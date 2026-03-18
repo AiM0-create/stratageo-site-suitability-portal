@@ -17,6 +17,13 @@ export interface UserPointConstraint {
 
 // ─── Analysis Specification (output of prompt parser) ───
 
+export interface ClassificationMeta {
+  confidence: 'high' | 'medium' | 'low';
+  matchedKeywords: string[];
+  reasoning: string;
+  score: number;
+}
+
 export interface AnalysisSpec {
   businessType: string;
   sectorId: string;
@@ -35,6 +42,7 @@ export interface AnalysisSpec {
   resultCount: number;
   parsingNotes: string[];
   confidence: 'high' | 'medium' | 'low';
+  classificationMeta?: ClassificationMeta;
 }
 
 export interface SpatialConstraint {

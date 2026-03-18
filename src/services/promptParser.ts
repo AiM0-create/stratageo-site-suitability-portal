@@ -3,14 +3,18 @@
  *
  * Extracts structured AnalysisSpec from freeform user input.
  * Conservative: marks uncertain inferences, never overclaims.
+ *
+ * Uses the scoring-based businessClassifier for sector detection
+ * instead of naive keyword matching. Cross-validates via intentValidator.
  */
 
 import type { AnalysisSpec, SpatialConstraint } from '../types';
-import { SECTOR_TEMPLATES, findSectorTemplate, type SectorTemplate } from './sectorTemplates';
+import { SECTOR_TEMPLATES, getSectorById, type SectorTemplate } from './sectorTemplates';
+import { classifyBusinessType, extractBusinessLabel } from './businessClassifier';
+import { validateClassification } from './intentValidator';
+import { extractDomainSignals } from './domainSignalExtractor';
 
 // ─── Coordinate extraction ───
-
-const COORD_PATTERN = /(-?\d{1,3}\.?\d*)[,\s]+(-?\d{1,3}\.?\d*)/;
 
 function extractCoordinates(text: string): { lat: number; lng: number } | null {
   // Pattern 1: "latitude X and longitude Y" / "latitude X longitude Y" / "lat X lon Y"
@@ -60,48 +64,7 @@ function isValidCoord(lat: number, lng: number): boolean {
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
 
-// ─── Distance extraction ───
-
-interface DistanceMatch {
-  valueM: number;
-  original: string;
-}
-
-function parseDistance(text: string): DistanceMatch | null {
-  // "500m", "500 meters", "0.5km", "2 km", "1.5 kilometers"
-  const mMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:m|meters?|metres?)\b/i);
-  if (mMatch) return { valueM: parseFloat(mMatch[1]), original: mMatch[0] };
-
-  const kmMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:km|kilometers?|kilometres?|kms?)\b/i);
-  if (kmMatch) return { valueM: parseFloat(kmMatch[1]) * 1000, original: kmMatch[0] };
-
-  return null;
-}
-
 // ─── Spatial constraint extraction ───
-
-interface ConstraintPattern {
-  pattern: RegExp;
-  type: SpatialConstraint['type'];
-  direction: SpatialConstraint['direction'];
-  hardRule: boolean;
-}
-
-const CONSTRAINT_PATTERNS: ConstraintPattern[] = [
-  // Hard exclusions
-  { pattern: /must\s+not\s+(?:be\s+)?within\s+/i, type: 'exclusion', direction: 'away', hardRule: true },
-  { pattern: /not\s+within\s+/i, type: 'exclusion', direction: 'away', hardRule: true },
-  { pattern: /avoid\s+(?:anything\s+)?within\s+/i, type: 'exclusion', direction: 'away', hardRule: true },
-  { pattern: /outside\s+/i, type: 'exclusion', direction: 'away', hardRule: true },
-
-  // Hard proximity
-  { pattern: /must\s+be\s+within\s+/i, type: 'proximity', direction: 'near', hardRule: true },
-  { pattern: /within\s+/i, type: 'proximity', direction: 'near', hardRule: false },
-
-  // Soft preferences
-  { pattern: /(?:close\s+to|near(?:by)?|adjacent\s+to|accessible\s+to)\s+/i, type: 'preference', direction: 'near', hardRule: false },
-  { pattern: /(?:away\s+from|far\s+from|avoid(?:ing)?)\s+/i, type: 'preference', direction: 'away', hardRule: false },
-];
 
 // Feature-to-OSM-tag mapping for constraint targets
 const FEATURE_OSM_MAP: Record<string, { tags: string[]; label: string }> = {
@@ -145,7 +108,6 @@ const FEATURE_OSM_MAP: Record<string, { tags: string[]; label: string }> = {
 
 function extractConstraints(text: string): SpatialConstraint[] {
   const constraints: SpatialConstraint[] = [];
-  const lowerText = text.toLowerCase();
 
   // Extract distance-based constraints
   // Pattern: "[must/not/avoid] within X km/m of [feature]"
@@ -210,17 +172,6 @@ function findFeature(target: string): { tags: string[]; label: string } {
   return { tags: [], label: target.charAt(0).toUpperCase() + target.slice(1) };
 }
 
-// ─── Sector detection ───
-
-function detectSector(text: string): SectorTemplate {
-  const lower = text.toLowerCase();
-  // Direct match attempt
-  for (const t of SECTOR_TEMPLATES) {
-    if (t.keywords.some(k => lower.includes(k))) return t;
-  }
-  return SECTOR_TEMPLATES[0]; // fallback to cafe
-}
-
 // ─── City extraction ───
 
 const KNOWN_CITIES = [
@@ -251,21 +202,6 @@ function extractCity(text: string): string {
   if (atMatch) return atMatch[1].trim();
 
   return '';
-}
-
-// ─── Business type extraction ───
-
-function extractBusinessType(text: string, sector: SectorTemplate): string {
-  // Try to find the explicit business type from the text
-  const lower = text.toLowerCase();
-  for (const kw of sector.keywords) {
-    const idx = lower.indexOf(kw);
-    if (idx !== -1) {
-      // Capitalize first letter
-      return kw.charAt(0).toUpperCase() + kw.slice(1);
-    }
-  }
-  return sector.label;
 }
 
 // ─── Priority / weight extraction ───
@@ -367,13 +303,35 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
   const notes: string[] = [];
   let confidence: AnalysisSpec['confidence'] = 'high';
 
-  // 1. Detect sector
-  const sector = detectSector(text);
+  // 1. Classify business type using scoring-based classifier
+  let classification = classifyBusinessType(text);
 
-  // 2. Extract coordinates (before city — coords can substitute for city)
+  // 2. Cross-validate the classification
+  const validation = validateClassification(classification, text);
+  if (!validation.valid && validation.correctedSectorId) {
+    // Re-classify was needed — use corrected result
+    notes.push(validation.reason || 'Classification corrected by validator.');
+    classification = classifyBusinessType(text); // re-run to get full result
+    // Force the corrected sector if validator identified it
+    if (validation.correctedSectorId !== classification.sectorId) {
+      classification = {
+        ...classification,
+        sectorId: validation.correctedSectorId,
+        label: validation.correctedLabel || classification.label,
+      };
+    }
+  }
+
+  // 3. Get the sector template
+  const sector = getSectorById(classification.sectorId);
+
+  // 4. Extract business type label from prompt text
+  const businessType = extractBusinessLabel(text, classification);
+
+  // 5. Extract coordinates (before city — coords can substitute for city)
   const coords = extractCoordinates(text);
 
-  // 3. Extract city
+  // 6. Extract city
   let city = extractCity(text);
   if (!city && coords) {
     // Coordinates provided — city will be resolved via reverse geocoding downstream
@@ -388,41 +346,52 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
   if (city.toLowerCase() === 'bangalore') city = 'Bengaluru';
   if (city.toLowerCase() === 'gurgaon') city = 'Gurugram';
 
-  // 4. Extract business type
-  const businessType = extractBusinessType(text, sector);
-
-  // 5. Extract constraints
+  // 7. Extract constraints
   const constraints = extractConstraints(text);
 
-  // 6. Extract priorities
+  // 8. Extract domain-specific signals and merge as additional constraints
+  const domainSignals = extractDomainSignals(text, classification.sectorId, constraints);
+  const allConstraints = [...constraints, ...domainSignals];
+
+  // 9. Extract priorities
   const { positive, negative, weights } = extractPriorities(text, sector);
 
-  // 7. Extract result count
+  // 10. Extract result count
   const resultCount = extractResultCount(text);
 
-  // 8. Detect user-point references
+  // 11. Detect user-point references
   const userPointIntent = parseUserPointIntent(text);
 
-  // 9. Build notes
-  if (constraints.length > 0) {
-    notes.push(`Detected ${constraints.length} spatial constraint(s).`);
+  // 12. Build notes
+  // Add classification info
+  notes.push(`Detected: ${classification.label} (Confidence: ${classification.confidence.charAt(0).toUpperCase() + classification.confidence.slice(1)}, Keywords: ${classification.matchedKeywords.join(', ') || 'none'})`);
+
+  if (allConstraints.length > 0) {
+    notes.push(`Detected ${allConstraints.length} spatial constraint(s).`);
   }
-  if (constraints.some(c => c.osmTags.length === 0 && c.target !== 'Competitors')) {
+  if (allConstraints.some(c => c.osmTags.length === 0 && c.target !== 'Competitors')) {
     notes.push('Some constraint targets could not be mapped to OSM tags and may not be checkable.');
-    confidence = 'medium';
+    if (confidence === 'high') confidence = 'medium';
   }
   if (userPointIntent.detected) {
     notes.push(`Detected reference to user-supplied locations (mode: ${userPointIntent.mode}${userPointIntent.radiusM ? `, radius: ${(userPointIntent.radiusM / 1000).toFixed(1)}km` : ''}).`);
   }
 
+  // Use the lower confidence between classifier and geo extraction
+  if (classification.confidence === 'low' && confidence !== 'low') {
+    confidence = 'low';
+  } else if (classification.confidence === 'medium' && confidence === 'high') {
+    confidence = 'medium';
+  }
+
   return {
     businessType,
-    sectorId: sector.id,
+    sectorId: classification.sectorId,
     geography: {
       city,
       anchor: coords || undefined,
     },
-    constraints,
+    constraints: allConstraints,
     userPointConstraints: [],
     hasUserPointReference: userPointIntent.detected,
     positiveCriteria: positive,
@@ -431,6 +400,12 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
     resultCount,
     parsingNotes: notes,
     confidence,
+    classificationMeta: {
+      confidence: classification.confidence,
+      matchedKeywords: classification.matchedKeywords,
+      reasoning: classification.reasoning,
+      score: classification.score,
+    },
   };
 }
 
@@ -438,14 +413,16 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
  * Parse a simple "BusinessType in City" shorthand from UI chips.
  */
 export function parseChipInput(businessType: string, city: string): AnalysisSpec {
-  const sector = findSectorTemplate(businessType) || SECTOR_TEMPLATES[0];
+  // Use the classifier to find the right sector
+  const classification = classifyBusinessType(businessType);
+  const sector = getSectorById(classification.sectorId);
   const weights: Record<string, number> = {};
   for (const c of sector.criteria) {
     weights[c.name] = c.defaultWeight;
   }
   return {
     businessType,
-    sectorId: sector.id,
+    sectorId: classification.sectorId,
     geography: { city },
     constraints: [],
     userPointConstraints: [],
@@ -456,5 +433,11 @@ export function parseChipInput(businessType: string, city: string): AnalysisSpec
     resultCount: 3,
     parsingNotes: [],
     confidence: 'high',
+    classificationMeta: {
+      confidence: classification.confidence,
+      matchedKeywords: classification.matchedKeywords,
+      reasoning: classification.reasoning,
+      score: classification.score,
+    },
   };
 }
