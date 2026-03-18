@@ -3,7 +3,6 @@ import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, Heatma
 import { config } from './config';
 import { runDemoAnalysis, runLiveAnalysis } from './services/analysisService';
 import { recalculateWithWeights } from './services/mcdaEngine';
-import { parsePrompt } from './services/promptParser';
 import { parseCSV } from './services/csvParser';
 import { TopBar } from './components/TopBar';
 import { MapView } from './components/MapView';
@@ -80,21 +79,22 @@ const App: React.FC = () => {
     setMessages(prev => [...prev, { role: 'user' as const, text: rawPrompt }]);
 
     try {
-      const parsedSpec = parsePrompt(rawPrompt);
+      const analysisResult = config.isDemoMode
+        ? await runDemoAnalysis(rawPrompt, setAnalysisStatus)
+        : await runLiveAnalysis(rawPrompt, resultCount, setAnalysisStatus, userPoints.length > 0 ? userPoints : undefined);
+
+      const parsedSpec = analysisResult.spec;
       const csvNote = userPoints.length > 0 ? ` with ${userPoints.length} CSV point(s)` : '';
       const locationDesc = parsedSpec.geography.anchor && !parsedSpec.geography.city
         ? `near ${parsedSpec.geography.anchor.lat.toFixed(4)}, ${parsedSpec.geography.anchor.lng.toFixed(4)}`
         : `in ${parsedSpec.geography.city || '(no location detected)'}`;
-      const specMsg = `Understood: ${parsedSpec.businessType} ${locationDesc}` +
+      const source = parsedSpec.classificationMeta?.source === 'llm' ? 'via AI intent' : 'local classifier';
+      const conf = parsedSpec.classificationMeta?.confidence || parsedSpec.confidence;
+      const specMsg = `Understood: ${parsedSpec.businessType} ${locationDesc} (${source}, ${conf} confidence)` +
         (parsedSpec.constraints.length > 0 ? ` with ${parsedSpec.constraints.length} constraint(s)` : '') +
-        csvNote +
-        (parsedSpec.parsingNotes.length > 0 ? `. ${parsedSpec.parsingNotes[0]}` : '');
+        csvNote;
 
       setMessages(prev => [...prev, { role: 'assistant' as const, text: specMsg }]);
-
-      const analysisResult = config.isDemoMode
-        ? await runDemoAnalysis(rawPrompt, setAnalysisStatus)
-        : await runLiveAnalysis(rawPrompt, resultCount, setAnalysisStatus, userPoints.length > 0 ? userPoints : undefined);
 
       setResult(analysisResult.result);
       setSpec(analysisResult.spec);

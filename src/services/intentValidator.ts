@@ -1,14 +1,103 @@
 /**
- * Intent Validator — Cross-validation guard for business classification.
+ * Intent Validator — Two-purpose validation module.
  *
- * Catches misclassifications by checking for contradictory signals.
- * If "solar farm" somehow got classified as "cafe", this layer detects
- * the contradiction and corrects it.
+ * 1. validateLLMIntent(): Validates the LLM-extracted intent before
+ *    it enters the deterministic analysis pipeline. (Stage A → Stage B gate)
+ *
+ * 2. validateClassification(): Legacy cross-validation guard for the
+ *    local regex-based classifier (used as fallback when LLM is unavailable).
  */
 
+import type { LLMIntent } from './intentSchema';
+import { resolveSectorId } from './intentSchema';
 import { classifyBusinessType, type ClassificationResult } from './businessClassifier';
 
-// ─── Types ───
+// ═══════════════════════════════════════════════════════
+// Part 1: LLM Intent Validation (new — for LLM-first pipeline)
+// ═══════════════════════════════════════════════════════
+
+export interface LLMIntentValidationResult {
+  valid: boolean;
+  sectorId: string | null;
+  warnings: string[];
+  errors: string[];
+}
+
+export function validateLLMIntent(intent: LLMIntent): LLMIntentValidationResult {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  // 1. Sector must map to a known template
+  const sectorId = resolveSectorId(intent.sector);
+  if (!sectorId) {
+    warnings.push(`Unknown sector "${intent.sector}" — will attempt local classification.`);
+  }
+
+  // 2. Geography checks
+  if (intent.anchorType === 'coordinate') {
+    if (!intent.coordinates) {
+      errors.push('anchorType is "coordinate" but no coordinates provided.');
+    } else {
+      const { lat, lng } = intent.coordinates;
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        errors.push(`Invalid coordinates: lat=${lat}, lng=${lng}.`);
+      }
+    }
+  }
+
+  if (intent.anchorType === 'city' && !intent.locationName) {
+    warnings.push('anchorType is "city" but no locationName provided.');
+  }
+
+  if (intent.anchorType === 'none' && !intent.coordinates && !intent.locationName) {
+    errors.push('No location information extracted — neither coordinates nor city name.');
+  }
+
+  // 3. Result count bounds
+  if (typeof intent.requestedResultCount !== 'number' || intent.requestedResultCount < 1) {
+    warnings.push('Invalid requestedResultCount — defaulting to 3.');
+  } else if (intent.requestedResultCount > 5) {
+    warnings.push('requestedResultCount exceeds 5 — capping at 5.');
+  }
+
+  // 4. Distance constraint sanity
+  if (intent.radiusConstraints) {
+    for (const rc of intent.radiusConstraints) {
+      if (rc.distanceM <= 0) {
+        warnings.push(`Invalid distance for "${rc.target}": ${rc.distanceM}m.`);
+      }
+      if (rc.distanceM > 100_000) {
+        warnings.push(`Very large distance for "${rc.target}": ${(rc.distanceM / 1000).toFixed(0)}km.`);
+      }
+    }
+  }
+
+  for (const ec of intent.exclusionCriteria) {
+    if (ec.distanceM != null && ec.distanceM <= 0) {
+      warnings.push(`Invalid exclusion distance for "${ec.name}": ${ec.distanceM}m.`);
+    }
+  }
+
+  // 5. Contradiction check
+  const positiveNames = new Set(intent.positiveCriteria.map(c => c.name.toLowerCase()));
+  for (const exc of intent.exclusionCriteria) {
+    if (positiveNames.has(exc.name.toLowerCase())) {
+      warnings.push(`"${exc.name}" in both positive and exclusion criteria.`);
+    }
+  }
+
+  // 6. Low-confidence ambiguity surfacing
+  if (intent.confidence === 'low' && intent.ambiguities && intent.ambiguities.length > 0) {
+    warnings.push(`Low confidence. Ambiguities: ${intent.ambiguities.join('; ')}`);
+  }
+
+  return { valid: errors.length === 0, sectorId, warnings, errors };
+}
+
+
+// ═══════════════════════════════════════════════════════
+// Part 2: Local classification validation (legacy fallback)
+// ═══════════════════════════════════════════════════════
 
 export interface ValidationResult {
   valid: boolean;
@@ -16,10 +105,6 @@ export interface ValidationResult {
   correctedLabel?: string;
   reason?: string;
 }
-
-// ─── Contradiction map ───
-// For each sector, terms that should NEVER appear if that sector is correct.
-// Key = sectorId, Value = array of terms that contradict it.
 
 const CONTRADICTIONS: Record<string, string[]> = {
   cafe: [
@@ -30,19 +115,19 @@ const CONTRADICTIONS: Record<string, string[]> = {
     'hospital', 'clinic', 'diagnostic', 'pharmacy',
     'coworking', 'co-working', 'shared office',
     'real estate', 'mixed-use', 'apartment complex', 'township',
-    'wind farm', 'renewable energy',
+    'wind farm', 'renewable energy', 'data center',
   ],
   preschool: [
     'solar farm', 'solar plant', 'warehouse', 'logistics',
-    'ev charging', 'charging station',
+    'ev charging', 'charging station', 'data center',
   ],
   ev: [
     'solar farm', 'solar plant', 'warehouse', 'preschool', 'school',
-    'hospital', 'clinic',
+    'hospital', 'clinic', 'data center',
   ],
   logistics: [
     'solar farm', 'solar plant', 'preschool', 'school',
-    'cafe', 'restaurant', 'coffee',
+    'cafe', 'restaurant', 'coffee', 'data center',
   ],
   solar: [
     'cafe', 'restaurant', 'coffee shop', 'preschool', 'school',
@@ -50,23 +135,21 @@ const CONTRADICTIONS: Record<string, string[]> = {
   ],
   retail: [
     'solar farm', 'solar plant', 'warehouse', 'logistics',
-    'preschool', 'hospital',
+    'preschool', 'hospital', 'data center',
   ],
   clinic: [
     'solar farm', 'solar plant', 'warehouse', 'logistics',
-    'ev charging',
+    'ev charging', 'data center',
   ],
   coworking: [
     'solar farm', 'solar plant', 'warehouse', 'logistics',
-    'preschool', 'hospital',
+    'preschool', 'hospital', 'data center',
   ],
   realestate: [
     'solar farm', 'solar plant', 'warehouse', 'logistics',
-    'ev charging',
+    'ev charging', 'data center',
   ],
 };
-
-// ─── Validator ───
 
 export function validateClassification(
   classification: ClassificationResult,
@@ -75,7 +158,6 @@ export function validateClassification(
   const lower = text.toLowerCase();
   const contradictions = CONTRADICTIONS[classification.sectorId] || [];
 
-  // Check if the prompt contains terms that contradict the classification
   const foundContradictions: string[] = [];
   for (const term of contradictions) {
     const regex = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
@@ -88,20 +170,16 @@ export function validateClassification(
     return { valid: true };
   }
 
-  // Contradiction found — re-classify to find the correct sector
-  // Build a sub-prompt from just the contradicting terms to identify the right domain
   const reclassification = classifyBusinessType(text);
 
-  // If reclassification gives a different sector with reasonable confidence, use it
   if (reclassification.sectorId !== classification.sectorId && reclassification.score >= 2) {
     return {
       valid: false,
       correctedSectorId: reclassification.sectorId,
       correctedLabel: reclassification.label,
-      reason: `Contradiction detected: "${foundContradictions[0]}" conflicts with ${classification.label}. Corrected to ${reclassification.label}.`,
+      reason: `Contradiction: "${foundContradictions[0]}" conflicts with ${classification.label}. Corrected to ${reclassification.label}.`,
     };
   }
 
-  // If reclassification agrees or can't improve, accept original
   return { valid: true };
 }

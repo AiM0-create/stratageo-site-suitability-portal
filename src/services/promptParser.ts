@@ -405,6 +405,7 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
       matchedKeywords: classification.matchedKeywords,
       reasoning: classification.reasoning,
       score: classification.score,
+      source: 'local' as const,
     },
   };
 }
@@ -438,6 +439,7 @@ export function parseChipInput(businessType: string, city: string): AnalysisSpec
       matchedKeywords: classification.matchedKeywords,
       reasoning: classification.reasoning,
       score: classification.score,
+      source: 'local' as const,
     },
   };
 }

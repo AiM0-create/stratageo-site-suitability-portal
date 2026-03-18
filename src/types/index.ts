@@ -22,6 +22,7 @@ export interface ClassificationMeta {
   matchedKeywords: string[];
   reasoning: string;
   score: number;
+  source: 'llm' | 'local';
 }
 
 export interface AnalysisSpec {

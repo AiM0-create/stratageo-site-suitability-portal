@@ -1,23 +1,33 @@
 /**
  * Analysis Service — Orchestrates the full analysis pipeline.
  *
- * Pipeline:
- * 1. Parse prompt → AnalysisSpec
- * 2. Resolve neighborhoods (AI intent or defaults)
- * 3. Geocode each neighborhood
- * 4. Fetch OSM data using sector-specific queries
- * 5. Score with dynamic MCDA (positive/negative/exclusions)
- * 6. Generate evidence-backed reasoning
- * 7. Optional AI explanation enhancement
+ * NEW Architecture (LLM-first):
+ *
+ * Stage A — Intent Understanding:
+ *   1. Send raw prompt to LLM → structured intent (LLMIntent)
+ *   2. Validate intent → check sector mapping, coordinates, constraints
+ *   3. Resolve template → build AnalysisSpec from intent
+ *   4. Fallback: if LLM unavailable → use local parsePrompt()
+ *
+ * Stage B — Deterministic Analysis:
+ *   5. Resolve geography (reverse geocode if coordinate-anchored)
+ *   6. Generate candidate locations (neighborhoods or coordinate offsets)
+ *   7. Fetch OSM data for each candidate
+ *   8. Score with MCDA (sector-specific criteria)
+ *   9. Check exclusions, rank, filter
+ *  10. Optional AI explanation enhancement
  */
 
 import type { AnalysisResult, AnalysisSpec, AnalysisStatus, LocationData, UserPoint, UserPointConstraint } from '../types';
 import { config } from '../config';
 import { parsePrompt, parseUserPointIntent } from './promptParser';
+import { extractIntent } from './llmIntentExtractor';
+import { validateLLMIntent } from './intentValidator';
+import { resolveTemplate } from './templateResolver';
 import { getSectorById } from './sectorTemplates';
 import { geocodeLocation, fetchOSMData, reverseGeocode } from './osmService';
 import { scoreNeighborhood, computeMCDAScore, checkExclusions, addUserPointCriteria, generateReasoning, generateSummary } from './mcdaEngine';
-import { fetchAIExplanation, fetchAIIntent } from './aiClient';
+import { fetchAIExplanation } from './aiClient';
 import { findDemoScenario, getDefaultDemoScenario } from '../data/demoScenarios';
 import { inferRadius } from './radiusInference';
 
@@ -41,7 +51,6 @@ function getNeighborhoodsForCity(city: string, count: number): string[] {
 }
 
 // ─── Coordinate-based candidate generation ───
-// Generate candidate points in a grid/ring around an anchor coordinate
 
 interface CandidatePoint {
   lat: number;
@@ -49,22 +58,14 @@ interface CandidatePoint {
   label: string;
 }
 
-/**
- * Generate candidate analysis points around an anchor coordinate.
- * Uses cardinal directions + center at appropriate spacing for the sector radius.
- */
 function generateCandidatePoints(anchorLat: number, anchorLng: number, searchRadiusM: number, count: number): CandidatePoint[] {
   const points: CandidatePoint[] = [];
-
-  // Center point
   points.push({ lat: anchorLat, lng: anchorLng, label: 'Anchor (center)' });
 
-  // Offset distance: use 1.5x search radius so candidates don't fully overlap
   const offsetM = searchRadiusM * 1.5;
-  const latDeg = offsetM / 111_320; // ~111.32km per degree latitude
+  const latDeg = offsetM / 111_320;
   const lngDeg = offsetM / (111_320 * Math.cos(anchorLat * Math.PI / 180));
 
-  // Cardinal directions
   const directions: Array<{ label: string; dLat: number; dLng: number }> = [
     { label: 'North', dLat: latDeg, dLng: 0 },
     { label: 'South', dLat: -latDeg, dLng: 0 },
@@ -77,7 +78,7 @@ function generateCandidatePoints(anchorLat: number, anchorLng: number, searchRad
   ];
 
   for (const dir of directions) {
-    if (points.length >= count + 2) break; // generate a few extras for filtering
+    if (points.length >= count + 2) break;
     points.push({
       lat: anchorLat + dir.dLat,
       lng: anchorLng + dir.dLng,
@@ -86,6 +87,54 @@ function generateCandidatePoints(anchorLat: number, anchorLng: number, searchRad
   }
 
   return points;
+}
+
+// ─── Stage A: Intent Understanding ───
+
+/**
+ * Extract structured intent from user prompt.
+ * Tries LLM first (live mode), falls back to local parser.
+ * Returns the AnalysisSpec ready for Stage B.
+ */
+async function extractAnalysisSpec(
+  rawPrompt: string,
+  onStatus: (status: AnalysisStatus) => void,
+): Promise<AnalysisSpec> {
+  // In demo mode, skip LLM entirely — use local parser
+  if (config.isDemoMode) {
+    return parsePrompt(rawPrompt);
+  }
+
+  onStatus({ message: 'Understanding your query (AI)...', progress: 5 });
+
+  // Try LLM-first intent extraction
+  const intent = await extractIntent(rawPrompt);
+
+  if (intent) {
+    // Validate the LLM's output
+    const validation = validateLLMIntent(intent);
+
+    if (validation.valid || validation.sectorId) {
+      // LLM succeeded — resolve to template and spec
+      const { spec } = resolveTemplate(intent, validation.sectorId);
+
+      // Append validation warnings to parsing notes
+      for (const w of validation.warnings) {
+        spec.parsingNotes.push(`[Validation] ${w}`);
+      }
+
+      return spec;
+    }
+
+    // LLM returned something but validation failed hard
+    console.warn('LLM intent validation failed:', validation.errors);
+  }
+
+  // Fallback: local regex-based parser
+  onStatus({ message: 'Using local analysis...', progress: 8 });
+  const spec = parsePrompt(rawPrompt);
+  spec.parsingNotes.unshift('[Fallback] AI intent extraction unavailable — using local classifier.');
+  return spec;
 }
 
 // ─── Demo analysis ───
@@ -134,12 +183,14 @@ export async function runLiveAnalysis(
   onStatus: (status: AnalysisStatus) => void,
   userPoints?: UserPoint[],
 ): Promise<{ result: AnalysisResult; spec: AnalysisSpec }> {
-  // Step 1: Parse prompt
-  onStatus({ message: 'Understanding your query...', progress: 5 });
-  const spec = parsePrompt(rawPrompt);
+  // ═══════════════════════════════════════════════════════
+  // Stage A: Intent Understanding (LLM-first)
+  // ═══════════════════════════════════════════════════════
+
+  const spec = await extractAnalysisSpec(rawPrompt, onStatus);
   spec.resultCount = Math.min(5, Math.max(1, resultCount));
 
-  // Step 1b: Build user-point constraints if CSV data provided
+  // Build user-point constraints if CSV data provided
   if (userPoints && userPoints.length > 0) {
     const intent = parseUserPointIntent(rawPrompt);
     const radiusInfo = intent.radiusM
@@ -159,6 +210,10 @@ export async function runLiveAnalysis(
     );
   }
 
+  // ═══════════════════════════════════════════════════════
+  // Stage B: Deterministic Analysis
+  // ═══════════════════════════════════════════════════════
+
   const sector = getSectorById(spec.sectorId);
   let { city } = spec.geography;
   const anchor = spec.geography.anchor;
@@ -172,7 +227,6 @@ export async function runLiveAnalysis(
   // Step 2: Resolve geography
   onStatus({ message: isCoordinateAnchored ? 'Resolving location from coordinates...' : 'Planning search strategy...', progress: 10 });
 
-  // If coordinate-anchored, try reverse geocoding for context
   let locationLabel = city || 'provided coordinates';
   if (isCoordinateAnchored && anchor) {
     try {
@@ -200,7 +254,6 @@ export async function runLiveAnalysis(
 
   if (anchor && (isCoordinateAnchored || !city)) {
     // ─── Coordinate-anchored analysis ───
-    // Generate candidate points around the anchor
     const candidates = generateCandidatePoints(anchor.lat, anchor.lng, sector.searchRadiusM, spec.resultCount + 2);
 
     for (let i = 0; i < candidates.length; i++) {
@@ -211,7 +264,6 @@ export async function runLiveAnalysis(
       });
 
       try {
-        // Reverse geocode each candidate for a meaningful name
         let candidateName = `${candidate.label} (${candidate.lat.toFixed(4)}, ${candidate.lng.toFixed(4)})`;
         try {
           const rev = await reverseGeocode(candidate.lat, candidate.lng);
@@ -253,15 +305,14 @@ export async function runLiveAnalysis(
       }
     }
   } else {
-    // ─── City-based analysis (original flow) ───
+    // ─── City-based analysis ───
     let neighborhoods: string[];
     if (spec.geography.neighborhoods?.length) {
+      // Use neighborhoods from LLM intent or pre-set
       neighborhoods = spec.geography.neighborhoods;
     } else {
-      const aiIntent = await fetchAIIntent(`${spec.businessType} in ${city}`);
-      neighborhoods = aiIntent?.neighborhoods?.length
-        ? aiIntent.neighborhoods.slice(0, spec.resultCount + 2)
-        : getNeighborhoodsForCity(city, spec.resultCount + 2);
+      // Fall back to default neighborhoods for the city
+      neighborhoods = getNeighborhoodsForCity(city, spec.resultCount + 2);
     }
 
     for (let i = 0; i < neighborhoods.length; i++) {
@@ -345,7 +396,7 @@ export async function runLiveAnalysis(
         target_location: locationLabel,
         methodology: `Attempted to screen ${analyzedLocations.length} areas but all were excluded by user-supplied spatial constraints (${radiusKm}km ${upc.mode} buffer around ${upc.points.length} points).`,
         spec,
-        locations: finalLocations, // still return them so user can see what was excluded
+        locations: finalLocations,
         grounding_sources: [
           { title: 'OpenStreetMap / Overpass API', uri: 'https://overpass-api.de/', retrievedAt: new Date().toISOString(), reliability: 'Varies by region' },
           { title: 'User-supplied CSV data', uri: 'user-upload', retrievedAt: new Date().toISOString(), reliability: 'User-provided' },
@@ -397,12 +448,13 @@ export async function runLiveAnalysis(
   onStatus({ message: 'Analysis complete', progress: 100 });
 
   const radiusKm = (sector.searchRadiusM / 1000).toFixed(1);
+  const intentSource = spec.classificationMeta?.source === 'llm' ? 'AI-interpreted' : 'locally-parsed';
   return {
     result: {
       summary,
       business_type: spec.businessType,
       target_location: locationLabel,
-      methodology: `Dynamic MCDA using ${finalLocations[0]?.criteria_breakdown.length || 0} sector-specific criteria scored from OpenStreetMap data within ${radiusKm}km radius.${isCoordinateAnchored ? ' Anchor-based analysis from provided coordinates.' : ''} Criteria include both positive and negative signals with direction-aware scoring. ${spec.constraints.length > 0 ? `${spec.constraints.length} spatial constraint(s) applied.` : ''} All scores are deterministic and evidence-backed.`,
+      methodology: `${intentSource} intent → Dynamic MCDA using ${finalLocations[0]?.criteria_breakdown.length || 0} sector-specific criteria scored from OpenStreetMap data within ${radiusKm}km radius.${isCoordinateAnchored ? ' Anchor-based analysis from provided coordinates.' : ''} Criteria include both positive and negative signals with direction-aware scoring. ${spec.constraints.length > 0 ? `${spec.constraints.length} spatial constraint(s) applied.` : ''} All scores are deterministic and evidence-backed.`,
       spec,
       locations: finalLocations,
       grounding_sources: [
