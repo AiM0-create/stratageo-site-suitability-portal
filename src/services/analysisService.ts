@@ -1,112 +1,160 @@
-import type { AnalysisRequest, AnalysisResult, AnalysisStatus, LocationData } from '../types';
+/**
+ * Analysis Service — Orchestrates the full analysis pipeline.
+ *
+ * Pipeline:
+ * 1. Parse prompt → AnalysisSpec
+ * 2. Resolve neighborhoods (AI intent or defaults)
+ * 3. Geocode each neighborhood
+ * 4. Fetch OSM data using sector-specific queries
+ * 5. Score with dynamic MCDA (positive/negative/exclusions)
+ * 6. Generate evidence-backed reasoning
+ * 7. Optional AI explanation enhancement
+ */
+
+import type { AnalysisResult, AnalysisSpec, AnalysisStatus, LocationData } from '../types';
 import { config } from '../config';
+import { parsePrompt } from './promptParser';
+import { getSectorById } from './sectorTemplates';
 import { geocodeLocation, fetchOSMData } from './osmService';
-import { scoreNeighborhood, computeMCDAScore, inferFootfall, generateTemplateReasoning, generateTemplateStrategy } from './scoringEngine';
+import { scoreNeighborhood, computeMCDAScore, checkExclusions, generateReasoning, generateSummary } from './mcdaEngine';
 import { fetchAIExplanation, fetchAIIntent } from './aiClient';
 import { findDemoScenario, getDefaultDemoScenario } from '../data/demoScenarios';
 
+// ─── Default neighborhoods by city ───
+
 const DEFAULT_NEIGHBORHOODS: Record<string, string[]> = {
-  bengaluru: ['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield'],
-  mumbai: ['Powai', 'Andheri West', 'Bandra', 'Lower Parel'],
-  delhi: ['Connaught Place', 'Dwarka', 'Hauz Khas', 'Saket'],
-  hyderabad: ['Madhapur', 'Gachibowli', 'Banjara Hills', 'Jubilee Hills'],
-  pune: ['Koregaon Park', 'Viman Nagar', 'Hinjewadi', 'Kothrud'],
-  chennai: ['T. Nagar', 'Anna Nagar', 'Adyar', 'Velachery'],
+  bengaluru: ['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield', 'Jayanagar'],
+  mumbai: ['Powai', 'Andheri West', 'Bandra', 'Lower Parel', 'Malad West'],
+  delhi: ['Connaught Place', 'Dwarka', 'Hauz Khas', 'Saket', 'Lajpat Nagar'],
+  hyderabad: ['Madhapur', 'Gachibowli', 'Banjara Hills', 'Jubilee Hills', 'Kondapur'],
+  pune: ['Koregaon Park', 'Viman Nagar', 'Hinjewadi', 'Kothrud', 'Baner'],
+  chennai: ['T. Nagar', 'Anna Nagar', 'Adyar', 'Velachery', 'Nungambakkam'],
 };
 
-function getNeighborhoodsForCity(city: string): string[] {
+function getNeighborhoodsForCity(city: string, count: number): string[] {
   const key = city.toLowerCase().trim();
   for (const [k, v] of Object.entries(DEFAULT_NEIGHBORHOODS)) {
-    if (key.includes(k) || k.includes(key)) return v;
+    if (key.includes(k) || k.includes(key)) return v.slice(0, count);
   }
-  return ['City Center', 'North District', 'South District', 'East District'];
+  return ['City Center', 'North', 'South', 'East', 'West'].slice(0, count);
 }
 
-function getOSMTagsForSector(sectorId: string): string[] {
-  const sector = config.sectors.find(s => s.id === sectorId);
-  return sector ? [...sector.osmTags] : ['amenity=restaurant', 'shop=convenience'];
-}
-
-function findSectorByType(businessType: string): string {
-  const bt = businessType.toLowerCase();
-  for (const s of config.sectors) {
-    if (bt.includes(s.id) || s.label.toLowerCase().includes(bt) || bt.includes(s.label.toLowerCase().split('/')[0].trim())) {
-      return s.id;
-    }
-  }
-  if (bt.includes('cafe') || bt.includes('coffee') || bt.includes('restaurant')) return 'cafe';
-  if (bt.includes('school') || bt.includes('preschool') || bt.includes('education')) return 'preschool';
-  if (bt.includes('retail') || bt.includes('store') || bt.includes('shop')) return 'retail';
-  if (bt.includes('clinic') || bt.includes('health') || bt.includes('hospital')) return 'clinic';
-  if (bt.includes('ev') || bt.includes('charging') || bt.includes('electric')) return 'ev';
-  return 'cafe';
-}
+// ─── Demo analysis ───
 
 export async function runDemoAnalysis(
-  request: AnalysisRequest,
-  onStatus: (status: AnalysisStatus) => void
-): Promise<AnalysisResult> {
-  onStatus({ message: 'Loading demo scenario...', progress: 30 });
+  rawPrompt: string,
+  onStatus: (status: AnalysisStatus) => void,
+): Promise<{ result: AnalysisResult; spec: AnalysisSpec }> {
+  const spec = parsePrompt(rawPrompt);
 
-  await new Promise(r => setTimeout(r, 800));
+  onStatus({ message: 'Parsing your query...', progress: 20 });
+  await new Promise(r => setTimeout(r, 400));
 
-  const scenario = findDemoScenario(request.businessType, request.city);
+  onStatus({ message: 'Searching demo scenarios...', progress: 50 });
+  await new Promise(r => setTimeout(r, 400));
 
-  onStatus({ message: 'Preparing results...', progress: 70 });
-  await new Promise(r => setTimeout(r, 600));
+  const scenario = findDemoScenario(spec.businessType, spec.geography.city);
+
+  onStatus({ message: 'Preparing results...', progress: 80 });
+  await new Promise(r => setTimeout(r, 300));
 
   if (scenario) {
     onStatus({ message: 'Demo analysis complete', progress: 100 });
-    return scenario.result;
+    return { result: { ...scenario.result, spec }, spec };
   }
 
-  // If no exact match, return the default with adjusted labels
   const fallback = getDefaultDemoScenario();
   onStatus({ message: 'Demo analysis complete', progress: 100 });
   return {
-    ...fallback.result,
-    business_type: request.businessType || fallback.result.business_type,
-    target_location: request.city || fallback.result.target_location,
-    summary: `This is a demo analysis for a ${request.businessType || 'business'} in ${request.city || 'a selected city'}. ` + fallback.result.summary,
+    result: {
+      ...fallback.result,
+      business_type: spec.businessType || fallback.result.business_type,
+      target_location: spec.geography.city || fallback.result.target_location,
+      summary: `Demo analysis for ${spec.businessType || 'a business'} in ${spec.geography.city || 'a city'}. ${fallback.result.summary}`,
+      spec,
+    },
+    spec,
   };
 }
 
+// ─── Live analysis ───
+
 export async function runLiveAnalysis(
-  request: AnalysisRequest,
-  onStatus: (status: AnalysisStatus) => void
-): Promise<AnalysisResult> {
-  const { businessType, city } = request;
-  const sectorId = findSectorByType(businessType);
-  const osmTags = getOSMTagsForSector(sectorId);
+  rawPrompt: string,
+  resultCount: number,
+  onStatus: (status: AnalysisStatus) => void,
+): Promise<{ result: AnalysisResult; spec: AnalysisSpec }> {
+  // Step 1: Parse prompt
+  onStatus({ message: 'Understanding your query...', progress: 5 });
+  const spec = parsePrompt(rawPrompt);
+  spec.resultCount = Math.min(5, Math.max(1, resultCount));
 
-  // Step 1: Try AI intent refinement, fall back to defaults
-  onStatus({ message: 'Planning search strategy...', progress: 10 });
-  let neighborhoods = getNeighborhoodsForCity(city);
+  const sector = getSectorById(spec.sectorId);
+  const { city } = spec.geography;
 
-  const aiIntent = await fetchAIIntent(`${businessType} in ${city}`);
-  if (aiIntent?.neighborhoods?.length) {
-    neighborhoods = aiIntent.neighborhoods.slice(0, 4);
+  if (!city) {
+    throw new Error('Could not detect a target city from your prompt. Please specify a city (e.g., "Cafe in Bengaluru").');
   }
 
-  // Step 2: Gather OSM data for each neighborhood
-  const analyzedLocations: Array<{ name: string; lat: number; lng: number; osmData: any }> = [];
+  // Step 2: Resolve neighborhoods
+  onStatus({ message: 'Planning search strategy...', progress: 10 });
+
+  let neighborhoods: string[];
+  if (spec.geography.neighborhoods?.length) {
+    neighborhoods = spec.geography.neighborhoods;
+  } else {
+    const aiIntent = await fetchAIIntent(`${spec.businessType} in ${city}`);
+    neighborhoods = aiIntent?.neighborhoods?.length
+      ? aiIntent.neighborhoods.slice(0, spec.resultCount + 2)
+      : getNeighborhoodsForCity(city, spec.resultCount + 2);
+  }
+
+  // Step 3: Gather OSM data for each neighborhood
+  const analyzedLocations: LocationData[] = [];
 
   for (let i = 0; i < neighborhoods.length; i++) {
     const neighborhood = neighborhoods[i];
-    onStatus({ message: `Analyzing ${neighborhood}...`, progress: 20 + (i * 15) });
+    onStatus({
+      message: `Analyzing ${neighborhood}...`,
+      progress: 15 + Math.round((i / neighborhoods.length) * 50),
+    });
 
     const coords = await geocodeLocation(`${neighborhood}, ${city}`);
-    if (!coords) continue;
+    if (!coords) {
+      spec.parsingNotes.push(`Could not geocode "${neighborhood}" — skipped.`);
+      continue;
+    }
 
     try {
-      const osmData = await fetchOSMData(coords.lat, coords.lng, osmTags);
+      const osmResult = await fetchOSMData(coords.lat, coords.lng, sector, spec.constraints);
+
+      const criteria = scoreNeighborhood(osmResult.signals, sector, spec);
+      const mcdaScore = computeMCDAScore(criteria);
+      const exclusions = checkExclusions(osmResult.signals, spec.constraints, sector.searchRadiusM);
+      const excluded = exclusions.some(e => !e.passed);
+
+      const reasoning = generateReasoning(
+        coords.display_name.split(',')[0],
+        criteria,
+        exclusions,
+        sector.searchRadiusM,
+      );
+
       analyzedLocations.push({
         name: coords.display_name.split(',')[0],
         lat: coords.lat,
         lng: coords.lng,
-        osmData,
+        mcda_score: mcdaScore,
+        criteria_breakdown: criteria,
+        exclusions,
+        excluded,
+        reasoning,
+        osmSignals: osmResult.signals,
+        pois: osmResult.pois,
+        searchRadiusM: sector.searchRadiusM,
       });
     } catch {
+      spec.parsingNotes.push(`OSM data fetch failed for "${neighborhood}" — skipped.`);
       continue;
     }
   }
@@ -115,58 +163,44 @@ export async function runLiveAnalysis(
     throw new Error(`Could not gather data for any neighborhoods in ${city}. Try a different city or check your connection.`);
   }
 
-  // Step 3: Deterministic scoring
-  onStatus({ message: 'Scoring candidate locations...', progress: 75 });
-  const locations: LocationData[] = analyzedLocations.map(loc => {
-    const criteria = scoreNeighborhood(loc.osmData);
-    const mcdaScore = computeMCDAScore(criteria);
-    return {
-      name: loc.name,
-      lat: loc.lat,
-      lng: loc.lng,
-      reasoning: generateTemplateReasoning(loc.name, businessType, loc.osmData),
-      footfall: inferFootfall(loc.osmData.commercial_density, loc.osmData.transport),
-      demographics: `Based on ${loc.osmData.residential_density} residential buildings within 1km. Detailed demographics require additional data sources.`,
-      marketing_radius_km: 2,
-      marketing_strategy: generateTemplateStrategy(businessType, loc.osmData),
-      public_transport: `${loc.osmData.transport} public transit stops identified within 1km radius.`,
-      mcda_score: mcdaScore,
-      criteria_breakdown: criteria,
-      pois: loc.osmData.pois,
-    };
+  // Step 4: Sort and limit
+  onStatus({ message: 'Ranking candidate locations...', progress: 70 });
+
+  analyzedLocations.sort((a, b) => {
+    if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;
+    return b.mcda_score - a.mcda_score;
   });
 
-  // Sort by score descending
-  locations.sort((a, b) => b.mcda_score - a.mcda_score);
+  const finalLocations = analyzedLocations.slice(0, spec.resultCount);
 
-  // Step 4: Optional AI enhancement
-  onStatus({ message: 'Generating insights...', progress: 88 });
-  let summary = generateTemplateSummary(businessType, city, locations);
+  // Step 5: Optional AI enhancement
+  onStatus({ message: 'Generating insights...', progress: 85 });
+
+  let summary = generateSummary(spec.businessType, city, finalLocations, spec);
 
   if (config.isLiveMode) {
     const aiResult = await fetchAIExplanation({
-      businessType,
+      businessType: spec.businessType,
       city,
-      locations: locations.map(loc => ({
+      locations: finalLocations.map(loc => ({
         name: loc.name,
         mcda_score: loc.mcda_score,
-        criteria_breakdown: loc.criteria_breakdown,
-        osmCounts: {
-          competitors: loc.criteria_breakdown.find(c => c.name === 'Competitive Landscape')?.score ?? 0,
-          transport: loc.criteria_breakdown.find(c => c.name === 'Transit Accessibility')?.score ?? 0,
-          commercial: loc.criteria_breakdown.find(c => c.name === 'Commercial Vibrancy')?.score ?? 0,
-          residential: loc.criteria_breakdown.find(c => c.name === 'Residential Catchment')?.score ?? 0,
-        },
+        criteria_breakdown: loc.criteria_breakdown.map(c => ({
+          name: c.name,
+          score: c.score,
+          weight: c.weight,
+          justification: c.justification,
+        })),
+        osmCounts: loc.osmSignals,
       })),
     });
 
     if (aiResult) {
       summary = aiResult.summary;
       for (const insight of aiResult.locationInsights) {
-        const loc = locations.find(l => l.name === insight.name);
+        const loc = finalLocations.find(l => l.name === insight.name);
         if (loc) {
           loc.reasoning = insight.reasoning;
-          loc.marketing_strategy = insight.strategy;
         }
       }
     }
@@ -174,33 +208,20 @@ export async function runLiveAnalysis(
 
   onStatus({ message: 'Analysis complete', progress: 100 });
 
+  const radiusKm = (sector.searchRadiusM / 1000).toFixed(1);
   return {
-    summary,
-    business_type: businessType,
-    target_location: city,
-    methodology: 'Multi-Criteria Decision Analysis (MCDA) using OpenStreetMap infrastructure data. Scores are computed deterministically from real-world POI counts within a 1km radius of each candidate area, evaluating competitive landscape, transit accessibility, commercial vibrancy, residential catchment, pedestrian footfall potential, and complementary infrastructure.',
-    locations,
-    grounding_sources: [
-      { title: 'OpenStreetMap Infrastructure Data', uri: 'https://www.openstreetmap.org/', retrievedAt: new Date().toISOString(), reliability: 'High (OSM Community Data)' },
-      { title: 'Nominatim Geocoding Service', uri: 'https://nominatim.openstreetmap.org/', retrievedAt: new Date().toISOString(), reliability: 'High (OSM Geocoder)' },
-    ],
+    result: {
+      summary,
+      business_type: spec.businessType,
+      target_location: city,
+      methodology: `Dynamic MCDA using ${finalLocations[0]?.criteria_breakdown.length || 0} sector-specific criteria scored from OpenStreetMap data within ${radiusKm}km radius. Criteria include both positive and negative signals with direction-aware scoring. ${spec.constraints.length > 0 ? `${spec.constraints.length} spatial constraint(s) applied.` : ''} All scores are deterministic and evidence-backed.`,
+      spec,
+      locations: finalLocations,
+      grounding_sources: [
+        { title: 'OpenStreetMap / Overpass API', uri: 'https://overpass-api.de/', retrievedAt: new Date().toISOString(), reliability: 'Varies by region — community-maintained' },
+        { title: 'Nominatim Geocoding', uri: 'https://nominatim.openstreetmap.org/', retrievedAt: new Date().toISOString(), reliability: 'Based on OSM address data' },
+      ],
+    },
+    spec,
   };
-}
-
-function generateTemplateSummary(businessType: string, city: string, locations: LocationData[]): string {
-  if (locations.length === 0) return `No candidate locations could be analyzed for ${businessType} in ${city}.`;
-
-  const top = locations[0];
-  const parts = [
-    `Analysis of ${locations.length} candidate areas in ${city} for a ${businessType} venture identifies ${top.name} as the top-ranked location with a suitability score of ${top.mcda_score}/10.`,
-  ];
-
-  if (locations.length > 1) {
-    parts.push(`${locations[1].name} follows with a score of ${locations[1].mcda_score}/10.`);
-  }
-
-  parts.push(`Scores are derived from real-world OpenStreetMap data including competitor density, transit access, commercial activity, and residential catchment within a 1km radius of each candidate area.`);
-  parts.push(`This is a screening-level assessment. For a comprehensive site suitability study with proprietary data layers, sector-specific criteria, and on-ground validation, contact Stratageo.`);
-
-  return parts.join(' ');
 }

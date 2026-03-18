@@ -7,7 +7,7 @@ interface AIExplanationRequest {
     name: string;
     mcda_score: number;
     criteria_breakdown: Array<{ name: string; score: number; weight: number; justification: string }>;
-    osmCounts: { competitors: number; transport: number; commercial: number; residential: number };
+    osmCounts: Record<string, number>;
   }>;
 }
 

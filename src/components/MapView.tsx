@@ -12,14 +12,14 @@ interface MapViewProps {
   heatmapType: HeatmapType;
 }
 
-const getMarkerIcon = (rank: number, isSelected: boolean) => {
-  const color = isSelected ? '#1d4ed8' : '#059669';
-  const bgColor = isSelected ? '#dbeafe' : '#d1fae5';
+const getMarkerIcon = (rank: number, isSelected: boolean, excluded: boolean) => {
+  const color = excluded ? '#94a3b8' : isSelected ? '#1d4ed8' : '#059669';
+  const bgColor = excluded ? '#f1f5f9' : isSelected ? '#dbeafe' : '#d1fae5';
 
   return L.divIcon({
     className: 'sg-marker',
     html: `<div class="sg-marker-pin" style="--marker-color: ${color}; --marker-bg: ${bgColor}">
-      <span class="sg-marker-rank">${rank}</span>
+      <span class="sg-marker-rank">${excluded ? '✕' : rank}</span>
     </div>`,
     iconSize: [36, 44],
     iconAnchor: [18, 44],
@@ -93,16 +93,22 @@ export const MapView: React.FC<MapViewProps> = ({
     const bounds: [number, number][] = [];
     const heatPoints: [number, number, number][] = [];
 
-    // Sort by score to get ranks
-    const ranked = [...locations].sort((a, b) => b.mcda_score - a.mcda_score);
+    // Sort: non-excluded first by score
+    const ranked = [...locations].sort((a, b) => {
+      if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;
+      return b.mcda_score - a.mcda_score;
+    });
 
-    ranked.forEach((loc, index) => {
+    let visibleRank = 0;
+    ranked.forEach((loc) => {
       const lat = Number(loc.lat);
       const lng = Number(loc.lng);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
+      if (!loc.excluded) visibleRank++;
+      const displayRank = loc.excluded ? 0 : visibleRank;
       const isSelected = selectedLocations.some(sl => sl.name === loc.name);
-      const icon = getMarkerIcon(index + 1, isSelected);
+      const icon = getMarkerIcon(displayRank, isSelected, loc.excluded);
 
       // Heatmap data
       if (heatmapType && loc.pois) {
@@ -117,8 +123,9 @@ export const MapView: React.FC<MapViewProps> = ({
 
       try {
         const marker = L.marker([lat, lng], { icon });
+        const excludedLabel = loc.excluded ? ' <span style="color:#ef4444;font-size:9px">[EXCLUDED]</span>' : '';
         marker.bindTooltip(
-          `<div class="sg-tooltip"><strong>#${index + 1}</strong> ${loc.name}<br/><span class="sg-tooltip-score">${loc.mcda_score}/10</span></div>`,
+          `<div class="sg-tooltip"><strong>#${loc.excluded ? '✕' : displayRank}</strong> ${loc.name}${excludedLabel}<br/><span class="sg-tooltip-score">${loc.mcda_score}/10</span></div>`,
           { permanent: true, direction: 'top', className: 'sg-tooltip-container', offset: [0, -44] }
         );
         marker.on('click', (e: any) => {
@@ -130,18 +137,18 @@ export const MapView: React.FC<MapViewProps> = ({
       } catch { /* skip invalid marker */ }
     });
 
-    // Selected location radius
+    // Selected location search radius
     selectedLocations.forEach(sl => {
       const lat = Number(sl.lat);
       const lng = Number(sl.lng);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      const radius = Number.isFinite(Number(sl.marketing_radius_km)) ? Number(sl.marketing_radius_km) * 1000 : 1000;
+      const radius = sl.searchRadiusM || 1000;
       try {
         L.circle([lat, lng], {
           radius,
           color: '#1d4ed8',
           fillColor: '#1d4ed8',
-          fillOpacity: 0.08,
+          fillOpacity: 0.06,
           weight: 1.5,
           dashArray: '6 4',
         }).addTo(markers);
@@ -150,11 +157,8 @@ export const MapView: React.FC<MapViewProps> = ({
 
     // Heatmap
     if (heatPoints.length > 0 && typeof L.heatLayer === 'function') {
-      const gradient = heatmapType === 'competitor'
-        ? { 0.4: '#3b82f6', 0.6: '#06b6d4', 0.8: '#eab308', 1: '#ef4444' }
-        : { 0.4: '#8b5cf6', 0.6: '#a855f7', 0.8: '#f472b6', 1: '#fbbf24' };
       try {
-        heatRef.current = L.heatLayer(heatPoints, { radius: 25, blur: 15, maxZoom: 15, gradient }).addTo(map);
+        heatRef.current = L.heatLayer(heatPoints, { radius: 25, blur: 15, maxZoom: 15 }).addTo(map);
       } catch { /* skip */ }
     }
 
@@ -181,13 +185,16 @@ export const MapView: React.FC<MapViewProps> = ({
         <div className="sg-map-legend">
           <div className="sg-legend-title">Map Legend</div>
           <div className="sg-legend-item">
-            <span className="sg-legend-dot" style={{ background: '#059669' }} /> Candidate Location
+            <span className="sg-legend-dot" style={{ background: '#059669' }} /> Candidate
           </div>
           <div className="sg-legend-item">
             <span className="sg-legend-dot" style={{ background: '#1d4ed8' }} /> Selected
           </div>
           <div className="sg-legend-item">
-            <span className="sg-legend-circle" /> Marketing Radius
+            <span className="sg-legend-dot" style={{ background: '#94a3b8' }} /> Excluded
+          </div>
+          <div className="sg-legend-item">
+            <span className="sg-legend-circle" /> Search Radius
           </div>
         </div>
       )}

@@ -8,17 +8,19 @@ interface FloatingAssistantProps {
   isLoading: boolean;
   analysisStatus: AnalysisStatus;
   error: string | null;
-  onRunAnalysis: (businessType: string, city: string) => void;
+  onRunAnalysis: (rawPrompt: string) => void;
   onDismissError: () => void;
   hasResults: boolean;
   onToggleResults: () => void;
   drawerOpen: boolean;
+  resultCount: number;
+  onResultCountChange: (count: number) => void;
 }
 
 const SCENARIOS = [
-  ...demoScenarios.map(s => ({ label: s.label, businessType: s.businessType, city: s.city })),
-  { label: 'Clinic in Hyderabad', businessType: 'Clinic', city: 'Hyderabad' },
-  { label: 'Retail in Pune', businessType: 'Retail Store', city: 'Pune' },
+  ...demoScenarios.map(s => ({ label: s.label, prompt: `${s.businessType} in ${s.city}` })),
+  { label: 'Clinic in Hyderabad', prompt: 'Clinic in Hyderabad' },
+  { label: 'Retail in Pune', prompt: 'Retail Store in Pune' },
 ];
 
 export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
@@ -31,6 +33,8 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   hasResults,
   onToggleResults,
   drawerOpen,
+  resultCount,
+  onResultCountChange,
 }) => {
   const [expanded, setExpanded] = useState(true);
   const [input, setInput] = useState('');
@@ -45,27 +49,17 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
     }
   }, [messages, isLoading, expanded]);
 
-  const handleChip = (businessType: string, cityName: string) => {
-    onRunAnalysis(businessType, cityName);
-  };
-
-  const handleFreeformSubmit = () => {
+  const handleSubmit = () => {
     const text = input.trim();
     if (!text) return;
-    // Simple parse: look for "X in Y" pattern
-    const match = text.match(/^(.+?)\s+in\s+(.+)$/i);
-    if (match) {
-      onRunAnalysis(match[1].trim(), match[2].trim());
-    } else {
-      onRunAnalysis(text, 'Bengaluru'); // fallback city
-    }
+    onRunAnalysis(text);
     setInput('');
   };
 
   const handleStructuredSubmit = () => {
     if (!selectedSector || !city.trim()) return;
     const label = config.sectors.find(s => s.id === selectedSector)?.label || selectedSector;
-    onRunAnalysis(label, city.trim());
+    onRunAnalysis(`${label} in ${city.trim()}`);
     setShowSectors(false);
     setSelectedSector('');
     setCity('');
@@ -74,7 +68,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleFreeformSubmit();
+      handleSubmit();
     }
   };
 
@@ -113,14 +107,21 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
             {messages.length === 0 && !isLoading && (
               <div className="assistant-welcome">
                 <p className="assistant-welcome-text">
-                  Describe a business type and city to screen candidate locations.
+                  Describe what you want to site and where. Use natural language — include constraints like distances, preferences, and exclusions.
+                </p>
+                <p className="assistant-welcome-examples" style={{ fontSize: '11px', color: '#64748b', margin: '6px 0 8px' }}>
+                  Try: "Cafe in Bengaluru near metro, low competition"
+                  <br />
+                  or: "Warehouse near highway in Pune, away from residential"
+                  <br />
+                  or: "Preschool in Mumbai within 2km of parks, not near industrial zones"
                 </p>
                 <div className="assistant-chips">
                   {SCENARIOS.map(s => (
                     <button
                       key={s.label}
                       className="assistant-chip"
-                      onClick={() => handleChip(s.businessType, s.city)}
+                      onClick={() => onRunAnalysis(s.prompt)}
                       disabled={isLoading}
                     >
                       {s.label}
@@ -200,6 +201,23 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
             </div>
           )}
 
+          {/* Result count control */}
+          <div className="assistant-controls">
+            <label className="assistant-count-label">
+              Results:
+              <select
+                value={resultCount}
+                onChange={(e) => onResultCountChange(parseInt(e.target.value))}
+                className="assistant-count-select"
+                disabled={isLoading}
+              >
+                {[1, 2, 3, 4, 5].map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           {/* Input bar */}
           <div className="assistant-input">
             <button
@@ -219,12 +237,12 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="e.g. Cafe in Bengaluru"
+              placeholder="e.g. Cafe in Bengaluru near metro, low competition"
               className="assistant-text-input"
               disabled={isLoading}
             />
             <button
-              onClick={handleFreeformSubmit}
+              onClick={handleSubmit}
               disabled={isLoading || !input.trim()}
               className="assistant-send"
             >

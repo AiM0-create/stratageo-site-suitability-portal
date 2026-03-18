@@ -1,6 +1,20 @@
-import type { POI } from '../types';
+/**
+ * OSM Service — Context-aware Overpass and Nominatim queries.
+ *
+ * Improvements over previous version:
+ * - Queries both nodes AND ways for relevant features
+ * - Uses sector-specific tag bundles from templates
+ * - Supports constraint-derived additional queries
+ * - Configurable search radius per sector
+ * - Deduplicates POIs
+ * - Better coordinate validation
+ */
+
+import type { POI, SpatialConstraint } from '../types';
+import type { SectorTemplate } from './sectorTemplates';
 
 const NOMINATIM_BASE_URL = 'https://nominatim.openstreetmap.org/search';
+
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
@@ -10,13 +24,7 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.osm.ch/api/interpreter',
 ];
 
-export interface OSMData {
-  competitors: number;
-  transport: number;
-  commercial_density: number;
-  residential_density: number;
-  pois: POI[];
-}
+// ─── Types ───
 
 export interface GeocodedLocation {
   lat: number;
@@ -24,17 +32,30 @@ export interface GeocodedLocation {
   display_name: string;
 }
 
+export interface OsmSignals {
+  [key: string]: number;
+}
+
+export interface OsmResult {
+  signals: OsmSignals;
+  pois: POI[];
+}
+
+// ─── Geocoding ───
+
 export async function geocodeLocation(query: string): Promise<GeocodedLocation | null> {
   try {
     const params = new URLSearchParams({ q: query, format: 'json', limit: '1', addressdetails: '1' });
-    const response = await fetch(`${NOMINATIM_BASE_URL}?${params.toString()}`);
+    const response = await fetch(`${NOMINATIM_BASE_URL}?${params.toString()}`, {
+      headers: { 'User-Agent': 'Stratageo-SiteSuitability/1.0' },
+    });
     if (!response.ok) return null;
 
     const data = await response.json();
     if (data && data.length > 0) {
       const lat = parseFloat(data[0].lat);
       const lng = parseFloat(data[0].lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      if (!isValidCoord(lat, lng)) return null;
       return { lat, lng, display_name: data[0].display_name };
     }
     return null;
@@ -43,12 +64,18 @@ export async function geocodeLocation(query: string): Promise<GeocodedLocation |
   }
 }
 
+function isValidCoord(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+// ─── Overpass retry logic ───
+
 async function fetchWithOverpassRetry(query: string): Promise<any> {
   let lastError: Error | null = null;
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -57,78 +84,164 @@ async function fetchWithOverpassRetry(query: string): Promise<any> {
       });
       clearTimeout(timeoutId);
       if (!response.ok) {
-        if (response.status === 429) continue;
-        throw new Error(`Overpass API failed: ${response.status}`);
+        if (response.status === 429) { await new Promise(r => setTimeout(r, 1000)); continue; }
+        throw new Error(`Overpass API: ${response.status}`);
       }
       return await response.json();
     } catch (error) {
       lastError = error as Error;
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 500));
     }
   }
   throw lastError || new Error('All Overpass endpoints failed');
 }
 
-export async function fetchOSMData(lat: number, lng: number, competitorTags: string[]): Promise<OSMData> {
-  const radius = 1000;
+// ─── Build Overpass query from sector template ───
 
-  const competitorQuery = competitorTags.map(tag => {
-    const [key, value] = tag.split('=');
-    return `node["${key}"="${value}"](around:${radius},${lat},${lng});`;
-  }).join('\n');
+function buildOverpassQuery(
+  lat: number,
+  lng: number,
+  radiusM: number,
+  sector: SectorTemplate,
+  constraints: SpatialConstraint[],
+): string {
+  const parts: string[] = [];
+  const addedTags = new Set<string>();
 
-  const query = `
-    [out:json][timeout:30];
-    (
-      ${competitorQuery}
-      node["public_transport"](around:${radius},${lat},${lng});
-      node["highway"="bus_stop"](around:${radius},${lat},${lng});
-      node["railway"="station"](around:${radius},${lat},${lng});
-      node["shop"](around:${radius},${lat},${lng});
-      node["office"](around:${radius},${lat},${lng});
-      node["amenity"="restaurant"](around:${radius},${lat},${lng});
-      node["amenity"="bank"](around:${radius},${lat},${lng});
-      node["building"="apartments"](around:${radius},${lat},${lng});
-      node["building"="residential"](around:${radius},${lat},${lng});
-      way["building"="apartments"](around:${radius},${lat},${lng});
-      way["building"="residential"](around:${radius},${lat},${lng});
-    );
-    out center;
-  `;
+  for (const criterion of sector.criteria) {
+    for (const tag of criterion.osmQuery.tags) {
+      if (addedTags.has(tag)) continue;
+      addedTags.add(tag);
 
-  const data = await fetchWithOverpassRetry(query);
-  const elements = data.elements || [];
+      const isWildcard = tag.includes('=*');
+      const [key, value] = tag.split('=');
 
-  let competitors = 0, transport = 0, commercial = 0, residential = 0;
-  const pois: POI[] = [];
-
-  for (const el of elements) {
-    const tags = el.tags || {};
-    let rawLat = el.lat ?? el.center?.lat;
-    let rawLng = el.lon ?? el.center?.lon;
-    const elLat = parseFloat(rawLat);
-    const elLng = parseFloat(rawLng);
-    const hasValidCoords = Number.isFinite(elLat) && Number.isFinite(elLng);
-    const name = tags.name;
-
-    const isCompetitor = competitorTags.some(tag => {
-      const [k, v] = tag.split('=');
-      return tags[k] === v;
-    });
-
-    if (isCompetitor) {
-      competitors++;
-      if (hasValidCoords) pois.push({ lat: elLat, lng: elLng, name, type: 'competitor' });
-    } else if (tags.public_transport || tags.highway === 'bus_stop' || tags.railway === 'station') {
-      transport++;
-      if (hasValidCoords) pois.push({ lat: elLat, lng: elLng, name, type: 'transport' });
-    } else if (tags.shop || tags.office || tags.amenity === 'restaurant' || tags.amenity === 'bank') {
-      commercial++;
-      if (hasValidCoords) pois.push({ lat: elLat, lng: elLng, name, type: 'commercial' });
-    } else if (tags.building === 'apartments' || tags.building === 'residential') {
-      residential++;
+      if (isWildcard) {
+        parts.push(`node["${key}"](around:${radiusM},${lat},${lng});`);
+        if (criterion.osmQuery.queryBothNodeAndWay) {
+          parts.push(`way["${key}"](around:${radiusM},${lat},${lng});`);
+        }
+      } else {
+        parts.push(`node["${key}"="${value}"](around:${radiusM},${lat},${lng});`);
+        if (criterion.osmQuery.queryBothNodeAndWay) {
+          parts.push(`way["${key}"="${value}"](around:${radiusM},${lat},${lng});`);
+        }
+      }
     }
   }
 
-  return { competitors, transport, commercial_density: commercial, residential_density: residential, pois };
+  // Add constraint-specific queries
+  for (const constraint of constraints) {
+    for (const tag of constraint.osmTags) {
+      if (addedTags.has(tag)) continue;
+      addedTags.add(tag);
+
+      const isWildcard = tag.includes('=*');
+      const [key, value] = tag.split('=');
+      const r = constraint.distanceM || radiusM;
+
+      if (isWildcard) {
+        parts.push(`node["${key}"](around:${r},${lat},${lng});`);
+        parts.push(`way["${key}"](around:${r},${lat},${lng});`);
+      } else {
+        parts.push(`node["${key}"="${value}"](around:${r},${lat},${lng});`);
+        parts.push(`way["${key}"="${value}"](around:${r},${lat},${lng});`);
+      }
+    }
+  }
+
+  return `
+    [out:json][timeout:30];
+    (
+      ${parts.join('\n      ')}
+    );
+    out center;
+  `;
+}
+
+// ─── Classify OSM elements into signals ───
+
+function classifyElement(
+  tags: Record<string, string>,
+  sector: SectorTemplate,
+  constraints: SpatialConstraint[],
+): { signalKeys: string[]; poiType: string } {
+  const signalKeys: string[] = [];
+  let poiType = 'other';
+
+  for (const criterion of sector.criteria) {
+    for (const tagDef of criterion.osmQuery.tags) {
+      const isWildcard = tagDef.includes('=*');
+      const [key, value] = tagDef.split('=');
+
+      if (isWildcard ? tags[key] : tags[key] === value) {
+        if (!signalKeys.includes(criterion.osmSignalKey)) {
+          signalKeys.push(criterion.osmSignalKey);
+        }
+        if (poiType === 'other') poiType = criterion.osmSignalKey;
+        break;
+      }
+    }
+  }
+
+  for (const constraint of constraints) {
+    for (const tagDef of constraint.osmTags) {
+      const isWildcard = tagDef.includes('=*');
+      const [key, value] = tagDef.split('=');
+      if (isWildcard ? tags[key] : tags[key] === value) {
+        const constraintKey = constraint.target.toLowerCase().replace(/\s+/g, '_');
+        if (!signalKeys.includes(constraintKey)) {
+          signalKeys.push(constraintKey);
+        }
+        if (poiType === 'other') poiType = constraintKey;
+      }
+    }
+  }
+
+  return { signalKeys, poiType };
+}
+
+// ─── Main data fetch ───
+
+export async function fetchOSMData(
+  lat: number,
+  lng: number,
+  sector: SectorTemplate,
+  constraints: SpatialConstraint[] = [],
+): Promise<OsmResult> {
+  const radiusM = sector.searchRadiusM;
+  const query = buildOverpassQuery(lat, lng, radiusM, sector, constraints);
+  const data = await fetchWithOverpassRetry(query);
+  const elements = data.elements || [];
+
+  const signals: OsmSignals = {};
+  const pois: POI[] = [];
+  const seenIds = new Set<number>();
+
+  for (const el of elements) {
+    if (el.id && seenIds.has(el.id)) continue;
+    if (el.id) seenIds.add(el.id);
+
+    const tags = el.tags || {};
+    const elLat = parseFloat(el.lat ?? el.center?.lat);
+    const elLng = parseFloat(el.lon ?? el.center?.lon);
+    const hasValidCoords = isValidCoord(elLat, elLng);
+
+    const { signalKeys, poiType } = classifyElement(tags, sector, constraints);
+
+    for (const key of signalKeys) {
+      signals[key] = (signals[key] || 0) + 1;
+    }
+
+    if (hasValidCoords && poiType !== 'other') {
+      pois.push({
+        lat: elLat,
+        lng: elLng,
+        name: tags.name,
+        type: poiType,
+      });
+    }
+  }
+
+  return { signals, pois };
 }

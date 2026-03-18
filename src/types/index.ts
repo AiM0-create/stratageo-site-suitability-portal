@@ -1,31 +1,91 @@
+// ─── Analysis Specification (output of prompt parser) ───
+
+export interface AnalysisSpec {
+  businessType: string;
+  sectorId: string;
+  geography: {
+    city: string;
+    country?: string;
+    neighborhoods?: string[];
+    anchor?: { lat: number; lng: number; label?: string };
+  };
+  constraints: SpatialConstraint[];
+  positiveCriteria: string[];
+  negativeCriteria: string[];
+  inferredWeights: Record<string, number>;
+  resultCount: number;
+  parsingNotes: string[];
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface SpatialConstraint {
+  type: 'proximity' | 'exclusion' | 'preference';
+  target: string;
+  osmTags: string[];
+  distanceM?: number;
+  direction: 'near' | 'away';
+  hardRule: boolean;
+  label: string;
+}
+
+// ─── MCDA Criteria (dynamic, directional) ───
+
+export type CriterionDirection = 'positive' | 'negative';
+export type EvidenceBasis = 'osm-observed' | 'osm-derived' | 'constraint-rule' | 'template-default' | 'ai-generated';
+
 export interface MCDACriteria {
   name: string;
   weight: number;
   score: number;
+  rawValue: number;
+  direction: CriterionDirection;
   justification: string;
+  evidenceBasis: EvidenceBasis;
+  osmQuery?: string;
 }
+
+// ─── Exclusion result ───
+
+export interface ExclusionCheck {
+  rule: string;
+  passed: boolean;
+  detail: string;
+  evidenceBasis: EvidenceBasis;
+}
+
+// ─── Location data ───
 
 export interface POI {
   lat: number;
   lng: number;
   name?: string;
-  type: 'competitor' | 'transport' | 'commercial' | 'residential';
+  type: string;
 }
 
 export interface LocationData {
   name: string;
   lat: number;
   lng: number;
-  reasoning: string;
-  footfall: string;
-  demographics: string;
-  marketing_radius_km: number;
-  marketing_strategy: string;
-  public_transport?: string;
-  local_initiatives?: string;
   mcda_score: number;
   criteria_breakdown: MCDACriteria[];
-  pois?: POI[];
+  exclusions: ExclusionCheck[];
+  excluded: boolean;
+  reasoning: string;
+  osmSignals: Record<string, number>;
+  pois: POI[];
+  searchRadiusM: number;
+}
+
+// ─── Analysis Result ───
+
+export interface AnalysisResult {
+  summary: string;
+  business_type: string;
+  target_location: string;
+  methodology: string;
+  spec: AnalysisSpec;
+  locations: LocationData[];
+  grounding_sources: GroundingSource[];
 }
 
 export interface GroundingSource {
@@ -35,19 +95,11 @@ export interface GroundingSource {
   reliability: string;
 }
 
-export interface AnalysisResult {
-  summary: string;
-  business_type: string;
-  target_location: string;
-  methodology: string;
-  locations: LocationData[];
-  grounding_sources?: GroundingSource[];
-}
+// ─── Analysis Request (from UI) ───
 
 export interface AnalysisRequest {
-  businessType: string;
-  city: string;
-  priorities?: Record<string, number>;
+  rawPrompt: string;
+  resultCount?: number;
 }
 
 export interface AnalysisStatus {
@@ -55,11 +107,10 @@ export interface AnalysisStatus {
   progress: number;
 }
 
+// ─── App state ───
+
 export type AppMode = 'demo' | 'live';
-
-export type AppView = 'landing' | 'analysis' | 'results';
-
-export type HeatmapType = 'competitor' | 'transport' | 'commercial' | null;
+export type HeatmapType = string | null;
 
 export interface DemoScenario {
   id: string;
