@@ -3,10 +3,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  // For GitHub Pages deployment: set to repo name
-  // e.g., '/stratageo-site-suitability-portal/'
-  // For root domain deployment, use '/'
-  base: '/stratageo-site-suitability-portal/',
+  // Base path: uses VITE_BASE_PATH env var if set, otherwise defaults to repo name for GitHub Pages.
+  // Vercel sets VITE_BASE_PATH='/' via env var so assets resolve correctly.
+  base: process.env.VITE_BASE_PATH || '/stratageo-site-suitability-portal/',
 
   plugins: [react()],
 
