@@ -1,0 +1,5 @@
+{
+  "name": "Stratageo Site Suitability Portal",
+  "description": "An AI-powered site suitability analysis tool that evaluates locations for businesses using Multi-Criteria Decision Analysis (MCDA). It analyzes keywords to determine business type and location, applies custom weighted criteria, and provides insights via an interactive map and detailed PDF reports.",
+  "requestFramePermissions": []
+}
