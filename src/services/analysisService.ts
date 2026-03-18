@@ -21,7 +21,7 @@
 import type { AnalysisResult, AnalysisSpec, AnalysisStatus, LocationData, UserPoint, UserPointConstraint } from '../types';
 import { config } from '../config';
 import { parsePrompt, parseUserPointIntent } from './promptParser';
-import { extractIntent } from './llmIntentExtractor';
+import { extractIntent, getLastDiagnostics } from './llmIntentExtractor';
 import { validateLLMIntent } from './intentValidator';
 import { buildProfiledConfig, dynamicCriteriaToTemplate, type ProfiledAnalysisConfig } from './profileBuilder';
 import { validateFeasibility } from './feasibilityValidator';
@@ -122,7 +122,9 @@ async function extractAnalysisIntent(
 ): Promise<IntentResult> {
   // In demo mode, skip LLM — use local parser
   if (config.isDemoMode) {
+    console.log('[Stratageo] Demo mode — skipping GPT, using local parser.');
     const spec = parsePrompt(rawPrompt);
+    spec.parsingNotes.unshift('[Demo Mode] GPT not used — running with local classifier and demo data.');
     const sector = getSectorById(spec.sectorId);
     return {
       spec,
@@ -132,24 +134,26 @@ async function extractAnalysisIntent(
     };
   }
 
-  onStatus({ message: 'Understanding your query (AI)...', progress: 5 });
+  // ─── LIVE MODE: GPT intent extraction is the primary path ───
+  onStatus({ message: 'Understanding your query via GPT...', progress: 5 });
+  console.log(`[Stratageo] Live mode active. Backend URL: ${config.aiBackendUrl}`);
 
-  // Try LLM-first intent extraction
+  // Try GPT-first intent extraction (the extractIntent function is LOUD about failures)
   const intent = await extractIntent(rawPrompt);
+  const diagnostics = getLastDiagnostics();
 
   if (intent) {
     const validation = validateLLMIntent(intent);
 
     if (validation.valid || validation.sectorId || validation.hasDynamicCriteria) {
-      // LLM succeeded — build profiled config
+      // GPT succeeded — build profiled config
+      console.log(`[Stratageo] GPT SUCCESS: ${intent.businessType} / ${intent.sector} — using AI-generated profile`);
       const profiledConfig = buildProfiledConfig(intent, validation.sectorId);
 
-      // Append validation warnings
       for (const w of validation.warnings) {
         profiledConfig.spec.parsingNotes.push(`[Validation] ${w}`);
       }
 
-      // Determine effective sector template
       const effectiveSector = profiledConfig.useDynamicCriteria
         ? dynamicCriteriaToTemplate(profiledConfig.dynamicCriteria, profiledConfig.searchRadiusM, intent.businessType)
         : profiledConfig.sector;
@@ -162,13 +166,21 @@ async function extractAnalysisIntent(
       };
     }
 
-    console.warn('LLM intent validation failed:', validation.errors);
+    // GPT returned data but validation failed
+    console.error(`[Stratageo] GPT returned data but validation FAILED:`, validation.errors);
   }
 
-  // Fallback: local regex-based parser
-  onStatus({ message: 'Using local analysis...', progress: 8 });
+  // ─── FALLBACK: GPT was expected but did not work ───
+  const fallbackReason = diagnostics.failureReason || 'Unknown reason';
+  console.warn(`[Stratageo] FALLBACK to local classifier. Reason: ${fallbackReason}`);
+
+  onStatus({ message: 'GPT unavailable — using local analysis...', progress: 8 });
   const spec = parsePrompt(rawPrompt);
-  spec.parsingNotes.unshift('[Fallback] AI intent extraction unavailable — using local classifier.');
+
+  // Make the fallback reason visible in parsing notes
+  spec.parsingNotes.unshift(`[FALLBACK] GPT intent extraction failed — using local classifier.`);
+  spec.parsingNotes.unshift(`[REASON] ${fallbackReason}`);
+
   const sector = getSectorById(spec.sectorId);
   return {
     spec,

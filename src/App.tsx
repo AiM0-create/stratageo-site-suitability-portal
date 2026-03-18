@@ -9,6 +9,7 @@ import { MapView } from './components/MapView';
 import { FloatingAssistant } from './components/FloatingAssistant';
 import { ResultsDrawer } from './components/ResultsDrawer';
 import { MethodologyDialog } from './components/MethodologyDialog';
+import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 
 declare const html2canvas: any;
 declare const jspdf: any;
@@ -300,6 +301,8 @@ const App: React.FC = () => {
         open={methodologyOpen}
         onClose={() => setMethodologyOpen(false)}
       />
+
+      <DiagnosticsPanel />
     </div>
   );
 };
