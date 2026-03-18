@@ -82,7 +82,10 @@ const App: React.FC = () => {
     try {
       const parsedSpec = parsePrompt(rawPrompt);
       const csvNote = userPoints.length > 0 ? ` with ${userPoints.length} CSV point(s)` : '';
-      const specMsg = `Understood: ${parsedSpec.businessType} in ${parsedSpec.geography.city || '(no city detected)'}` +
+      const locationDesc = parsedSpec.geography.anchor && !parsedSpec.geography.city
+        ? `near ${parsedSpec.geography.anchor.lat.toFixed(4)}, ${parsedSpec.geography.anchor.lng.toFixed(4)}`
+        : `in ${parsedSpec.geography.city || '(no location detected)'}`;
+      const specMsg = `Understood: ${parsedSpec.businessType} ${locationDesc}` +
         (parsedSpec.constraints.length > 0 ? ` with ${parsedSpec.constraints.length} constraint(s)` : '') +
         csvNote +
         (parsedSpec.parsingNotes.length > 0 ? `. ${parsedSpec.parsingNotes[0]}` : '');

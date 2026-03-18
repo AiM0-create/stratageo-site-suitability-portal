@@ -15,7 +15,7 @@ import type { AnalysisResult, AnalysisSpec, AnalysisStatus, LocationData, UserPo
 import { config } from '../config';
 import { parsePrompt, parseUserPointIntent } from './promptParser';
 import { getSectorById } from './sectorTemplates';
-import { geocodeLocation, fetchOSMData } from './osmService';
+import { geocodeLocation, fetchOSMData, reverseGeocode } from './osmService';
 import { scoreNeighborhood, computeMCDAScore, checkExclusions, addUserPointCriteria, generateReasoning, generateSummary } from './mcdaEngine';
 import { fetchAIExplanation, fetchAIIntent } from './aiClient';
 import { findDemoScenario, getDefaultDemoScenario } from '../data/demoScenarios';
@@ -38,6 +38,54 @@ function getNeighborhoodsForCity(city: string, count: number): string[] {
     if (key.includes(k) || k.includes(key)) return v.slice(0, count);
   }
   return ['City Center', 'North', 'South', 'East', 'West'].slice(0, count);
+}
+
+// ─── Coordinate-based candidate generation ───
+// Generate candidate points in a grid/ring around an anchor coordinate
+
+interface CandidatePoint {
+  lat: number;
+  lng: number;
+  label: string;
+}
+
+/**
+ * Generate candidate analysis points around an anchor coordinate.
+ * Uses cardinal directions + center at appropriate spacing for the sector radius.
+ */
+function generateCandidatePoints(anchorLat: number, anchorLng: number, searchRadiusM: number, count: number): CandidatePoint[] {
+  const points: CandidatePoint[] = [];
+
+  // Center point
+  points.push({ lat: anchorLat, lng: anchorLng, label: 'Anchor (center)' });
+
+  // Offset distance: use 1.5x search radius so candidates don't fully overlap
+  const offsetM = searchRadiusM * 1.5;
+  const latDeg = offsetM / 111_320; // ~111.32km per degree latitude
+  const lngDeg = offsetM / (111_320 * Math.cos(anchorLat * Math.PI / 180));
+
+  // Cardinal directions
+  const directions: Array<{ label: string; dLat: number; dLng: number }> = [
+    { label: 'North', dLat: latDeg, dLng: 0 },
+    { label: 'South', dLat: -latDeg, dLng: 0 },
+    { label: 'East', dLat: 0, dLng: lngDeg },
+    { label: 'West', dLat: 0, dLng: -lngDeg },
+    { label: 'NE', dLat: latDeg * 0.7, dLng: lngDeg * 0.7 },
+    { label: 'SE', dLat: -latDeg * 0.7, dLng: lngDeg * 0.7 },
+    { label: 'SW', dLat: -latDeg * 0.7, dLng: -lngDeg * 0.7 },
+    { label: 'NW', dLat: latDeg * 0.7, dLng: -lngDeg * 0.7 },
+  ];
+
+  for (const dir of directions) {
+    if (points.length >= count + 2) break; // generate a few extras for filtering
+    points.push({
+      lat: anchorLat + dir.dLat,
+      lng: anchorLng + dir.dLng,
+      label: dir.label,
+    });
+  }
+
+  return points;
 }
 
 // ─── Demo analysis ───
@@ -112,86 +160,166 @@ export async function runLiveAnalysis(
   }
 
   const sector = getSectorById(spec.sectorId);
-  const { city } = spec.geography;
+  let { city } = spec.geography;
+  const anchor = spec.geography.anchor;
+  const isCoordinateAnchored = !!anchor && !city;
 
-  if (!city) {
-    throw new Error('Could not detect a target city from your prompt. Please specify a city (e.g., "Cafe in Bengaluru").');
+  // Validate: must have either city or coordinates
+  if (!city && !anchor) {
+    throw new Error('Could not detect a target location. Please specify a city (e.g., "Cafe in Bengaluru") or provide coordinates (e.g., "near 12.9385, 77.6206").');
   }
 
-  // Step 2: Resolve neighborhoods
-  onStatus({ message: 'Planning search strategy...', progress: 10 });
+  // Step 2: Resolve geography
+  onStatus({ message: isCoordinateAnchored ? 'Resolving location from coordinates...' : 'Planning search strategy...', progress: 10 });
 
-  let neighborhoods: string[];
-  if (spec.geography.neighborhoods?.length) {
-    neighborhoods = spec.geography.neighborhoods;
-  } else {
-    const aiIntent = await fetchAIIntent(`${spec.businessType} in ${city}`);
-    neighborhoods = aiIntent?.neighborhoods?.length
-      ? aiIntent.neighborhoods.slice(0, spec.resultCount + 2)
-      : getNeighborhoodsForCity(city, spec.resultCount + 2);
+  // If coordinate-anchored, try reverse geocoding for context
+  let locationLabel = city || 'provided coordinates';
+  if (isCoordinateAnchored && anchor) {
+    try {
+      const reverseResult = await reverseGeocode(anchor.lat, anchor.lng);
+      if (reverseResult) {
+        const locality = reverseResult.locality;
+        const inferredCity = reverseResult.city;
+        if (inferredCity) {
+          city = inferredCity;
+          spec.geography.city = inferredCity;
+          locationLabel = locality ? `${locality}, ${inferredCity}` : inferredCity;
+          spec.parsingNotes.push(`Reverse geocoded: ${locationLabel} (${reverseResult.state || reverseResult.country}).`);
+        } else if (locality) {
+          locationLabel = locality;
+          spec.parsingNotes.push(`Reverse geocoded locality: ${locality}.`);
+        }
+      }
+    } catch {
+      spec.parsingNotes.push('Reverse geocoding failed — proceeding with raw coordinates as anchor.');
+    }
   }
 
-  // Step 3: Gather OSM data for each neighborhood
+  // Step 3: Build candidate list
   const analyzedLocations: LocationData[] = [];
 
-  for (let i = 0; i < neighborhoods.length; i++) {
-    const neighborhood = neighborhoods[i];
-    onStatus({
-      message: `Analyzing ${neighborhood}...`,
-      progress: 15 + Math.round((i / neighborhoods.length) * 50),
-    });
+  if (anchor && (isCoordinateAnchored || !city)) {
+    // ─── Coordinate-anchored analysis ───
+    // Generate candidate points around the anchor
+    const candidates = generateCandidatePoints(anchor.lat, anchor.lng, sector.searchRadiusM, spec.resultCount + 2);
 
-    const coords = await geocodeLocation(`${neighborhood}, ${city}`);
-    if (!coords) {
-      spec.parsingNotes.push(`Could not geocode "${neighborhood}" — skipped.`);
-      continue;
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      onStatus({
+        message: `Analyzing area ${candidate.label}...`,
+        progress: 15 + Math.round((i / candidates.length) * 50),
+      });
+
+      try {
+        // Reverse geocode each candidate for a meaningful name
+        let candidateName = `${candidate.label} (${candidate.lat.toFixed(4)}, ${candidate.lng.toFixed(4)})`;
+        try {
+          const rev = await reverseGeocode(candidate.lat, candidate.lng);
+          if (rev?.locality) candidateName = rev.locality;
+          else if (rev?.display_name) candidateName = rev.display_name.split(',')[0];
+        } catch { /* use fallback name */ }
+
+        const osmResult = await fetchOSMData(candidate.lat, candidate.lng, sector, spec.constraints);
+
+        let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
+        if (spec.userPointConstraints.length > 0) {
+          criteria = addUserPointCriteria(criteria, candidate.lat, candidate.lng, spec.userPointConstraints);
+        }
+
+        const mcdaScore = computeMCDAScore(criteria);
+        const exclusions = checkExclusions(
+          osmResult.signals, spec.constraints, sector.searchRadiusM,
+          candidate.lat, candidate.lng, spec.userPointConstraints,
+        );
+        const excluded = exclusions.some(e => !e.passed);
+
+        const reasoning = generateReasoning(candidateName, criteria, exclusions, sector.searchRadiusM);
+
+        analyzedLocations.push({
+          name: candidateName,
+          lat: candidate.lat,
+          lng: candidate.lng,
+          mcda_score: mcdaScore,
+          criteria_breakdown: criteria,
+          exclusions,
+          excluded,
+          reasoning,
+          osmSignals: osmResult.signals,
+          pois: osmResult.pois,
+          searchRadiusM: sector.searchRadiusM,
+        });
+      } catch {
+        spec.parsingNotes.push(`OSM data fetch failed for "${candidate.label}" — skipped.`);
+      }
+    }
+  } else {
+    // ─── City-based analysis (original flow) ───
+    let neighborhoods: string[];
+    if (spec.geography.neighborhoods?.length) {
+      neighborhoods = spec.geography.neighborhoods;
+    } else {
+      const aiIntent = await fetchAIIntent(`${spec.businessType} in ${city}`);
+      neighborhoods = aiIntent?.neighborhoods?.length
+        ? aiIntent.neighborhoods.slice(0, spec.resultCount + 2)
+        : getNeighborhoodsForCity(city, spec.resultCount + 2);
     }
 
-    try {
-      const osmResult = await fetchOSMData(coords.lat, coords.lng, sector, spec.constraints);
+    for (let i = 0; i < neighborhoods.length; i++) {
+      const neighborhood = neighborhoods[i];
+      onStatus({
+        message: `Analyzing ${neighborhood}...`,
+        progress: 15 + Math.round((i / neighborhoods.length) * 50),
+      });
 
-      let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
-
-      // Add user-point-derived criteria (soft proximity scoring)
-      if (spec.userPointConstraints.length > 0) {
-        criteria = addUserPointCriteria(criteria, coords.lat, coords.lng, spec.userPointConstraints);
+      const coords = await geocodeLocation(`${neighborhood}, ${city}`);
+      if (!coords) {
+        spec.parsingNotes.push(`Could not geocode "${neighborhood}" — skipped.`);
+        continue;
       }
 
-      const mcdaScore = computeMCDAScore(criteria);
-      const exclusions = checkExclusions(
-        osmResult.signals, spec.constraints, sector.searchRadiusM,
-        coords.lat, coords.lng, spec.userPointConstraints,
-      );
-      const excluded = exclusions.some(e => !e.passed);
+      try {
+        const osmResult = await fetchOSMData(coords.lat, coords.lng, sector, spec.constraints);
 
-      const reasoning = generateReasoning(
-        coords.display_name.split(',')[0],
-        criteria,
-        exclusions,
-        sector.searchRadiusM,
-      );
+        let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
+        if (spec.userPointConstraints.length > 0) {
+          criteria = addUserPointCriteria(criteria, coords.lat, coords.lng, spec.userPointConstraints);
+        }
 
-      analyzedLocations.push({
-        name: coords.display_name.split(',')[0],
-        lat: coords.lat,
-        lng: coords.lng,
-        mcda_score: mcdaScore,
-        criteria_breakdown: criteria,
-        exclusions,
-        excluded,
-        reasoning,
-        osmSignals: osmResult.signals,
-        pois: osmResult.pois,
-        searchRadiusM: sector.searchRadiusM,
-      });
-    } catch {
-      spec.parsingNotes.push(`OSM data fetch failed for "${neighborhood}" — skipped.`);
-      continue;
+        const mcdaScore = computeMCDAScore(criteria);
+        const exclusions = checkExclusions(
+          osmResult.signals, spec.constraints, sector.searchRadiusM,
+          coords.lat, coords.lng, spec.userPointConstraints,
+        );
+        const excluded = exclusions.some(e => !e.passed);
+
+        const reasoning = generateReasoning(
+          coords.display_name.split(',')[0],
+          criteria,
+          exclusions,
+          sector.searchRadiusM,
+        );
+
+        analyzedLocations.push({
+          name: coords.display_name.split(',')[0],
+          lat: coords.lat,
+          lng: coords.lng,
+          mcda_score: mcdaScore,
+          criteria_breakdown: criteria,
+          exclusions,
+          excluded,
+          reasoning,
+          osmSignals: osmResult.signals,
+          pois: osmResult.pois,
+          searchRadiusM: sector.searchRadiusM,
+        });
+      } catch {
+        spec.parsingNotes.push(`OSM data fetch failed for "${neighborhood}" — skipped.`);
+      }
     }
   }
 
   if (analyzedLocations.length === 0) {
-    throw new Error(`Could not gather data for any neighborhoods in ${city}. Try a different city or check your connection.`);
+    throw new Error(`Could not gather data for any candidate areas${city ? ` in ${city}` : ''}. Try a different location or check your connection.`);
   }
 
   // Step 4: Sort and limit
@@ -214,7 +342,7 @@ export async function runLiveAnalysis(
       result: {
         summary: `No suitable locations found given current constraints. All ${analyzedLocations.length} candidate areas fall within the ${radiusKm}km ${upc.mode === 'exclude' ? 'exclusion' : 'inclusion'} zone of the ${upc.points.length} uploaded location(s). Try reducing the radius or relaxing constraints.`,
         business_type: spec.businessType,
-        target_location: city,
+        target_location: locationLabel,
         methodology: `Attempted to screen ${analyzedLocations.length} areas but all were excluded by user-supplied spatial constraints (${radiusKm}km ${upc.mode} buffer around ${upc.points.length} points).`,
         spec,
         locations: finalLocations, // still return them so user can see what was excluded
@@ -236,12 +364,12 @@ export async function runLiveAnalysis(
   // Step 5: Optional AI enhancement
   onStatus({ message: 'Generating insights...', progress: 85 });
 
-  let summary = generateSummary(spec.businessType, city, finalLocations, spec);
+  let summary = generateSummary(spec.businessType, locationLabel, finalLocations, spec);
 
   if (config.isLiveMode) {
     const aiResult = await fetchAIExplanation({
       businessType: spec.businessType,
-      city,
+      city: locationLabel,
       locations: finalLocations.map(loc => ({
         name: loc.name,
         mcda_score: loc.mcda_score,
@@ -273,8 +401,8 @@ export async function runLiveAnalysis(
     result: {
       summary,
       business_type: spec.businessType,
-      target_location: city,
-      methodology: `Dynamic MCDA using ${finalLocations[0]?.criteria_breakdown.length || 0} sector-specific criteria scored from OpenStreetMap data within ${radiusKm}km radius. Criteria include both positive and negative signals with direction-aware scoring. ${spec.constraints.length > 0 ? `${spec.constraints.length} spatial constraint(s) applied.` : ''} All scores are deterministic and evidence-backed.`,
+      target_location: locationLabel,
+      methodology: `Dynamic MCDA using ${finalLocations[0]?.criteria_breakdown.length || 0} sector-specific criteria scored from OpenStreetMap data within ${radiusKm}km radius.${isCoordinateAnchored ? ' Anchor-based analysis from provided coordinates.' : ''} Criteria include both positive and negative signals with direction-aware scoring. ${spec.constraints.length > 0 ? `${spec.constraints.length} spatial constraint(s) applied.` : ''} All scores are deterministic and evidence-backed.`,
       spec,
       locations: finalLocations,
       grounding_sources: [

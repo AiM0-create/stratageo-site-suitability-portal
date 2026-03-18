@@ -64,6 +64,61 @@ export async function geocodeLocation(query: string): Promise<GeocodedLocation |
   }
 }
 
+// ─── Reverse geocoding ───
+
+export interface ReverseGeocodeResult {
+  locality: string;
+  city: string;
+  state: string;
+  country: string;
+  display_name: string;
+}
+
+const reverseGeocodeCache = new Map<string, ReverseGeocodeResult | null>();
+
+export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResult | null> {
+  const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+  if (reverseGeocodeCache.has(cacheKey)) return reverseGeocodeCache.get(cacheKey) ?? null;
+
+  try {
+    const params = new URLSearchParams({
+      lat: lat.toString(),
+      lon: lng.toString(),
+      format: 'json',
+      zoom: '14',
+      addressdetails: '1',
+    });
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+      headers: { 'User-Agent': 'Stratageo-SiteSuitability/1.0' },
+    });
+    if (!response.ok) {
+      reverseGeocodeCache.set(cacheKey, null);
+      return null;
+    }
+
+    const data = await response.json();
+    if (!data || data.error) {
+      reverseGeocodeCache.set(cacheKey, null);
+      return null;
+    }
+
+    const addr = data.address || {};
+    const result: ReverseGeocodeResult = {
+      locality: addr.suburb || addr.neighbourhood || addr.village || addr.town || '',
+      city: addr.city || addr.town || addr.county || '',
+      state: addr.state || '',
+      country: addr.country || '',
+      display_name: data.display_name || '',
+    };
+
+    reverseGeocodeCache.set(cacheKey, result);
+    return result;
+  } catch {
+    reverseGeocodeCache.set(cacheKey, null);
+    return null;
+  }
+}
+
 function isValidCoord(lat: number, lng: number): boolean {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }

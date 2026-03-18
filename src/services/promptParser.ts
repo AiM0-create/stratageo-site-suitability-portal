@@ -13,23 +13,39 @@ import { SECTOR_TEMPLATES, findSectorTemplate, type SectorTemplate } from './sec
 const COORD_PATTERN = /(-?\d{1,3}\.?\d*)[,\s]+(-?\d{1,3}\.?\d*)/;
 
 function extractCoordinates(text: string): { lat: number; lng: number } | null {
-  // Look for explicit lat/lon mentions
-  const latLon = text.match(/lat(?:itude)?\s*[:=]?\s*(-?\d+\.?\d*)[,\s]+lon(?:gitude)?\s*[:=]?\s*(-?\d+\.?\d*)/i);
-  if (latLon) {
-    const lat = parseFloat(latLon[1]);
-    const lng = parseFloat(latLon[2]);
+  // Pattern 1: "latitude X and longitude Y" / "latitude X longitude Y" / "lat X lon Y"
+  const latAndLon = text.match(/lat(?:itude)?\s*[:=]?\s*(-?\d+\.?\d*)\s*(?:and\s+)?lon(?:gitude)?\s*[:=]?\s*(-?\d+\.?\d*)/i);
+  if (latAndLon) {
+    const lat = parseFloat(latAndLon[1]);
+    const lng = parseFloat(latAndLon[2]);
     if (isValidCoord(lat, lng)) return { lat, lng };
   }
 
-  // Look for coordinate pairs in context of spatial language
-  const aroundMatch = text.match(/(?:around|near|at|check|within.*of)\s+(-?\d{1,3}\.\d{2,})[,\s]+(-?\d{1,3}\.\d{2,})/i);
-  if (aroundMatch) {
-    const lat = parseFloat(aroundMatch[1]);
-    const lng = parseFloat(aroundMatch[2]);
+  // Pattern 2: "latitude X, longitude Y" with comma separator
+  const latCommaLon = text.match(/lat(?:itude)?\s*[:=]?\s*(-?\d+\.?\d*)\s*,\s*lon(?:gitude)?\s*[:=]?\s*(-?\d+\.?\d*)/i);
+  if (latCommaLon) {
+    const lat = parseFloat(latCommaLon[1]);
+    const lng = parseFloat(latCommaLon[2]);
     if (isValidCoord(lat, lng)) return { lat, lng };
   }
 
-  // Bare coordinate pair (must have decimals to avoid matching distances)
+  // Pattern 3: "use lat X lon Y" / "lat X lon Y as anchor"
+  const latLonSpaced = text.match(/lat\s+(-?\d+\.?\d+)\s+lon\s+(-?\d+\.?\d+)/i);
+  if (latLonSpaced) {
+    const lat = parseFloat(latLonSpaced[1]);
+    const lng = parseFloat(latLonSpaced[2]);
+    if (isValidCoord(lat, lng)) return { lat, lng };
+  }
+
+  // Pattern 4: coordinate pairs in spatial context ("near X, Y", "within Xkm of X, Y", "of the lat/lng")
+  const spatialMatch = text.match(/(?:around|near|at|check|of|from)\s+(?:the\s+)?(?:lat\/?lng\.?\s+)?(-?\d{1,3}\.\d{2,})[,\s]+(-?\d{1,3}\.\d{2,})/i);
+  if (spatialMatch) {
+    const lat = parseFloat(spatialMatch[1]);
+    const lng = parseFloat(spatialMatch[2]);
+    if (isValidCoord(lat, lng)) return { lat, lng };
+  }
+
+  // Pattern 5: Bare coordinate pair (must have decimals to avoid matching distances)
   const bare = text.match(/\b(-?\d{1,3}\.\d{3,})[,\s]+(-?\d{1,3}\.\d{3,})\b/);
   if (bare) {
     const lat = parseFloat(bare[1]);
@@ -354,22 +370,26 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
   // 1. Detect sector
   const sector = detectSector(text);
 
-  // 2. Extract city
+  // 2. Extract coordinates (before city — coords can substitute for city)
+  const coords = extractCoordinates(text);
+
+  // 3. Extract city
   let city = extractCity(text);
-  if (!city) {
-    // Normalize Bangalore -> Bengaluru
+  if (!city && coords) {
+    // Coordinates provided — city will be resolved via reverse geocoding downstream
     city = '';
-    notes.push('No city detected in prompt. Please specify a target city.');
+    notes.push(`Coordinates detected (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}). Will use as anchor point.`);
+    // Don't downgrade confidence — coordinates are a valid anchor
+  } else if (!city && !coords) {
+    city = '';
+    notes.push('No city or coordinates detected. Please specify a location.');
     confidence = 'low';
   }
   if (city.toLowerCase() === 'bangalore') city = 'Bengaluru';
   if (city.toLowerCase() === 'gurgaon') city = 'Gurugram';
 
-  // 3. Extract business type
+  // 4. Extract business type
   const businessType = extractBusinessType(text, sector);
-
-  // 4. Extract coordinates
-  const coords = extractCoordinates(text);
 
   // 5. Extract constraints
   const constraints = extractConstraints(text);
@@ -386,9 +406,6 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
   // 9. Build notes
   if (constraints.length > 0) {
     notes.push(`Detected ${constraints.length} spatial constraint(s).`);
-  }
-  if (coords) {
-    notes.push(`Using anchor point: ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`);
   }
   if (constraints.some(c => c.osmTags.length === 0 && c.target !== 'Competitors')) {
     notes.push('Some constraint targets could not be mapped to OSM tags and may not be checkable.');
