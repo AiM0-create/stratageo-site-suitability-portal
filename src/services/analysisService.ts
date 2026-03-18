@@ -1,21 +1,21 @@
 /**
  * Analysis Service — Orchestrates the full analysis pipeline.
  *
- * NEW Architecture (LLM-first):
+ * v3 Architecture (Profile-Based):
  *
- * Stage A — Intent Understanding:
- *   1. Send raw prompt to LLM → structured intent (LLMIntent)
- *   2. Validate intent → check sector mapping, coordinates, constraints
- *   3. Resolve template → build AnalysisSpec from intent
- *   4. Fallback: if LLM unavailable → use local parsePrompt()
+ * Stage A — Universal Intent Understanding:
+ *   1. LLM extracts structured intent with site-seeking profile + dynamic criteria
+ *   2. Validate intent (geography, criteria, profile coherence)
+ *   3. Build profiled config (dynamic criteria OR fallback to sector template)
+ *   Fallback: local parsePrompt() if LLM unavailable
  *
  * Stage B — Deterministic Analysis:
- *   5. Resolve geography (reverse geocode if coordinate-anchored)
- *   6. Generate candidate locations (neighborhoods or coordinate offsets)
- *   7. Fetch OSM data for each candidate
- *   8. Score with MCDA (sector-specific criteria)
- *   9. Check exclusions, rank, filter
- *  10. Optional AI explanation enhancement
+ *   4. Resolve geography (reverse geocode if coordinate-anchored)
+ *   5. Generate candidates (neighborhoods or coordinate offsets)
+ *   6. Fetch OSM data using DYNAMIC criteria (not hardcoded templates)
+ *   7. Score with MCDA
+ *   8. Exclusion checks, ranking, feasibility validation
+ *   9. Optional AI explanation enhancement
  */
 
 import type { AnalysisResult, AnalysisSpec, AnalysisStatus, LocationData, UserPoint, UserPointConstraint } from '../types';
@@ -23,13 +23,16 @@ import { config } from '../config';
 import { parsePrompt, parseUserPointIntent } from './promptParser';
 import { extractIntent } from './llmIntentExtractor';
 import { validateLLMIntent } from './intentValidator';
-import { resolveTemplate } from './templateResolver';
+import { buildProfiledConfig, dynamicCriteriaToTemplate, type ProfiledAnalysisConfig } from './profileBuilder';
+import { validateFeasibility } from './feasibilityValidator';
 import { getSectorById } from './sectorTemplates';
+import type { SectorTemplate } from './sectorTemplates';
 import { geocodeLocation, fetchOSMData, reverseGeocode } from './osmService';
 import { scoreNeighborhood, computeMCDAScore, checkExclusions, addUserPointCriteria, generateReasoning, generateSummary } from './mcdaEngine';
 import { fetchAIExplanation } from './aiClient';
 import { findDemoScenario, getDefaultDemoScenario } from '../data/demoScenarios';
 import { inferRadius } from './radiusInference';
+import type { SiteProfile } from './intentSchema';
 
 // ─── Default neighborhoods by city ───
 
@@ -89,20 +92,44 @@ function generateCandidatePoints(anchorLat: number, anchorLng: number, searchRad
   return points;
 }
 
+// ─── Default profile ───
+
+const DEFAULT_PROFILE: SiteProfile = {
+  marketPositioning: 'unknown',
+  landIntensity: 'low',
+  urbanPreference: 'flexible',
+  infrastructureDependency: 'low',
+  footTrafficDependency: 'medium',
+  competitionSensitivity: 'avoid_competition',
+  accessProfile: 'mixed',
+  environmentalSensitivity: 'medium',
+  searchRadiusM: 1500,
+  profileSummary: 'General site suitability analysis.',
+};
+
 // ─── Stage A: Intent Understanding ───
 
-/**
- * Extract structured intent from user prompt.
- * Tries LLM first (live mode), falls back to local parser.
- * Returns the AnalysisSpec ready for Stage B.
- */
-async function extractAnalysisSpec(
+interface IntentResult {
+  spec: AnalysisSpec;
+  effectiveSector: SectorTemplate;
+  searchRadiusM: number;
+  profile: SiteProfile;
+}
+
+async function extractAnalysisIntent(
   rawPrompt: string,
   onStatus: (status: AnalysisStatus) => void,
-): Promise<AnalysisSpec> {
-  // In demo mode, skip LLM entirely — use local parser
+): Promise<IntentResult> {
+  // In demo mode, skip LLM — use local parser
   if (config.isDemoMode) {
-    return parsePrompt(rawPrompt);
+    const spec = parsePrompt(rawPrompt);
+    const sector = getSectorById(spec.sectorId);
+    return {
+      spec,
+      effectiveSector: sector,
+      searchRadiusM: sector.searchRadiusM,
+      profile: DEFAULT_PROFILE,
+    };
   }
 
   onStatus({ message: 'Understanding your query (AI)...', progress: 5 });
@@ -111,22 +138,30 @@ async function extractAnalysisSpec(
   const intent = await extractIntent(rawPrompt);
 
   if (intent) {
-    // Validate the LLM's output
     const validation = validateLLMIntent(intent);
 
-    if (validation.valid || validation.sectorId) {
-      // LLM succeeded — resolve to template and spec
-      const { spec } = resolveTemplate(intent, validation.sectorId);
+    if (validation.valid || validation.sectorId || validation.hasDynamicCriteria) {
+      // LLM succeeded — build profiled config
+      const profiledConfig = buildProfiledConfig(intent, validation.sectorId);
 
-      // Append validation warnings to parsing notes
+      // Append validation warnings
       for (const w of validation.warnings) {
-        spec.parsingNotes.push(`[Validation] ${w}`);
+        profiledConfig.spec.parsingNotes.push(`[Validation] ${w}`);
       }
 
-      return spec;
+      // Determine effective sector template
+      const effectiveSector = profiledConfig.useDynamicCriteria
+        ? dynamicCriteriaToTemplate(profiledConfig.dynamicCriteria, profiledConfig.searchRadiusM, intent.businessType)
+        : profiledConfig.sector;
+
+      return {
+        spec: profiledConfig.spec,
+        effectiveSector,
+        searchRadiusM: profiledConfig.searchRadiusM,
+        profile: profiledConfig.siteProfile,
+      };
     }
 
-    // LLM returned something but validation failed hard
     console.warn('LLM intent validation failed:', validation.errors);
   }
 
@@ -134,7 +169,13 @@ async function extractAnalysisSpec(
   onStatus({ message: 'Using local analysis...', progress: 8 });
   const spec = parsePrompt(rawPrompt);
   spec.parsingNotes.unshift('[Fallback] AI intent extraction unavailable — using local classifier.');
-  return spec;
+  const sector = getSectorById(spec.sectorId);
+  return {
+    spec,
+    effectiveSector: sector,
+    searchRadiusM: sector.searchRadiusM,
+    profile: DEFAULT_PROFILE,
+  };
 }
 
 // ─── Demo analysis ───
@@ -184,10 +225,10 @@ export async function runLiveAnalysis(
   userPoints?: UserPoint[],
 ): Promise<{ result: AnalysisResult; spec: AnalysisSpec }> {
   // ═══════════════════════════════════════════════════════
-  // Stage A: Intent Understanding (LLM-first)
+  // Stage A: Universal Intent Understanding
   // ═══════════════════════════════════════════════════════
 
-  const spec = await extractAnalysisSpec(rawPrompt, onStatus);
+  const { spec, effectiveSector, searchRadiusM, profile } = await extractAnalysisIntent(rawPrompt, onStatus);
   spec.resultCount = Math.min(5, Math.max(1, resultCount));
 
   // Build user-point constraints if CSV data provided
@@ -214,7 +255,8 @@ export async function runLiveAnalysis(
   // Stage B: Deterministic Analysis
   // ═══════════════════════════════════════════════════════
 
-  const sector = getSectorById(spec.sectorId);
+  // Use the effective sector (may be dynamic or template-based)
+  const sector = effectiveSector;
   let { city } = spec.geography;
   const anchor = spec.geography.anchor;
   const isCoordinateAnchored = !!anchor && !city;
@@ -254,7 +296,7 @@ export async function runLiveAnalysis(
 
   if (anchor && (isCoordinateAnchored || !city)) {
     // ─── Coordinate-anchored analysis ───
-    const candidates = generateCandidatePoints(anchor.lat, anchor.lng, sector.searchRadiusM, spec.resultCount + 2);
+    const candidates = generateCandidatePoints(anchor.lat, anchor.lng, searchRadiusM, spec.resultCount + 2);
 
     for (let i = 0; i < candidates.length; i++) {
       const candidate = candidates[i];
@@ -280,12 +322,12 @@ export async function runLiveAnalysis(
 
         const mcdaScore = computeMCDAScore(criteria);
         const exclusions = checkExclusions(
-          osmResult.signals, spec.constraints, sector.searchRadiusM,
+          osmResult.signals, spec.constraints, searchRadiusM,
           candidate.lat, candidate.lng, spec.userPointConstraints,
         );
         const excluded = exclusions.some(e => !e.passed);
 
-        const reasoning = generateReasoning(candidateName, criteria, exclusions, sector.searchRadiusM);
+        const reasoning = generateReasoning(candidateName, criteria, exclusions, searchRadiusM);
 
         analyzedLocations.push({
           name: candidateName,
@@ -298,7 +340,7 @@ export async function runLiveAnalysis(
           reasoning,
           osmSignals: osmResult.signals,
           pois: osmResult.pois,
-          searchRadiusM: sector.searchRadiusM,
+          searchRadiusM,
         });
       } catch {
         spec.parsingNotes.push(`OSM data fetch failed for "${candidate.label}" — skipped.`);
@@ -308,10 +350,8 @@ export async function runLiveAnalysis(
     // ─── City-based analysis ───
     let neighborhoods: string[];
     if (spec.geography.neighborhoods?.length) {
-      // Use neighborhoods from LLM intent or pre-set
       neighborhoods = spec.geography.neighborhoods;
     } else {
-      // Fall back to default neighborhoods for the city
       neighborhoods = getNeighborhoodsForCity(city, spec.resultCount + 2);
     }
 
@@ -338,7 +378,7 @@ export async function runLiveAnalysis(
 
         const mcdaScore = computeMCDAScore(criteria);
         const exclusions = checkExclusions(
-          osmResult.signals, spec.constraints, sector.searchRadiusM,
+          osmResult.signals, spec.constraints, searchRadiusM,
           coords.lat, coords.lng, spec.userPointConstraints,
         );
         const excluded = exclusions.some(e => !e.passed);
@@ -347,7 +387,7 @@ export async function runLiveAnalysis(
           coords.display_name.split(',')[0],
           criteria,
           exclusions,
-          sector.searchRadiusM,
+          searchRadiusM,
         );
 
         analyzedLocations.push({
@@ -361,7 +401,7 @@ export async function runLiveAnalysis(
           reasoning,
           osmSignals: osmResult.signals,
           pois: osmResult.pois,
-          searchRadiusM: sector.searchRadiusM,
+          searchRadiusM,
         });
       } catch {
         spec.parsingNotes.push(`OSM data fetch failed for "${neighborhood}" — skipped.`);
@@ -383,7 +423,10 @@ export async function runLiveAnalysis(
 
   const finalLocations = analyzedLocations.slice(0, spec.resultCount);
 
-  // Step 4b: Feasibility check
+  // Step 4b: Feasibility validation against profile
+  const feasibility = validateFeasibility(finalLocations, spec, profile);
+
+  // Handle infeasible results
   const nonExcludedCount = finalLocations.filter(l => !l.excluded).length;
   if (nonExcludedCount === 0 && spec.userPointConstraints.length > 0) {
     const upc = spec.userPointConstraints[0];
@@ -406,9 +449,17 @@ export async function runLiveAnalysis(
     };
   }
 
+  // Append feasibility warnings/suggestions to parsing notes
+  for (const w of feasibility.warnings) {
+    spec.parsingNotes.push(`[Feasibility] ${w}`);
+  }
+  for (const s of feasibility.suggestions) {
+    spec.parsingNotes.push(`[Suggestion] ${s}`);
+  }
+
   if (nonExcludedCount < spec.resultCount && spec.userPointConstraints.length > 0) {
     spec.parsingNotes.push(
-      `Only ${nonExcludedCount} of ${spec.resultCount} requested locations passed all constraints. Showing all available results.`,
+      `Only ${nonExcludedCount} of ${spec.resultCount} requested locations passed all constraints.`,
     );
   }
 
@@ -416,6 +467,11 @@ export async function runLiveAnalysis(
   onStatus({ message: 'Generating insights...', progress: 85 });
 
   let summary = generateSummary(spec.businessType, locationLabel, finalLocations, spec);
+
+  // Prepend feasibility assessment to summary
+  if (feasibility.overallQuality === 'weak') {
+    summary = `Note: Overall suitability is low for ${spec.businessType} in this area. ${summary}`;
+  }
 
   if (config.isLiveMode) {
     const aiResult = await fetchAIExplanation({
@@ -447,14 +503,15 @@ export async function runLiveAnalysis(
 
   onStatus({ message: 'Analysis complete', progress: 100 });
 
-  const radiusKm = (sector.searchRadiusM / 1000).toFixed(1);
-  const intentSource = spec.classificationMeta?.source === 'llm' ? 'AI-interpreted' : 'locally-parsed';
+  const radiusKm = (searchRadiusM / 1000).toFixed(1);
+  const intentSource = spec.classificationMeta?.source === 'llm' ? 'AI-profiled' : 'locally-parsed';
+  const criteriaType = sector.id === 'dynamic' ? 'dynamically-generated' : 'template-based';
   return {
     result: {
       summary,
       business_type: spec.businessType,
       target_location: locationLabel,
-      methodology: `${intentSource} intent → Dynamic MCDA using ${finalLocations[0]?.criteria_breakdown.length || 0} sector-specific criteria scored from OpenStreetMap data within ${radiusKm}km radius.${isCoordinateAnchored ? ' Anchor-based analysis from provided coordinates.' : ''} Criteria include both positive and negative signals with direction-aware scoring. ${spec.constraints.length > 0 ? `${spec.constraints.length} spatial constraint(s) applied.` : ''} All scores are deterministic and evidence-backed.`,
+      methodology: `${intentSource} intent with ${criteriaType} criteria → MCDA using ${finalLocations[0]?.criteria_breakdown.length || 0} criteria scored from OpenStreetMap within ${radiusKm}km radius.${isCoordinateAnchored ? ' Anchor-based analysis from provided coordinates.' : ''} ${spec.constraints.length > 0 ? `${spec.constraints.length} spatial constraint(s) applied.` : ''} Feasibility: ${feasibility.overallQuality}. All scores are deterministic and evidence-backed.`,
       spec,
       locations: finalLocations,
       grounding_sources: [

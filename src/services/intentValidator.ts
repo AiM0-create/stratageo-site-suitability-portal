@@ -1,11 +1,8 @@
 /**
- * Intent Validator — Two-purpose validation module.
+ * Intent Validator — Validates LLM-extracted intent and legacy local classification.
  *
- * 1. validateLLMIntent(): Validates the LLM-extracted intent before
- *    it enters the deterministic analysis pipeline. (Stage A → Stage B gate)
- *
- * 2. validateClassification(): Legacy cross-validation guard for the
- *    local regex-based classifier (used as fallback when LLM is unavailable).
+ * 1. validateLLMIntent(): Validates LLM intent including profile + dynamic criteria.
+ * 2. validateClassification(): Legacy local classifier cross-validation (fallback).
  */
 
 import type { LLMIntent } from './intentSchema';
@@ -13,12 +10,13 @@ import { resolveSectorId } from './intentSchema';
 import { classifyBusinessType, type ClassificationResult } from './businessClassifier';
 
 // ═══════════════════════════════════════════════════════
-// Part 1: LLM Intent Validation (new — for LLM-first pipeline)
+// Part 1: LLM Intent Validation (profile-based)
 // ═══════════════════════════════════════════════════════
 
 export interface LLMIntentValidationResult {
   valid: boolean;
   sectorId: string | null;
+  hasDynamicCriteria: boolean;
   warnings: string[];
   errors: string[];
 }
@@ -27,13 +25,35 @@ export function validateLLMIntent(intent: LLMIntent): LLMIntentValidationResult 
   const warnings: string[] = [];
   const errors: string[] = [];
 
-  // 1. Sector must map to a known template
+  // 1. Sector mapping (fallback — not critical if dynamic criteria exist)
   const sectorId = resolveSectorId(intent.sector);
-  if (!sectorId) {
-    warnings.push(`Unknown sector "${intent.sector}" — will attempt local classification.`);
+  if (!sectorId && (!intent.osmCriteria || intent.osmCriteria.length < 3)) {
+    warnings.push(`Unknown sector "${intent.sector}" and insufficient dynamic criteria — will use local classifier.`);
   }
 
-  // 2. Geography checks
+  // 2. Dynamic criteria validation
+  const hasDynamicCriteria = Array.isArray(intent.osmCriteria) && intent.osmCriteria.length >= 3;
+  if (hasDynamicCriteria) {
+    let validCriteria = 0;
+    for (const c of intent.osmCriteria) {
+      if (c.name && Array.isArray(c.osmTags) && c.osmTags.length > 0 && c.direction) {
+        validCriteria++;
+      }
+    }
+    if (validCriteria < 3) {
+      warnings.push(`Only ${validCriteria} valid dynamic criteria (need at least 3).`);
+    }
+  }
+
+  // 3. Profile validation
+  if (intent.siteProfile) {
+    const p = intent.siteProfile;
+    if (p.searchRadiusM && (p.searchRadiusM < 100 || p.searchRadiusM > 50_000)) {
+      warnings.push(`Search radius ${p.searchRadiusM}m seems unusual — will clamp to 500-20000m.`);
+    }
+  }
+
+  // 4. Geography checks
   if (intent.anchorType === 'coordinate') {
     if (!intent.coordinates) {
       errors.push('anchorType is "coordinate" but no coordinates provided.');
@@ -50,17 +70,17 @@ export function validateLLMIntent(intent: LLMIntent): LLMIntentValidationResult 
   }
 
   if (intent.anchorType === 'none' && !intent.coordinates && !intent.locationName) {
-    errors.push('No location information extracted — neither coordinates nor city name.');
+    errors.push('No location information — neither coordinates nor city name.');
   }
 
-  // 3. Result count bounds
+  // 5. Result count bounds
   if (typeof intent.requestedResultCount !== 'number' || intent.requestedResultCount < 1) {
     warnings.push('Invalid requestedResultCount — defaulting to 3.');
   } else if (intent.requestedResultCount > 5) {
     warnings.push('requestedResultCount exceeds 5 — capping at 5.');
   }
 
-  // 4. Distance constraint sanity
+  // 6. Distance constraint sanity
   if (intent.radiusConstraints) {
     for (const rc of intent.radiusConstraints) {
       if (rc.distanceM <= 0) {
@@ -72,26 +92,18 @@ export function validateLLMIntent(intent: LLMIntent): LLMIntentValidationResult 
     }
   }
 
-  for (const ec of intent.exclusionCriteria) {
-    if (ec.distanceM != null && ec.distanceM <= 0) {
-      warnings.push(`Invalid exclusion distance for "${ec.name}": ${ec.distanceM}m.`);
-    }
-  }
-
-  // 5. Contradiction check
-  const positiveNames = new Set(intent.positiveCriteria.map(c => c.name.toLowerCase()));
-  for (const exc of intent.exclusionCriteria) {
-    if (positiveNames.has(exc.name.toLowerCase())) {
-      warnings.push(`"${exc.name}" in both positive and exclusion criteria.`);
-    }
-  }
-
-  // 6. Low-confidence ambiguity surfacing
+  // 7. Low-confidence surfacing
   if (intent.confidence === 'low' && intent.ambiguities && intent.ambiguities.length > 0) {
     warnings.push(`Low confidence. Ambiguities: ${intent.ambiguities.join('; ')}`);
   }
 
-  return { valid: errors.length === 0, sectorId, warnings, errors };
+  return {
+    valid: errors.length === 0,
+    sectorId,
+    hasDynamicCriteria,
+    warnings,
+    errors,
+  };
 }
 
 
@@ -115,11 +127,11 @@ const CONTRADICTIONS: Record<string, string[]> = {
     'hospital', 'clinic', 'diagnostic', 'pharmacy',
     'coworking', 'co-working', 'shared office',
     'real estate', 'mixed-use', 'apartment complex', 'township',
-    'wind farm', 'renewable energy', 'data center',
+    'wind farm', 'renewable energy', 'data center', 'cold chain',
   ],
   preschool: [
     'solar farm', 'solar plant', 'warehouse', 'logistics',
-    'ev charging', 'charging station', 'data center',
+    'ev charging', 'charging station', 'data center', 'cold chain',
   ],
   ev: [
     'solar farm', 'solar plant', 'warehouse', 'preschool', 'school',

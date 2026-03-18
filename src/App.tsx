@@ -88,9 +88,10 @@ const App: React.FC = () => {
       const locationDesc = parsedSpec.geography.anchor && !parsedSpec.geography.city
         ? `near ${parsedSpec.geography.anchor.lat.toFixed(4)}, ${parsedSpec.geography.anchor.lng.toFixed(4)}`
         : `in ${parsedSpec.geography.city || '(no location detected)'}`;
-      const source = parsedSpec.classificationMeta?.source === 'llm' ? 'via AI intent' : 'local classifier';
+      const source = parsedSpec.classificationMeta?.source === 'llm' ? 'AI-profiled' : 'local classifier';
       const conf = parsedSpec.classificationMeta?.confidence || parsedSpec.confidence;
-      const specMsg = `Understood: ${parsedSpec.businessType} ${locationDesc} (${source}, ${conf} confidence)` +
+      const criteriaCount = analysisResult.result.locations[0]?.criteria_breakdown.length || 0;
+      const specMsg = `Understood: ${parsedSpec.businessType} ${locationDesc} (${source}, ${conf} confidence, ${criteriaCount} criteria)` +
         (parsedSpec.constraints.length > 0 ? ` with ${parsedSpec.constraints.length} constraint(s)` : '') +
         csvNote;
 
