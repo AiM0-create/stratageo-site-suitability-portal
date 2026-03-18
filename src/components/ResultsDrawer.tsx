@@ -14,6 +14,9 @@ interface ResultsDrawerProps {
   onWeightChange: (name: string, weight: number) => void;
   heatmapType: HeatmapType;
   onHeatmapChange: (type: HeatmapType) => void;
+  showBuffers?: boolean;
+  onToggleBuffers?: () => void;
+  csvPointCount?: number;
 }
 
 const ComparisonChart: React.FC<{ locations: LocationData[] }> = ({ locations }) => {
@@ -74,6 +77,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   onWeightChange,
   heatmapType,
   onHeatmapChange,
+  showBuffers,
+  onToggleBuffers,
+  csvPointCount = 0,
 }) => {
   const [expandedLoc, setExpandedLoc] = useState<string | null>(locations[0]?.name ?? null);
   const [showAssumptions, setShowAssumptions] = useState(false);
@@ -140,6 +146,29 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                         </span>
                       ))}
                     </div>
+                  </div>
+                )}
+                {spec.userPointConstraints && spec.userPointConstraints.length > 0 && (
+                  <div className="assumption-section">
+                    <span className="assumption-label">CSV Spatial Constraints</span>
+                    {spec.userPointConstraints.map((upc, i) => (
+                      <div key={i} className="constraint-panel">
+                        <div className="constraint-panel-row">
+                          <span className={`constraint-chip ${upc.mode === 'exclude' ? 'exclusion' : 'proximity'}`}>
+                            {upc.mode === 'exclude' ? '✕ Excluding' : upc.mode === 'include' ? '✓ Including' : '~ Penalizing'} areas within {(upc.radiusM / 1000).toFixed(1)}km of {upc.label}
+                          </span>
+                        </div>
+                        <div className="constraint-panel-meta">
+                          Radius: {(upc.radiusM / 1000).toFixed(1)}km ({upc.radiusSource === 'user' ? 'user-specified' : 'auto-inferred'})
+                          {onToggleBuffers && (
+                            <label className="buffer-toggle">
+                              <input type="checkbox" checked={showBuffers} onChange={onToggleBuffers} />
+                              Show buffers on map
+                            </label>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
                 {spec.positiveCriteria.length > 0 && (

@@ -530,6 +530,60 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   color: var(--gray-700); cursor: pointer;
 }
 
+/* ========== CSV UPLOAD ========== */
+.csv-upload-btn {
+  background: none; border: none; padding: 4px 6px;
+  color: var(--gray-500); cursor: pointer; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.csv-upload-btn:hover { color: var(--blue-600); background: var(--blue-50); }
+.csv-upload-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.csv-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; margin: 0 10px 4px 10px;
+  background: #fff7ed; border: 1px solid #fed7aa; border-radius: 20px;
+  font-size: 11px; color: #9a3412;
+}
+.csv-chip-icon { font-size: 13px; }
+.csv-chip-clear {
+  background: none; border: none; cursor: pointer;
+  color: #9a3412; font-size: 14px; font-weight: 700;
+  padding: 0 2px; line-height: 1;
+}
+.csv-chip-clear:hover { color: #ef4444; }
+
+/* User point markers on map */
+.user-marker-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #f97316; border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+/* ========== CONSTRAINT PANEL ========== */
+.constraint-panel {
+  background: var(--gray-50); border-radius: 6px;
+  padding: 6px 8px; margin: 4px 0;
+}
+.constraint-panel-row { margin-bottom: 4px; }
+.constraint-panel-meta {
+  font-size: 10px; color: var(--gray-500);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.buffer-toggle {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--gray-600); cursor: pointer;
+}
+.buffer-toggle input { width: 12px; height: 12px; margin: 0; cursor: pointer; }
+
+/* ========== FEASIBILITY WARNING ========== */
+.feasibility-warning {
+  background: #fffbeb; border: 1px solid #fcd34d;
+  border-radius: 6px; padding: 8px 10px; margin: 8px 0;
+  font-size: 11px; color: #92400e;
+}
+
 /* ========== RESPONSIVE ========== */
 @media (max-width: 640px) {
   .assistant { max-width: 96%; bottom: 8px; }

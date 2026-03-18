@@ -5,6 +5,8 @@ const defaultSpec: AnalysisSpec = {
   sectorId: '',
   geography: { city: '' },
   constraints: [],
+  userPointConstraints: [],
+  hasUserPointReference: false,
   positiveCriteria: [],
   negativeCriteria: [],
   inferredWeights: {},

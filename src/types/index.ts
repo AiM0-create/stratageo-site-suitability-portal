@@ -1,3 +1,20 @@
+// ─── User-supplied point (from CSV upload) ───
+
+export interface UserPoint {
+  lat: number;
+  lng: number;
+  name?: string;
+  category?: string;
+}
+
+export interface UserPointConstraint {
+  points: UserPoint[];
+  mode: 'exclude' | 'include' | 'penalty';
+  radiusM: number;
+  radiusSource: 'user' | 'inferred';
+  label: string;
+}
+
 // ─── Analysis Specification (output of prompt parser) ───
 
 export interface AnalysisSpec {
@@ -10,6 +27,8 @@ export interface AnalysisSpec {
     anchor?: { lat: number; lng: number; label?: string };
   };
   constraints: SpatialConstraint[];
+  userPointConstraints: UserPointConstraint[];
+  hasUserPointReference: boolean;
   positiveCriteria: string[];
   negativeCriteria: string[];
   inferredWeights: Record<string, number>;

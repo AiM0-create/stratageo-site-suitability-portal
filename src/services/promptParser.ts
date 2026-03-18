@@ -288,6 +288,51 @@ function extractPriorities(text: string, sector: SectorTemplate): { positive: st
   return { positive, negative, weights };
 }
 
+// ─── User-point reference detection ───
+
+export interface UserPointIntent {
+  detected: boolean;
+  mode: 'exclude' | 'include' | 'penalty';
+  radiusM?: number;
+}
+
+const USER_POINT_PHRASES = [
+  'these locations', 'uploaded points', 'uploaded locations', 'my csv',
+  'csv locations', 'my stores', 'my locations', 'existing stores',
+  'existing locations', 'given coordinates', 'given points', 'these points',
+  'these coordinates', 'provided locations', 'our stores', 'our locations',
+  'my branches', 'our branches', 'competitor locations', 'their stores',
+];
+
+export function parseUserPointIntent(text: string): UserPointIntent {
+  const lower = text.toLowerCase();
+
+  // Check if user references uploaded points
+  const hasReference = USER_POINT_PHRASES.some(phrase => lower.includes(phrase));
+  if (!hasReference) {
+    return { detected: false, mode: 'exclude' };
+  }
+
+  // Determine mode: exclude, include, or penalty
+  const isExclude = /(?:not\s+within|away\s+from|avoid|outside|at\s+least\s+\d|beyond)\s/.test(lower);
+  const isInclude = /(?:within|near|close\s+to|around|inside)\s/.test(lower) && !isExclude;
+
+  // Extract radius if specified
+  let radiusM: number | undefined;
+  const radiusMatch = lower.match(
+    /(?:not\s+within|within|at\s+least|beyond|away\s+from.*?)\s+(\d+(?:\.\d+)?)\s*(?:km|m|meters?|kilometres?|kilometers?)/i,
+  );
+  if (radiusMatch) {
+    const value = parseFloat(radiusMatch[1]);
+    const isKm = /km|kilomet/.test(radiusMatch[0]);
+    radiusM = isKm ? value * 1000 : value;
+  }
+
+  const mode = isExclude ? 'exclude' : isInclude ? 'include' : 'penalty';
+
+  return { detected: true, mode, radiusM };
+}
+
 // ─── Result count extraction ───
 
 function extractResultCount(text: string): number {
@@ -335,7 +380,10 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
   // 7. Extract result count
   const resultCount = extractResultCount(text);
 
-  // 8. Build notes
+  // 8. Detect user-point references
+  const userPointIntent = parseUserPointIntent(text);
+
+  // 9. Build notes
   if (constraints.length > 0) {
     notes.push(`Detected ${constraints.length} spatial constraint(s).`);
   }
@@ -346,6 +394,9 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
     notes.push('Some constraint targets could not be mapped to OSM tags and may not be checkable.');
     confidence = 'medium';
   }
+  if (userPointIntent.detected) {
+    notes.push(`Detected reference to user-supplied locations (mode: ${userPointIntent.mode}${userPointIntent.radiusM ? `, radius: ${(userPointIntent.radiusM / 1000).toFixed(1)}km` : ''}).`);
+  }
 
   return {
     businessType,
@@ -355,6 +406,8 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
       anchor: coords || undefined,
     },
     constraints,
+    userPointConstraints: [],
+    hasUserPointReference: userPointIntent.detected,
     positiveCriteria: positive,
     negativeCriteria: negative,
     inferredWeights: weights,
@@ -378,6 +431,8 @@ export function parseChipInput(businessType: string, city: string): AnalysisSpec
     sectorId: sector.id,
     geography: { city },
     constraints: [],
+    userPointConstraints: [],
+    hasUserPointReference: false,
     positiveCriteria: [],
     negativeCriteria: [],
     inferredWeights: weights,

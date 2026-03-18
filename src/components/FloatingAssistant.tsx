@@ -15,6 +15,9 @@ interface FloatingAssistantProps {
   drawerOpen: boolean;
   resultCount: number;
   onResultCountChange: (count: number) => void;
+  onCSVUpload: (file: File) => void;
+  onClearCSV: () => void;
+  csvPointCount: number;
 }
 
 const SCENARIOS = [
@@ -34,6 +37,9 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   onToggleResults,
   drawerOpen,
   resultCount,
+  onCSVUpload,
+  onClearCSV,
+  csvPointCount,
   onResultCountChange,
 }) => {
   const [expanded, setExpanded] = useState(true);
@@ -42,6 +48,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   const [selectedSector, setSelectedSector] = useState('');
   const [city, setCity] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (expanded && scrollRef.current) {
@@ -218,6 +225,15 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
             </label>
           </div>
 
+          {/* CSV chip */}
+          {csvPointCount > 0 && (
+            <div className="csv-chip">
+              <span className="csv-chip-icon">&#128205;</span>
+              <span>{csvPointCount} location{csvPointCount !== 1 ? 's' : ''} loaded</span>
+              <button className="csv-chip-clear" onClick={onClearCSV} title="Clear CSV data">&times;</button>
+            </div>
+          )}
+
           {/* Input bar */}
           <div className="assistant-input">
             <button
@@ -232,12 +248,34 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 }
               </svg>
             </button>
+            {/* CSV upload button */}
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onCSVUpload(file);
+                e.target.value = '';
+              }}
+            />
+            <button
+              className="csv-upload-btn"
+              onClick={() => csvInputRef.current?.click()}
+              title="Upload CSV with lat/lon locations"
+              disabled={isLoading}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+              </svg>
+            </button>
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="e.g. Cafe in Bengaluru near metro, low competition"
+              placeholder={csvPointCount > 0 ? "e.g. Cafe in Bengaluru, not within 3km of these locations" : "e.g. Cafe in Bengaluru near metro, low competition"}
               className="assistant-text-input"
               disabled={isLoading}
             />

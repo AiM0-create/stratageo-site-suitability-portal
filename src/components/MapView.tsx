@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import type { LocationData, HeatmapType } from '../types';
+import type { LocationData, HeatmapType, UserPoint } from '../types';
 import { config } from '../config';
 
 declare const L: any;
@@ -10,6 +10,9 @@ interface MapViewProps {
   onSelectLocation: (location: LocationData) => void;
   onDeselectAll: () => void;
   heatmapType: HeatmapType;
+  userPoints?: UserPoint[];
+  showBuffers?: boolean;
+  bufferRadiusM?: number;
 }
 
 const getMarkerIcon = (rank: number, isSelected: boolean, excluded: boolean) => {
@@ -33,11 +36,15 @@ export const MapView: React.FC<MapViewProps> = ({
   onSelectLocation,
   onDeselectAll,
   heatmapType,
+  userPoints = [],
+  showBuffers = true,
+  bufferRadiusM,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any>(null);
   const heatRef = useRef<any>(null);
+  const userLayerRef = useRef<any>(null);
 
   // Initialize map
   useEffect(() => {
@@ -178,24 +185,102 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, [locations, selectedLocations, onSelectLocation, heatmapType]);
 
+  // User-uploaded points layer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (userLayerRef.current) {
+      map.removeLayer(userLayerRef.current);
+      userLayerRef.current = null;
+    }
+
+    if (userPoints.length === 0) return;
+
+    const group = L.layerGroup();
+
+    const userIcon = L.divIcon({
+      className: 'sg-marker',
+      html: `<div class="user-marker-dot"></div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+
+    for (const pt of userPoints) {
+      const lat = Number(pt.lat);
+      const lng = Number(pt.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const marker = L.marker([lat, lng], { icon: userIcon, interactive: false });
+      if (pt.name) {
+        marker.bindTooltip(pt.name, { direction: 'top', offset: [0, -8], className: 'sg-tooltip-container' });
+      }
+      group.addLayer(marker);
+
+      // Buffer circles
+      if (showBuffers && bufferRadiusM) {
+        try {
+          L.circle([lat, lng], {
+            radius: bufferRadiusM,
+            color: '#ef4444',
+            fillColor: '#ef4444',
+            fillOpacity: 0.05,
+            weight: 1,
+            dashArray: '4 3',
+            interactive: false,
+          }).addTo(group);
+        } catch { /* skip */ }
+      }
+    }
+
+    group.addTo(map);
+    userLayerRef.current = group;
+
+    // If no analysis locations yet, fit to user points
+    if (locations.length === 0 && userPoints.length > 0) {
+      const pts = userPoints
+        .map(p => [Number(p.lat), Number(p.lng)] as [number, number])
+        .filter(c => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+      if (pts.length > 0) {
+        map.flyToBounds(pts, { padding: [60, 60], animate: true, duration: 1 });
+      }
+    }
+  }, [userPoints, showBuffers, bufferRadiusM, locations.length]);
+
   return (
     <div className="sg-map-wrapper">
       <div ref={containerRef} className="sg-map" id="map-container" />
-      {locations.length > 0 && (
+      {(locations.length > 0 || userPoints.length > 0) && (
         <div className="sg-map-legend">
           <div className="sg-legend-title">Map Legend</div>
-          <div className="sg-legend-item">
-            <span className="sg-legend-dot" style={{ background: '#059669' }} /> Candidate
-          </div>
-          <div className="sg-legend-item">
-            <span className="sg-legend-dot" style={{ background: '#1d4ed8' }} /> Selected
-          </div>
-          <div className="sg-legend-item">
-            <span className="sg-legend-dot" style={{ background: '#94a3b8' }} /> Excluded
-          </div>
-          <div className="sg-legend-item">
-            <span className="sg-legend-circle" /> Search Radius
-          </div>
+          {locations.length > 0 && (
+            <>
+              <div className="sg-legend-item">
+                <span className="sg-legend-dot" style={{ background: '#059669' }} /> Candidate
+              </div>
+              <div className="sg-legend-item">
+                <span className="sg-legend-dot" style={{ background: '#1d4ed8' }} /> Selected
+              </div>
+              <div className="sg-legend-item">
+                <span className="sg-legend-dot" style={{ background: '#94a3b8' }} /> Excluded
+              </div>
+              <div className="sg-legend-item">
+                <span className="sg-legend-circle" /> Search Radius
+              </div>
+            </>
+          )}
+          {userPoints.length > 0 && (
+            <>
+              <div className="sg-legend-item">
+                <span className="sg-legend-dot" style={{ background: '#f97316' }} /> User Points
+              </div>
+              {showBuffers && bufferRadiusM && (
+                <div className="sg-legend-item">
+                  <span className="sg-legend-circle" style={{ borderColor: '#ef4444' }} /> Buffer Zone
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

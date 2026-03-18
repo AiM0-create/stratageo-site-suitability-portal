@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, HeatmapType } from './types';
+import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, HeatmapType, UserPoint } from './types';
 import { config } from './config';
 import { runDemoAnalysis, runLiveAnalysis } from './services/analysisService';
 import { recalculateWithWeights } from './services/mcdaEngine';
 import { parsePrompt } from './services/promptParser';
+import { parseCSV } from './services/csvParser';
 import { TopBar } from './components/TopBar';
 import { MapView } from './components/MapView';
 import { FloatingAssistant } from './components/FloatingAssistant';
@@ -26,6 +27,8 @@ const App: React.FC = () => {
   const [methodologyOpen, setMethodologyOpen] = useState(false);
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([]);
   const [resultCount, setResultCount] = useState(3);
+  const [userPoints, setUserPoints] = useState<UserPoint[]>([]);
+  const [showBuffers, setShowBuffers] = useState(true);
 
   const locations = useMemo(() => {
     if (!result) return [];
@@ -35,6 +38,33 @@ const App: React.FC = () => {
   const selectedRecalculated = useMemo(() => {
     return locations.filter(loc => selectedLocations.some(sl => sl.name === loc.name));
   }, [locations, selectedLocations]);
+
+  const handleCSVUpload = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const result = parseCSV(text);
+
+      if (result.errors.length > 0) {
+        setError(result.errors.join(' '));
+        setMessages(prev => [...prev, { role: 'assistant' as const, text: `CSV Error: ${result.errors.join(' ')}` }]);
+        return;
+      }
+
+      setUserPoints(result.points);
+      const msg = `Loaded ${result.points.length} location(s) from CSV.${result.warnings.length > 0 ? ' ' + result.warnings.join(' ') : ''} These points will be used as spatial constraints in your next analysis.`;
+      setMessages(prev => [...prev, { role: 'assistant' as const, text: msg }]);
+    };
+    reader.onerror = () => {
+      setError('Failed to read CSV file.');
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const handleClearCSV = useCallback(() => {
+    setUserPoints([]);
+    setMessages(prev => [...prev, { role: 'assistant' as const, text: 'CSV locations cleared.' }]);
+  }, []);
 
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
     setIsLoading(true);
@@ -51,15 +81,17 @@ const App: React.FC = () => {
 
     try {
       const parsedSpec = parsePrompt(rawPrompt);
+      const csvNote = userPoints.length > 0 ? ` with ${userPoints.length} CSV point(s)` : '';
       const specMsg = `Understood: ${parsedSpec.businessType} in ${parsedSpec.geography.city || '(no city detected)'}` +
         (parsedSpec.constraints.length > 0 ? ` with ${parsedSpec.constraints.length} constraint(s)` : '') +
+        csvNote +
         (parsedSpec.parsingNotes.length > 0 ? `. ${parsedSpec.parsingNotes[0]}` : '');
 
       setMessages(prev => [...prev, { role: 'assistant' as const, text: specMsg }]);
 
       const analysisResult = config.isDemoMode
         ? await runDemoAnalysis(rawPrompt, setAnalysisStatus)
-        : await runLiveAnalysis(rawPrompt, resultCount, setAnalysisStatus);
+        : await runLiveAnalysis(rawPrompt, resultCount, setAnalysisStatus, userPoints.length > 0 ? userPoints : undefined);
 
       setResult(analysisResult.result);
       setSpec(analysisResult.spec);
@@ -89,7 +121,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [resultCount]);
+  }, [resultCount, userPoints]);
 
   const handleSelectLocation = useCallback((location: LocationData) => {
     const lat = Number(location.lat);
@@ -211,6 +243,9 @@ const App: React.FC = () => {
         onSelectLocation={handleSelectLocation}
         onDeselectAll={handleDeselectAll}
         heatmapType={heatmapType}
+        userPoints={userPoints}
+        showBuffers={showBuffers}
+        bufferRadiusM={spec?.userPointConstraints?.[0]?.radiusM}
       />
 
       <TopBar
@@ -233,6 +268,9 @@ const App: React.FC = () => {
         drawerOpen={drawerOpen}
         resultCount={resultCount}
         onResultCountChange={handleResultCountChange}
+        onCSVUpload={handleCSVUpload}
+        onClearCSV={handleClearCSV}
+        csvPointCount={userPoints.length}
       />
 
       {result && (
@@ -248,6 +286,9 @@ const App: React.FC = () => {
           onWeightChange={handleWeightChange}
           heatmapType={heatmapType}
           onHeatmapChange={setHeatmapType}
+          showBuffers={showBuffers}
+          onToggleBuffers={() => setShowBuffers(prev => !prev)}
+          csvPointCount={userPoints.length}
         />
       )}
 

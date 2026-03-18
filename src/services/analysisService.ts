@@ -11,14 +11,15 @@
  * 7. Optional AI explanation enhancement
  */
 
-import type { AnalysisResult, AnalysisSpec, AnalysisStatus, LocationData } from '../types';
+import type { AnalysisResult, AnalysisSpec, AnalysisStatus, LocationData, UserPoint, UserPointConstraint } from '../types';
 import { config } from '../config';
-import { parsePrompt } from './promptParser';
+import { parsePrompt, parseUserPointIntent } from './promptParser';
 import { getSectorById } from './sectorTemplates';
 import { geocodeLocation, fetchOSMData } from './osmService';
-import { scoreNeighborhood, computeMCDAScore, checkExclusions, generateReasoning, generateSummary } from './mcdaEngine';
+import { scoreNeighborhood, computeMCDAScore, checkExclusions, addUserPointCriteria, generateReasoning, generateSummary } from './mcdaEngine';
 import { fetchAIExplanation, fetchAIIntent } from './aiClient';
 import { findDemoScenario, getDefaultDemoScenario } from '../data/demoScenarios';
+import { inferRadius } from './radiusInference';
 
 // ─── Default neighborhoods by city ───
 
@@ -83,11 +84,32 @@ export async function runLiveAnalysis(
   rawPrompt: string,
   resultCount: number,
   onStatus: (status: AnalysisStatus) => void,
+  userPoints?: UserPoint[],
 ): Promise<{ result: AnalysisResult; spec: AnalysisSpec }> {
   // Step 1: Parse prompt
   onStatus({ message: 'Understanding your query...', progress: 5 });
   const spec = parsePrompt(rawPrompt);
   spec.resultCount = Math.min(5, Math.max(1, resultCount));
+
+  // Step 1b: Build user-point constraints if CSV data provided
+  if (userPoints && userPoints.length > 0) {
+    const intent = parseUserPointIntent(rawPrompt);
+    const radiusInfo = intent.radiusM
+      ? { radiusM: intent.radiusM, reason: `User specified ${(intent.radiusM / 1000).toFixed(1)}km radius.` }
+      : inferRadius(spec.sectorId, spec.geography.city);
+
+    const upc: UserPointConstraint = {
+      points: userPoints,
+      mode: intent.detected ? intent.mode : 'exclude',
+      radiusM: radiusInfo.radiusM,
+      radiusSource: intent.radiusM ? 'user' : 'inferred',
+      label: `${userPoints.length} uploaded location(s)`,
+    };
+    spec.userPointConstraints = [upc];
+    spec.parsingNotes.push(
+      `CSV: ${userPoints.length} user points loaded. Mode: ${upc.mode}, radius: ${(upc.radiusM / 1000).toFixed(1)}km (${upc.radiusSource}). ${radiusInfo.reason}`,
+    );
+  }
 
   const sector = getSectorById(spec.sectorId);
   const { city } = spec.geography;
@@ -128,9 +150,18 @@ export async function runLiveAnalysis(
     try {
       const osmResult = await fetchOSMData(coords.lat, coords.lng, sector, spec.constraints);
 
-      const criteria = scoreNeighborhood(osmResult.signals, sector, spec);
+      let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
+
+      // Add user-point-derived criteria (soft proximity scoring)
+      if (spec.userPointConstraints.length > 0) {
+        criteria = addUserPointCriteria(criteria, coords.lat, coords.lng, spec.userPointConstraints);
+      }
+
       const mcdaScore = computeMCDAScore(criteria);
-      const exclusions = checkExclusions(osmResult.signals, spec.constraints, sector.searchRadiusM);
+      const exclusions = checkExclusions(
+        osmResult.signals, spec.constraints, sector.searchRadiusM,
+        coords.lat, coords.lng, spec.userPointConstraints,
+      );
       const excluded = exclusions.some(e => !e.passed);
 
       const reasoning = generateReasoning(
@@ -172,6 +203,35 @@ export async function runLiveAnalysis(
   });
 
   const finalLocations = analyzedLocations.slice(0, spec.resultCount);
+
+  // Step 4b: Feasibility check
+  const nonExcludedCount = finalLocations.filter(l => !l.excluded).length;
+  if (nonExcludedCount === 0 && spec.userPointConstraints.length > 0) {
+    const upc = spec.userPointConstraints[0];
+    const radiusKm = (upc.radiusM / 1000).toFixed(1);
+    onStatus({ message: 'Analysis complete — no feasible locations found', progress: 100 });
+    return {
+      result: {
+        summary: `No suitable locations found given current constraints. All ${analyzedLocations.length} candidate areas fall within the ${radiusKm}km ${upc.mode === 'exclude' ? 'exclusion' : 'inclusion'} zone of the ${upc.points.length} uploaded location(s). Try reducing the radius or relaxing constraints.`,
+        business_type: spec.businessType,
+        target_location: city,
+        methodology: `Attempted to screen ${analyzedLocations.length} areas but all were excluded by user-supplied spatial constraints (${radiusKm}km ${upc.mode} buffer around ${upc.points.length} points).`,
+        spec,
+        locations: finalLocations, // still return them so user can see what was excluded
+        grounding_sources: [
+          { title: 'OpenStreetMap / Overpass API', uri: 'https://overpass-api.de/', retrievedAt: new Date().toISOString(), reliability: 'Varies by region' },
+          { title: 'User-supplied CSV data', uri: 'user-upload', retrievedAt: new Date().toISOString(), reliability: 'User-provided' },
+        ],
+      },
+      spec,
+    };
+  }
+
+  if (nonExcludedCount < spec.resultCount && spec.userPointConstraints.length > 0) {
+    spec.parsingNotes.push(
+      `Only ${nonExcludedCount} of ${spec.resultCount} requested locations passed all constraints. Showing all available results.`,
+    );
+  }
 
   // Step 5: Optional AI enhancement
   onStatus({ message: 'Generating insights...', progress: 85 });

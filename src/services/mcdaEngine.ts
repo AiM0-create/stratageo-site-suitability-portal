@@ -9,9 +9,10 @@
  * - Evidence-tagged justifications
  */
 
-import type { MCDACriteria, ExclusionCheck, LocationData, AnalysisSpec, SpatialConstraint } from '../types';
+import type { MCDACriteria, ExclusionCheck, LocationData, AnalysisSpec, SpatialConstraint, UserPointConstraint } from '../types';
 import type { CriterionTemplate, SectorTemplate } from './sectorTemplates';
 import { getSectorById } from './sectorTemplates';
+import { buildUserPointExclusions, scoreUserPointProximity } from './userPointManager';
 
 interface OsmSignals {
   [key: string]: number;
@@ -105,6 +106,23 @@ export function scoreNeighborhood(
   return criteria;
 }
 
+/**
+ * Score neighborhood with user-point proximity as additional criterion.
+ * Call this after scoreNeighborhood() to append user-point criteria.
+ */
+export function addUserPointCriteria(
+  criteria: MCDACriteria[],
+  candidateLat: number,
+  candidateLng: number,
+  userPointConstraints: UserPointConstraint[],
+): MCDACriteria[] {
+  for (const upc of userPointConstraints) {
+    if (upc.points.length === 0) continue;
+    criteria.push(scoreUserPointProximity(candidateLat, candidateLng, upc));
+  }
+  return criteria;
+}
+
 // ─── Compute weighted MCDA score ───
 
 export function computeMCDAScore(criteria: MCDACriteria[]): number {
@@ -124,9 +142,13 @@ export function checkExclusions(
   osmSignals: OsmSignals,
   constraints: SpatialConstraint[],
   radiusM: number,
+  candidateLat?: number,
+  candidateLng?: number,
+  userPointConstraints?: UserPointConstraint[],
 ): ExclusionCheck[] {
   const checks: ExclusionCheck[] = [];
 
+  // OSM-based exclusions
   for (const constraint of constraints) {
     if (constraint.type !== 'exclusion' && !constraint.hardRule) continue;
 
@@ -134,7 +156,6 @@ export function checkExclusions(
     const count = osmSignals[signalKey] ?? 0;
 
     if (constraint.direction === 'away') {
-      // Exclusion: should NOT have these features nearby
       const passed = count === 0;
       checks.push({
         rule: constraint.label,
@@ -145,7 +166,6 @@ export function checkExclusions(
         evidenceBasis: 'osm-observed',
       });
     } else if (constraint.direction === 'near' && constraint.hardRule) {
-      // Hard proximity: MUST have these features nearby
       const passed = count > 0;
       checks.push({
         rule: constraint.label,
@@ -155,6 +175,15 @@ export function checkExclusions(
           : `No ${constraint.target.toLowerCase()} found within search radius — proximity requirement not met.`,
         evidenceBasis: 'osm-observed',
       });
+    }
+  }
+
+  // User-point-based exclusions (haversine distance checks)
+  if (candidateLat != null && candidateLng != null && userPointConstraints) {
+    for (const upc of userPointConstraints) {
+      if (upc.mode === 'penalty') continue; // soft penalty, not exclusion
+      const upcExclusions = buildUserPointExclusions(candidateLat, candidateLng, upc);
+      checks.push(...upcExclusions);
     }
   }
 
