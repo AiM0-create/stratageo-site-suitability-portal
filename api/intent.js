@@ -133,11 +133,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
   }
 
+  const startTime = Date.now();
+
   try {
     const { prompt } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: 'Missing prompt' });
     }
+
+    console.log(`[intent] Calling OpenAI gpt-4o-mini for: "${prompt.substring(0, 100)}..."`);
 
     const response = await openai.responses.create({
       model: 'gpt-4o-mini',
@@ -154,13 +158,33 @@ export default async function handler(req, res) {
       max_output_tokens: 1200,
     });
 
-    const parsed = JSON.parse(response.output_text);
+    const elapsed = Date.now() - startTime;
+    let parsed;
+    try {
+      parsed = JSON.parse(response.output_text);
+    } catch (parseErr) {
+      console.error(`[intent] OpenAI returned invalid JSON in ${elapsed}ms:`, response.output_text?.substring(0, 200));
+      res.writeHead(502, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        error: 'OpenAI returned invalid JSON',
+        detail: response.output_text?.substring(0, 200),
+        latencyMs: elapsed,
+      }));
+    }
+
+    console.log(`[intent] SUCCESS in ${elapsed}ms: ${parsed.businessType} / ${parsed.sector} (${parsed.confidence})`);
 
     res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(parsed));
   } catch (error) {
-    console.error('Intent parsing error:', error);
+    const elapsed = Date.now() - startTime;
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[intent] FAILED in ${elapsed}ms:`, msg);
     res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ error: 'Intent parsing failed' }));
+    return res.end(JSON.stringify({
+      error: 'Intent parsing failed',
+      detail: msg,
+      latencyMs: elapsed,
+    }));
   }
 }

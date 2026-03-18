@@ -24,7 +24,7 @@ export default function handler(req, res) {
     version: '3.0',
     openaiKeyConfigured: !!process.env.OPENAI_API_KEY,
     nodeVersion: process.version,
-    endpoints: ['/api/health', '/api/intent', '/api/explain'],
+    endpoints: ['/api/health', '/api/intent', '/api/explain', '/api/test-openai'],
   };
 
   res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
