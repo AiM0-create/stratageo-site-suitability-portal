@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, HeatmapType, UserPoint } from './types';
 import { config } from './config';
 import { runDemoAnalysis, runLiveAnalysis } from './services/analysisService';
@@ -33,6 +33,52 @@ const App: React.FC = () => {
   const [resultCount, setResultCount] = useState(3);
   const [userPoints, setUserPoints] = useState<UserPoint[]>([]);
   const [showBuffers, setShowBuffers] = useState(true);
+
+  // ─── Results cache: preserve results across session switches ───
+  interface CachedResults {
+    result: AnalysisResult;
+    spec: AnalysisSpec;
+    weights: Record<string, number>;
+    userPoints: UserPoint[];
+  }
+  const resultsCacheRef = useRef<Map<string, CachedResults>>(new Map());
+  const prevSessionIdRef = useRef<string>(currentSession.id);
+
+  // When session changes, cache old results and restore new ones
+  useEffect(() => {
+    if (prevSessionIdRef.current === currentSession.id) return;
+
+    // Cache current results under the old session ID
+    if (result && spec) {
+      resultsCacheRef.current.set(prevSessionIdRef.current, {
+        result,
+        spec,
+        weights: customWeights,
+        userPoints,
+      });
+    }
+
+    // Restore cached results for the new session (if any)
+    const cached = resultsCacheRef.current.get(currentSession.id);
+    if (cached) {
+      setResult(cached.result);
+      setSpec(cached.spec);
+      setCustomWeights(cached.weights);
+      setUserPoints(cached.userPoints);
+      setDrawerOpen(true);
+    } else {
+      setResult(null);
+      setSpec(null);
+      setCustomWeights({});
+      setUserPoints([]);
+      setDrawerOpen(false);
+    }
+
+    setSelectedLocations([]);
+    setError(null);
+    setHeatmapType(null);
+    prevSessionIdRef.current = currentSession.id;
+  }, [currentSession.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive messages from session for display
   const messages = useMemo(() =>
@@ -194,7 +240,29 @@ const App: React.FC = () => {
     }
   }, [addMessage]);
 
+  const handleSwitchSession = useCallback((id: string) => {
+    // Cache current results before switching
+    if (result && spec) {
+      resultsCacheRef.current.set(currentSession.id, {
+        result,
+        spec,
+        weights: customWeights,
+        userPoints,
+      });
+    }
+    switchSession(id);
+  }, [switchSession, result, spec, customWeights, userPoints, currentSession.id]);
+
   const handleNewAnalysis = useCallback(() => {
+    // Cache current results before switching
+    if (result && spec) {
+      resultsCacheRef.current.set(currentSession.id, {
+        result,
+        spec,
+        weights: customWeights,
+        userPoints,
+      });
+    }
     setResult(null);
     setSpec(null);
     setSelectedLocations([]);
@@ -204,7 +272,7 @@ const App: React.FC = () => {
     setDrawerOpen(false);
     setUserPoints([]);
     newSession();
-  }, [newSession]);
+  }, [newSession, result, spec, customWeights, userPoints, currentSession.id]);
 
   const handleExportPDF = useCallback(async () => {
     if (!result || locations.length === 0) return;
@@ -295,7 +363,7 @@ const App: React.FC = () => {
         onNewAnalysis={handleNewAnalysis}
         sessions={sessionIndex.sessions}
         currentSessionId={currentSession.id}
-        onSwitchSession={switchSession}
+        onSwitchSession={handleSwitchSession}
       />
 
       <FloatingAssistant
