@@ -85,32 +85,15 @@ export async function checkBackendHealth(): Promise<{ ok: boolean; detail: strin
 export async function extractIntent(rawPrompt: string): Promise<LLMIntent | null> {
   const backendUrl = config.aiBackendUrl;
 
-  // Guard: no backend URL
+  // Guard: no backend URL = no GPT
   if (!backendUrl) {
-    const reason = 'GPT intent extraction SKIPPED: no backend URL configured (VITE_AI_BACKEND_URL is empty). Using local fallback.';
-    console.warn(`[Stratageo] ${reason}`);
-    setDiagnostics({
-      attempted: false,
-      succeeded: false,
-      source: 'local_fallback',
-      backendUrl: '(not configured)',
-      failureReason: reason,
-      httpStatus: null,
-      responseTimeMs: null,
-      rawIntent: null,
-    });
-    return null;
-  }
-
-  // Guard: demo mode
-  if (config.isDemoMode) {
-    const reason = 'GPT intent extraction SKIPPED: app is in demo mode. Set VITE_APP_MODE=live to enable.';
+    const reason = 'GPT SKIPPED: no backend URL (VITE_AI_BACKEND_URL is empty).';
     console.warn(`[Stratageo] ${reason}`);
     setDiagnostics({
       attempted: false,
       succeeded: false,
       source: 'demo_mode',
-      backendUrl,
+      backendUrl: '(not configured)',
       failureReason: reason,
       httpStatus: null,
       responseTimeMs: null,

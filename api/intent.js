@@ -19,6 +19,12 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+/** Helper: send JSON with CORS headers on every path */
+function sendJSON(res, status, body) {
+  res.writeHead(status, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+  return res.end(JSON.stringify(body));
+}
+
 const SYSTEM_PROMPT = `You are a geospatial site-selection intent parser for Stratageo, a professional site suitability platform.
 
 Given ANY user query about locating a business, facility, or infrastructure project, extract a structured JSON object. You must handle ANY business type — retail, industrial, infrastructure, energy, social, commercial, or mixed.
@@ -120,17 +126,19 @@ NEVER default to "Cafe" or "Restaurant" unless the user explicitly mentions food
 If genuinely ambiguous, set confidence=low and list ambiguities. Do NOT guess.`;
 
 export default async function handler(req, res) {
+  // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(200, CORS_HEADERS);
     return res.end();
   }
 
+  // All error paths use sendJSON to guarantee CORS headers
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJSON(res, 405, { error: 'Method not allowed' });
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
+    return sendJSON(res, 500, { error: 'OPENAI_API_KEY not configured' });
   }
 
   const startTime = Date.now();
@@ -138,53 +146,49 @@ export default async function handler(req, res) {
   try {
     const { prompt } = req.body;
     if (!prompt) {
-      return res.status(400).json({ error: 'Missing prompt' });
+      return sendJSON(res, 400, { error: 'Missing prompt' });
     }
 
     console.log(`[intent] Calling OpenAI gpt-4o-mini for: "${prompt.substring(0, 100)}..."`);
 
-    const response = await openai.responses.create({
+    // Use the stable Chat Completions API (not the newer Responses API)
+    const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      input: [
+      messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ],
-      text: {
-        format: {
-          type: 'json_object',
-        },
-      },
+      response_format: { type: 'json_object' },
       temperature: 0.2,
-      max_output_tokens: 1200,
+      max_tokens: 1200,
     });
 
     const elapsed = Date.now() - startTime;
+    const rawText = response.choices?.[0]?.message?.content;
+
+    if (!rawText) {
+      console.error(`[intent] OpenAI returned empty content in ${elapsed}ms`);
+      return sendJSON(res, 502, { error: 'OpenAI returned empty response', latencyMs: elapsed });
+    }
+
     let parsed;
     try {
-      parsed = JSON.parse(response.output_text);
+      parsed = JSON.parse(rawText);
     } catch (parseErr) {
-      console.error(`[intent] OpenAI returned invalid JSON in ${elapsed}ms:`, response.output_text?.substring(0, 200));
-      res.writeHead(502, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
+      console.error(`[intent] OpenAI returned invalid JSON in ${elapsed}ms:`, rawText.substring(0, 200));
+      return sendJSON(res, 502, {
         error: 'OpenAI returned invalid JSON',
-        detail: response.output_text?.substring(0, 200),
+        detail: rawText.substring(0, 200),
         latencyMs: elapsed,
-      }));
+      });
     }
 
     console.log(`[intent] SUCCESS in ${elapsed}ms: ${parsed.businessType} / ${parsed.sector} (${parsed.confidence})`);
-
-    res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(parsed));
+    return sendJSON(res, 200, parsed);
   } catch (error) {
     const elapsed = Date.now() - startTime;
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[intent] FAILED in ${elapsed}ms:`, msg);
-    res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({
-      error: 'Intent parsing failed',
-      detail: msg,
-      latencyMs: elapsed,
-    }));
+    return sendJSON(res, 500, { error: 'Intent parsing failed', detail: msg, latencyMs: elapsed });
   }
 }

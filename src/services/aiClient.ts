@@ -42,19 +42,3 @@ export async function fetchAIExplanation(request: AIExplanationRequest): Promise
   }
 }
 
-export async function fetchAIIntent(userPrompt: string): Promise<{ businessType: string; city: string; neighborhoods: string[]; osmTags: string[] } | null> {
-  if (!config.aiBackendUrl) return null;
-
-  try {
-    const response = await fetch(`${config.aiBackendUrl}/api/intent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: userPrompt }),
-    });
-
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
-  }
-}

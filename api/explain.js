@@ -1,31 +1,11 @@
 /**
  * Stratageo AI Explanation Endpoint
  *
- * Serverless function that calls OpenAI to generate business-context explanations
+ * Calls OpenAI to generate business-context explanations
  * for pre-scored site suitability results.
  *
- * Deploy to: Vercel Functions, Netlify Functions, Cloudflare Workers, or similar.
- *
- * Environment variables required:
- *   OPENAI_API_KEY - Your OpenAI API key (server-side only)
- *
- * Request body (POST):
- * {
- *   businessType: string,
- *   city: string,
- *   locations: Array<{
- *     name: string,
- *     mcda_score: number,
- *     criteria_breakdown: Array<{ name: string, score: number, weight: number, justification: string }>,
- *     osmCounts: { competitors: number, transport: number, commercial: number, residential: number }
- *   }>
- * }
- *
- * Response:
- * {
- *   summary: string,
- *   locationInsights: Array<{ name: string, reasoning: string, strategy: string }>
- * }
+ * Request: POST { businessType, city, locations }
+ * Response: { summary, locationInsights }
  */
 
 import OpenAI from 'openai';
@@ -38,26 +18,30 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+function sendJSON(res, status, body) {
+  res.writeHead(status, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+  return res.end(JSON.stringify(body));
+}
+
 export default async function handler(req, res) {
-  // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(200, CORS_HEADERS);
     return res.end();
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJSON(res, 405, { error: 'Method not allowed' });
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
+    return sendJSON(res, 500, { error: 'OPENAI_API_KEY not configured' });
   }
 
   try {
     const { businessType, city, locations } = req.body;
 
     if (!businessType || !city || !locations?.length) {
-      return res.status(400).json({ error: 'Missing required fields: businessType, city, locations' });
+      return sendJSON(res, 400, { error: 'Missing required fields: businessType, city, locations' });
     }
 
     const locationSummary = locations.map(loc =>
@@ -84,26 +68,24 @@ Respond in JSON format:
 
 Be concise, data-informed, and business-practical. Do not repeat score numbers. Do not use marketing hype.`;
 
-    const response = await openai.responses.create({
+    const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      input: prompt,
-      text: {
-        format: {
-          type: 'json_object',
-        },
-      },
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
       temperature: 0.3,
-      max_output_tokens: 600,
+      max_tokens: 600,
     });
 
-    const text = response.output_text;
-    const parsed = JSON.parse(text);
+    const text = response.choices?.[0]?.message?.content;
+    if (!text) {
+      return sendJSON(res, 502, { error: 'OpenAI returned empty response' });
+    }
 
-    res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify(parsed));
+    const parsed = JSON.parse(text);
+    return sendJSON(res, 200, parsed);
   } catch (error) {
-    console.error('OpenAI API error:', error);
-    res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ error: 'AI explanation generation failed' }));
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[explain] OpenAI API error:', msg);
+    return sendJSON(res, 500, { error: 'AI explanation generation failed', detail: msg });
   }
 }

@@ -5,14 +5,16 @@ export const config = {
   contactUrl: 'https://stratageo.in/contact.php',
 
   mode: (import.meta.env.VITE_APP_MODE as 'demo' | 'live') || 'demo',
-  aiBackendUrl: import.meta.env.VITE_AI_BACKEND_URL || '',
+  aiBackendUrl: (import.meta.env.VITE_AI_BACKEND_URL || '').replace(/\/+$/, ''),
 
+  /** Demo mode = no backend URL configured. If backend URL exists, we're live. */
   get isDemoMode(): boolean {
-    return this.mode === 'demo' || !this.aiBackendUrl;
+    return !this.aiBackendUrl;
   },
 
+  /** Live mode = backend URL is configured (regardless of VITE_APP_MODE). */
   get isLiveMode(): boolean {
-    return this.mode === 'live' && !!this.aiBackendUrl;
+    return !!this.aiBackendUrl;
   },
 
   map: {
