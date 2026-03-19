@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { AnalysisStatus } from '../types';
+import type { WorkingMemory } from '../types/session';
 import { config } from '../config';
 import { demoScenarios } from '../data/demoScenarios';
 
@@ -18,6 +19,10 @@ interface FloatingAssistantProps {
   onCSVUpload: (file: File) => void;
   onClearCSV: () => void;
   csvPointCount: number;
+  memory: WorkingMemory;
+  onNewChat: () => void;
+  onClearMemoryField: (field: keyof WorkingMemory) => void;
+  sessionTitle: string;
 }
 
 const SCENARIOS = [
@@ -41,6 +46,10 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   onClearCSV,
   csvPointCount,
   onResultCountChange,
+  memory,
+  onNewChat,
+  onClearMemoryField,
+  sessionTitle,
 }) => {
   const [expanded, setExpanded] = useState(true);
   const [input, setInput] = useState('');
@@ -85,9 +94,20 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
       <div className="assistant-header" onClick={() => setExpanded(!expanded)}>
         <div className="assistant-header-left">
           <div className="assistant-indicator" />
-          <span className="assistant-title">Site Suitability Assistant</span>
+          <span className="assistant-title">{memory.lastAnalysisTimestamp ? sessionTitle : 'Site Suitability Assistant'}</span>
         </div>
         <div className="assistant-header-right">
+          {messages.length > 0 && (
+            <button
+              className="new-chat-btn"
+              onClick={(e) => { e.stopPropagation(); onNewChat(); }}
+              title="New chat"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </button>
+          )}
           {hasResults && (
             <button
               className="assistant-results-toggle"
@@ -225,8 +245,38 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
             </label>
           </div>
 
-          {/* CSV chip */}
-          {csvPointCount > 0 && (
+          {/* Context chips — show active memory items */}
+          {memory.lastAnalysisTimestamp && (
+            <div className="context-chips">
+              {memory.businessType && (
+                <span className="context-chip">
+                  {memory.businessType}
+                  <button className="context-chip-clear" onClick={() => onClearMemoryField('businessType')} title="Clear">&times;</button>
+                </span>
+              )}
+              {memory.city && (
+                <span className="context-chip">
+                  {memory.city}
+                  <button className="context-chip-clear" onClick={() => onClearMemoryField('city')} title="Clear">&times;</button>
+                </span>
+              )}
+              {memory.constraints.length > 0 && (
+                <span className="context-chip">
+                  {memory.constraints.length} constraint{memory.constraints.length !== 1 ? 's' : ''}
+                  <button className="context-chip-clear" onClick={() => onClearMemoryField('constraints')} title="Clear">&times;</button>
+                </span>
+              )}
+              {csvPointCount > 0 && (
+                <span className="context-chip">
+                  {csvPointCount} CSV pt{csvPointCount !== 1 ? 's' : ''}
+                  <button className="context-chip-clear" onClick={onClearCSV} title="Clear CSV">&times;</button>
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* CSV chip (shown only when no analysis yet) */}
+          {csvPointCount > 0 && !memory.lastAnalysisTimestamp && (
             <div className="csv-chip">
               <span className="csv-chip-icon">&#128205;</span>
               <span>{csvPointCount} location{csvPointCount !== 1 ? 's' : ''} loaded</span>

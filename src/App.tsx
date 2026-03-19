@@ -4,6 +4,8 @@ import { config } from './config';
 import { runDemoAnalysis, runLiveAnalysis } from './services/analysisService';
 import { recalculateWithWeights } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
+import { resolveContext } from './services/contextResolver';
+import { useSession } from './contexts/SessionContext';
 import { TopBar } from './components/TopBar';
 import { MapView } from './components/MapView';
 import { FloatingAssistant } from './components/FloatingAssistant';
@@ -15,6 +17,9 @@ declare const html2canvas: any;
 declare const jspdf: any;
 
 const App: React.FC = () => {
+  const { state: sessionState, addMessage, updateMemory, newSession, switchSession, clearMemoryField, dispatch } = useSession();
+  const { currentSession, sessionIndex } = sessionState;
+
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [spec, setSpec] = useState<AnalysisSpec | null>(null);
   const [selectedLocations, setSelectedLocations] = useState<LocationData[]>([]);
@@ -25,10 +30,15 @@ const App: React.FC = () => {
   const [heatmapType, setHeatmapType] = useState<HeatmapType>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [methodologyOpen, setMethodologyOpen] = useState(false);
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([]);
   const [resultCount, setResultCount] = useState(3);
   const [userPoints, setUserPoints] = useState<UserPoint[]>([]);
   const [showBuffers, setShowBuffers] = useState(true);
+
+  // Derive messages from session for display
+  const messages = useMemo(() =>
+    currentSession.messages.map(m => ({ role: m.role, text: m.text })),
+    [currentSession.messages],
+  );
 
   const locations = useMemo(() => {
     if (!result) return [];
@@ -43,28 +53,30 @@ const App: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
-      const result = parseCSV(text);
+      const csvResult = parseCSV(text);
 
-      if (result.errors.length > 0) {
-        setError(result.errors.join(' '));
-        setMessages(prev => [...prev, { role: 'assistant' as const, text: `CSV Error: ${result.errors.join(' ')}` }]);
+      if (csvResult.errors.length > 0) {
+        setError(csvResult.errors.join(' '));
+        addMessage('assistant', `CSV Error: ${csvResult.errors.join(' ')}`, { intent: 'csv_upload' });
         return;
       }
 
-      setUserPoints(result.points);
-      const msg = `Loaded ${result.points.length} location(s) from CSV.${result.warnings.length > 0 ? ' ' + result.warnings.join(' ') : ''} These points will be used as spatial constraints in your next analysis.`;
-      setMessages(prev => [...prev, { role: 'assistant' as const, text: msg }]);
+      setUserPoints(csvResult.points);
+      updateMemory({ csvFileName: file.name, csvPointCount: csvResult.points.length });
+      const msg = `Loaded ${csvResult.points.length} location(s) from CSV.${csvResult.warnings.length > 0 ? ' ' + csvResult.warnings.join(' ') : ''} These points will be used as spatial constraints in your next analysis.`;
+      addMessage('assistant', msg, { intent: 'csv_upload' });
     };
     reader.onerror = () => {
       setError('Failed to read CSV file.');
     };
     reader.readAsText(file);
-  }, []);
+  }, [addMessage, updateMemory]);
 
   const handleClearCSV = useCallback(() => {
     setUserPoints([]);
-    setMessages(prev => [...prev, { role: 'assistant' as const, text: 'CSV locations cleared.' }]);
-  }, []);
+    updateMemory({ csvFileName: null, csvPointCount: 0 });
+    addMessage('assistant', 'CSV locations cleared.');
+  }, [addMessage, updateMemory]);
 
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
     setIsLoading(true);
@@ -77,12 +89,20 @@ const App: React.FC = () => {
     setDrawerOpen(false);
     setAnalysisStatus({ message: 'Starting analysis...', progress: 5 });
 
-    setMessages(prev => [...prev, { role: 'user' as const, text: rawPrompt }]);
+    // Resolve context for follow-ups
+    const resolved = resolveContext(rawPrompt, currentSession.memory, currentSession.messages);
+
+    addMessage('user', rawPrompt, { intent: resolved.isFollowUp ? 'followup' : 'query' });
+
+    if (resolved.isFollowUp) {
+      addMessage('assistant', `Continuing from previous analysis. ${resolved.contextSummary}`);
+    }
 
     try {
+      const promptToSend = resolved.effectivePrompt;
       const analysisResult = config.isDemoMode
         ? await runDemoAnalysis(rawPrompt, setAnalysisStatus)
-        : await runLiveAnalysis(rawPrompt, resultCount, setAnalysisStatus, userPoints.length > 0 ? userPoints : undefined);
+        : await runLiveAnalysis(promptToSend, resultCount, setAnalysisStatus, userPoints.length > 0 ? userPoints : undefined);
 
       const parsedSpec = analysisResult.spec;
       const csvNote = userPoints.length > 0 ? ` with ${userPoints.length} CSV point(s)` : '';
@@ -96,7 +116,7 @@ const App: React.FC = () => {
         (parsedSpec.constraints.length > 0 ? ` with ${parsedSpec.constraints.length} constraint(s)` : '') +
         csvNote;
 
-      setMessages(prev => [...prev, { role: 'assistant' as const, text: specMsg }]);
+      addMessage('assistant', specMsg);
 
       setResult(analysisResult.result);
       setSpec(analysisResult.spec);
@@ -113,20 +133,36 @@ const App: React.FC = () => {
 
       const top = analysisResult.result.locations.filter(l => !l.excluded)[0];
       const excludedCount = analysisResult.result.locations.filter(l => l.excluded).length;
-      setMessages(prev => [...prev, {
-        role: 'assistant' as const,
-        text: top
-          ? `Screened ${analysisResult.result.locations.length} areas in ${analysisResult.result.target_location}. ${top.name} ranks highest at ${top.mcda_score}/10.${excludedCount > 0 ? ` ${excludedCount} excluded by constraints.` : ''}`
-          : analysisResult.result.summary,
-      }]);
+      addMessage('assistant', top
+        ? `Screened ${analysisResult.result.locations.length} areas in ${analysisResult.result.target_location}. ${top.name} ranks highest at ${top.mcda_score}/10.${excludedCount > 0 ? ` ${excludedCount} excluded by constraints.` : ''}`
+        : analysisResult.result.summary,
+      );
+
+      // Update working memory from results
+      updateMemory({
+        businessType: parsedSpec.businessType,
+        city: parsedSpec.geography.city || null,
+        coordinates: parsedSpec.geography.anchor || null,
+        sectorId: parsedSpec.sectorId,
+        constraints: parsedSpec.constraints.map(c => c.label),
+        lastResultCount: analysisResult.result.locations.length,
+        lastSearchRadiusM: analysisResult.result.locations[0]?.searchRadiusM || null,
+        lastAnalysisTimestamp: new Date().toISOString(),
+      });
+
+      // Auto-title the session on first analysis
+      if (currentSession.title === 'New Analysis') {
+        const title = `${parsedSpec.businessType} in ${parsedSpec.geography.city || 'coordinates'}`;
+        dispatch({ type: 'SET_TITLE', title });
+      }
     } catch (err: any) {
       const msg = err?.message || 'Analysis failed. Please try again.';
       setError(msg);
-      setMessages(prev => [...prev, { role: 'assistant' as const, text: msg }]);
+      addMessage('assistant', msg);
     } finally {
       setIsLoading(false);
     }
-  }, [resultCount, userPoints]);
+  }, [resultCount, userPoints, currentSession.memory, currentSession.messages, currentSession.title, addMessage, updateMemory, dispatch]);
 
   const handleSelectLocation = useCallback((location: LocationData) => {
     const lat = Number(location.lat);
@@ -151,15 +187,12 @@ const App: React.FC = () => {
 
   const handleResultCountChange = useCallback((count: number) => {
     if (count > 5) {
-      setMessages(prev => [...prev, {
-        role: 'assistant' as const,
-        text: 'For this live demo, results are limited to 5 ranked locations to keep the analysis responsive and reliable. For larger batch screening or custom studies, please contact Stratageo.',
-      }]);
+      addMessage('assistant', 'For this live demo, results are limited to 5 ranked locations to keep the analysis responsive and reliable. For larger batch screening or custom studies, please contact Stratageo.');
       setResultCount(5);
     } else {
       setResultCount(Math.max(1, count));
     }
-  }, []);
+  }, [addMessage]);
 
   const handleNewAnalysis = useCallback(() => {
     setResult(null);
@@ -169,8 +202,9 @@ const App: React.FC = () => {
     setError(null);
     setHeatmapType(null);
     setDrawerOpen(false);
-    setMessages([]);
-  }, []);
+    setUserPoints([]);
+    newSession();
+  }, [newSession]);
 
   const handleExportPDF = useCallback(async () => {
     if (!result || locations.length === 0) return;
@@ -259,6 +293,9 @@ const App: React.FC = () => {
         onExportPDF={handleExportPDF}
         onMethodology={() => setMethodologyOpen(true)}
         onNewAnalysis={handleNewAnalysis}
+        sessions={sessionIndex.sessions}
+        currentSessionId={currentSession.id}
+        onSwitchSession={switchSession}
       />
 
       <FloatingAssistant
@@ -276,6 +313,10 @@ const App: React.FC = () => {
         onCSVUpload={handleCSVUpload}
         onClearCSV={handleClearCSV}
         csvPointCount={userPoints.length}
+        memory={currentSession.memory}
+        onNewChat={handleNewAnalysis}
+        onClearMemoryField={clearMemoryField}
+        sessionTitle={currentSession.title}
       />
 
       {result && (

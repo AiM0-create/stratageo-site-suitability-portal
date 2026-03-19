@@ -144,20 +144,31 @@ export default async function handler(req, res) {
   const startTime = Date.now();
 
   try {
-    const { prompt } = req.body;
+    const { prompt, sessionContext } = req.body;
     if (!prompt) {
       return sendJSON(res, 400, { error: 'Missing prompt' });
     }
 
-    console.log(`[intent] Calling OpenAI gpt-4o-mini for: "${prompt.substring(0, 100)}..."`);
+    console.log(`[intent] Calling OpenAI gpt-4o-mini for: "${prompt.substring(0, 100)}..."${sessionContext ? ' (with session context)' : ''}`);
+
+    // Build messages array with optional session context
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+    ];
+
+    if (sessionContext) {
+      messages.push({
+        role: 'system',
+        content: `Previous analysis context (use this to interpret follow-up queries — carry forward any details not explicitly changed by the user):\n${sessionContext}`,
+      });
+    }
+
+    messages.push({ role: 'user', content: prompt });
 
     // Use the stable Chat Completions API (not the newer Responses API)
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: prompt },
-      ],
+      messages,
       response_format: { type: 'json_object' },
       temperature: 0.2,
       max_tokens: 1200,

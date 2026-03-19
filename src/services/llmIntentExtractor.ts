@@ -82,7 +82,7 @@ export async function checkBackendHealth(): Promise<{ ok: boolean; detail: strin
 
 // ─── Main intent extraction ───
 
-export async function extractIntent(rawPrompt: string): Promise<LLMIntent | null> {
+export async function extractIntent(rawPrompt: string, sessionContext?: string): Promise<LLMIntent | null> {
   const backendUrl = config.aiBackendUrl;
 
   // Guard: no backend URL = no GPT
@@ -124,7 +124,7 @@ export async function extractIntent(rawPrompt: string): Promise<LLMIntent | null
     const response = await fetch(`${backendUrl}/api/intent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: rawPrompt }),
+      body: JSON.stringify({ prompt: rawPrompt, sessionContext: sessionContext || null }),
       signal: controller.signal,
     });
 
