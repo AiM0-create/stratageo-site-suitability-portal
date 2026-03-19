@@ -104,6 +104,17 @@ export const SECTOR_ID_MAP: Record<string, string> = {
   luxury_residential: 'realestate',
   affordable_housing: 'realestate',
   property: 'realestate',
+  // Industrial / Manufacturing
+  industrial: 'logistics',
+  manufacturing: 'logistics',
+  heavy_industry: 'logistics',
+  light_manufacturing: 'logistics',
+  factory: 'logistics',
+  // Environmental / Waste
+  environmental_services: 'logistics',
+  waste_management: 'logistics',
+  waste_processing: 'logistics',
+  recycling: 'logistics',
 };
 
 export function resolveSectorId(llmSector: string): string | null {

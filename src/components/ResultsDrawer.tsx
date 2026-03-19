@@ -126,7 +126,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
               <div className="assumptions-body">
                 <div className="assumption-row">
                   <span className="assumption-label">Sector</span>
-                  <span className="assumption-value">{spec.businessType} ({spec.sectorId})</span>
+                  <span className="assumption-value">{spec.businessType}{spec.classificationMeta?.source === 'llm' ? '' : ` (${spec.sectorId})`}</span>
                 </div>
                 <div className="assumption-row">
                   <span className="assumption-label">Search Radius</span>

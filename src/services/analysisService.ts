@@ -241,7 +241,9 @@ export async function runLiveAnalysis(
   // ═══════════════════════════════════════════════════════
 
   const { spec, effectiveSector, searchRadiusM, profile } = await extractAnalysisIntent(rawPrompt, onStatus);
-  spec.resultCount = Math.min(5, Math.max(1, resultCount));
+  // If the LLM extracted a specific result count from the prompt, prefer it over the UI dropdown
+  const llmResultCount = spec.classificationMeta?.source === 'llm' ? spec.resultCount : undefined;
+  spec.resultCount = Math.min(5, Math.max(1, llmResultCount || resultCount));
 
   // Build user-point constraints if CSV data provided
   if (userPoints && userPoints.length > 0) {

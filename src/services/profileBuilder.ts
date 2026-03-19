@@ -30,7 +30,8 @@ export interface ProfiledAnalysisConfig {
 
 export function buildProfiledConfig(intent: LLMIntent, validatedSectorId: string | null): ProfiledAnalysisConfig {
   const hasDynamicCriteria = intent.osmCriteria && intent.osmCriteria.length >= 3;
-  const sectorId = validatedSectorId || resolveSectorId(intent.sector) || 'cafe';
+  // Fallback to 'logistics' (neutral industrial template) — NEVER default to 'cafe'
+  const sectorId = validatedSectorId || resolveSectorId(intent.sector) || 'logistics';
   const sector = getSectorById(sectorId);
 
   // Profile-derived search radius (prefer LLM's recommendation)
