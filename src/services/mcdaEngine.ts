@@ -18,29 +18,52 @@ interface OsmSignals {
   [key: string]: number;
 }
 
+// ─── Linear interpolation helpers ───
+
+function lerp(value: number, fromLow: number, fromHigh: number, toLow: number, toHigh: number): number {
+  if (fromHigh === fromLow) return toHigh;
+  return toLow + ((value - fromLow) / (fromHigh - fromLow)) * (toHigh - toLow);
+}
+
+function interpolatePositive(raw: number, t: number[]): number {
+  // Breakpoints map to score anchors: t[0]→1, t[1]→3, t[2]→5, t[3]→7, t[4]→8.5, beyond→9.5
+  const anchors = [1, 3, 5, 7, 8.5, 9.5];
+  if (raw <= t[0]) return anchors[0];
+  if (raw <= t[1]) return lerp(raw, t[0], t[1], anchors[0], anchors[1]);
+  if (raw <= t[2]) return lerp(raw, t[1], t[2], anchors[1], anchors[2]);
+  if (raw <= t[3]) return lerp(raw, t[2], t[3], anchors[2], anchors[3]);
+  if (raw <= t[4]) return lerp(raw, t[3], t[4], anchors[3], anchors[4]);
+  // Beyond t[4]: asymptotically approach 9.5 (diminishing returns)
+  const excess = raw - t[4];
+  const range = t[4] - t[3] || 1;
+  return anchors[4] + (anchors[5] - anchors[4]) * (1 - Math.exp(-excess / range));
+}
+
+function interpolateNegative(raw: number, t: number[]): number {
+  // Fewer = better. Anchors: 0→9, t[1]→7, t[2]→5, t[3]→3.5, t[4]→2, beyond→1
+  const anchors = [9, 7, 5, 3.5, 2, 1];
+  if (raw === 0) return anchors[0];
+  if (raw <= t[1]) return lerp(raw, 0, t[1], anchors[0], anchors[1]);
+  if (raw <= t[2]) return lerp(raw, t[1], t[2], anchors[1], anchors[2]);
+  if (raw <= t[3]) return lerp(raw, t[2], t[3], anchors[2], anchors[3]);
+  if (raw <= t[4]) return lerp(raw, t[3], t[4], anchors[3], anchors[4]);
+  // Beyond t[4]: asymptotically approach 1
+  const excess = raw - t[4];
+  const range = t[4] - t[3] || 1;
+  return anchors[4] - (anchors[4] - anchors[5]) * (1 - Math.exp(-excess / range));
+}
+
 // ─── Score a single criterion ───
 
 function scoreCriterion(template: CriterionTemplate, rawValue: number, radiusM: number): MCDACriteria {
   const { scoringThresholds: t, direction, name, evidenceBasis } = template;
 
-  let score: number;
-  if (direction === 'positive') {
-    // More = better
-    if (rawValue <= t[0]) score = 1;
-    else if (rawValue <= t[1]) score = 3;
-    else if (rawValue <= t[2]) score = 5;
-    else if (rawValue <= t[3]) score = 7;
-    else if (rawValue <= t[4]) score = 8;
-    else score = 9;
-  } else {
-    // Negative direction: fewer = better (inverted)
-    if (rawValue === 0) score = 8; // None found — good for negative criteria
-    else if (rawValue <= t[1]) score = 7;
-    else if (rawValue <= t[2]) score = 6;
-    else if (rawValue <= t[3]) score = 4;
-    else if (rawValue <= t[4]) score = 3;
-    else score = 2;
-  }
+  // Continuous linear interpolation between breakpoints for granular scoring.
+  // Positive: [t0→1, t1→3, t2→5, t3→7, t4→8.5, beyond→9.5]
+  // Negative: [0→9, t1→7, t2→5, t3→3.5, t4→2, beyond→1]
+  const score = direction === 'positive'
+    ? interpolatePositive(rawValue, t)
+    : interpolateNegative(rawValue, t);
 
   const radiusKm = (radiusM / 1000).toFixed(1);
   const dirLabel = direction === 'positive' ? '' : ' (inverted — lower count = higher score)';
