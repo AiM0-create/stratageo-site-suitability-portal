@@ -112,6 +112,7 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   background: var(--glass); backdrop-filter: blur(16px);
   border: 1px solid var(--glass-border); border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
+  transition: left 0.25s ease, transform 0.25s ease;
   display: flex; flex-direction: column; overflow: hidden;
   transition: max-height 0.25s ease;
 }
@@ -245,6 +246,14 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
 }
 .assistant-send:hover:not(:disabled) { background: var(--blue-600); }
 .assistant-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* When drawer is open, shift the assistant rightward to avoid overlap */
+.assistant-drawer-shift {
+  left: calc(50% + 200px); /* 200px = half of drawer width (400px) */
+}
+@media (max-width: 900px) {
+  .assistant-drawer-shift { left: 50%; } /* On small screens, don't shift */
+}
 
 /* ========== RESULTS DRAWER ========== */
 .drawer {

@@ -68,7 +68,7 @@ Return JSON with these exact fields:
   "coordinates": {"lat": number, "lng": number} or null,
   "locationName": "city or region name, or null",
   "anchorType": "coordinate | city | none",
-  "neighborhoods": ["3-5 real neighborhood names if city-based, else empty"],
+  "neighborhoods": ["CRITICAL: If the user mentions specific areas/neighborhoods/localities (e.g. 'BKC', 'Whitefield', 'Noida Expressway', 'Koramangala'), you MUST include those here. If none mentioned, provide 3-5 real neighborhood names for the city. Empty if coordinate-anchored."],
 
   "positiveCriteria": [{"name": "what user wants nearby", "priority": "high|medium|low"}],
   "negativeCriteria": [{"name": "what user wants to minimize", "priority": "high|medium|low"}],
@@ -123,7 +123,17 @@ If a brand is mentioned (Apple, Starbucks, Amazon, Reliance, etc.):
 - Adjust osmCriteria (premium retail needs luxury co-location, not just any commercial activity)
 
 NEVER default to "Cafe" or "Restaurant" unless the user explicitly mentions food/cafe/restaurant/coffee/dining.
-If genuinely ambiguous, set confidence=low and list ambiguities. Do NOT guess.`;
+If genuinely ambiguous, set confidence=low and list ambiguities. Do NOT guess.
+
+NEIGHBORHOOD EXTRACTION (CRITICAL):
+- If the user mentions ANY specific area, locality, neighborhood, or landmark (e.g. "near BKC", "in Whitefield", "Noida Expressway area", "Koramangala"), you MUST include those in the "neighborhoods" array.
+- The neighborhoods array drives WHERE the analysis searches. If the user says "near Huda City Centre" but you return generic neighborhoods, the analysis will search in wrong areas.
+- For named exclusions like "not in Koramangala" or "away from Chandni Chowk", put the excluded area in exclusionCriteria AND still include alternative neighborhoods.
+
+HINDI/HINGLISH/DEVANAGARI:
+- You MUST handle queries in Hindi (Devanagari script), Hinglish (Hindi-English mix), and regional terms.
+- Common Indian terms: "godown"=warehouse, "tapri/tapdi"=tea stall, "kirana"=grocery store, "kendra"=center, "jagaha"=place, "dukaan"=shop, "mohalla"=neighborhood.
+- Translate and extract intent normally. Set confidence=medium if interpretation is uncertain.`;
 
 export default async function handler(req, res) {
   // CORS preflight

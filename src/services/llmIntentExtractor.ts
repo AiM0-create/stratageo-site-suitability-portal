@@ -11,7 +11,7 @@
 import { config } from '../config';
 import type { LLMIntent } from './intentSchema';
 
-const INTENT_TIMEOUT_MS = 30_000;
+const INTENT_TIMEOUT_MS = 45_000;
 
 // ─── Diagnostic state (readable by UI debug panel) ───
 

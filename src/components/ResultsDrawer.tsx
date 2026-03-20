@@ -289,8 +289,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             <div className={`criterion-bar-fill ${c.direction === 'negative' ? 'bar-negative' : 'bar-positive'}`} style={{ width: `${c.score * 10}%` }} />
                           </div>
                           <div className="criterion-meta">
-                            <span className="criterion-raw">raw: {c.rawValue}</span>
-                            <span className="criterion-weight-label">w: {c.weight.toFixed(2)}</span>
+                            <span className="criterion-raw">{c.rawValue} observed</span>
+                            <span className="criterion-weight-label">weight: {Math.round(c.weight * 100)}%</span>
                             <input
                               type="range" min="0" max="0.5" step="0.05" value={c.weight}
                               onChange={(e) => onWeightChange(c.name, parseFloat(e.target.value))}

@@ -51,6 +51,9 @@ const DEFAULT_NEIGHBORHOODS: Record<string, string[]> = {
   gurgaon: ['Cyber City Gurgaon', 'Sohna Road', 'Golf Course Road Gurgaon', 'Sector 29 Gurgaon', 'MG Road Gurgaon'],
   gurugram: ['Cyber City Gurgaon', 'Sohna Road', 'Golf Course Road Gurgaon', 'Sector 29 Gurgaon', 'MG Road Gurgaon'],
   noida: ['Sector 18 Noida', 'Sector 62 Noida', 'Sector 137 Noida', 'Greater Noida West', 'Sector 44 Noida'],
+  // NCR spans Delhi + Noida + Gurgaon — pick representative neighborhoods across the metro region
+  'delhi ncr': ['Connaught Place', 'Dwarka', 'Sector 18 Noida', 'Cyber City Gurgaon', 'Greater Noida West', 'Saket', 'Sohna Road'],
+  ncr: ['Connaught Place', 'Dwarka', 'Sector 18 Noida', 'Cyber City Gurgaon', 'Greater Noida West', 'Saket', 'Sohna Road'],
 };
 
 function getNeighborhoodsForCity(city: string, count: number): string[] {
@@ -492,6 +495,67 @@ export async function runLiveAnalysis(
           lng: cityAnchor.lng + off.dlng,
           displayName: off.name,
         });
+      }
+    }
+
+    // Phase 1b: Enforce named-area exclusions
+    // Constraints with empty osmTags and a target that looks like a place name
+    // (e.g., "Koramangala", "Chandni Chowk") → geocode them and remove nearby candidates
+    const namedExclusions = spec.constraints.filter(
+      c => c.type === 'exclusion' && c.osmTags.length === 0 && c.target.length > 2,
+    );
+    if (namedExclusions.length > 0 && geocodedNeighborhoods.length > 0) {
+      for (const exc of namedExclusions) {
+        const excCoords = await geocodeLocation(`${exc.target}, ${city}`);
+        if (!excCoords) continue;
+        const exclusionRadiusM = exc.distanceM || 2000; // default 2km exclusion radius for named areas
+        const before = geocodedNeighborhoods.length;
+        for (let i = geocodedNeighborhoods.length - 1; i >= 0; i--) {
+          const gn = geocodedNeighborhoods[i];
+          const dist = haversineM(excCoords.lat, excCoords.lng, gn.lat, gn.lng);
+          if (dist < exclusionRadiusM) {
+            spec.parsingNotes.push(
+              `Excluded "${gn.displayName}" — within ${(dist / 1000).toFixed(1)}km of excluded area "${exc.target}" (${(exclusionRadiusM / 1000).toFixed(1)}km buffer).`,
+            );
+            geocodedNeighborhoods.splice(i, 1);
+          }
+        }
+        if (geocodedNeighborhoods.length < before) {
+          spec.parsingNotes.push(
+            `Named exclusion "${exc.target}": removed ${before - geocodedNeighborhoods.length} candidate(s).`,
+          );
+        }
+      }
+
+      // If all candidates got excluded, try adding more neighborhoods from defaults
+      if (geocodedNeighborhoods.length === 0) {
+        spec.parsingNotes.push('All candidates excluded by named area constraints — expanding search to additional neighborhoods.');
+        const fallbackNeighborhoods = getNeighborhoodsForCity(city, 10);
+        for (const nb of fallbackNeighborhoods) {
+          if (neighborhoods.includes(nb)) continue; // already tried
+          const coords = await geocodeLocation(`${nb}, ${city}`);
+          if (!coords) continue;
+          if (cityAnchor) {
+            const distFromCity = haversineM(cityAnchor.lat, cityAnchor.lng, coords.lat, coords.lng);
+            if (distFromCity > maxNeighborhoodDistanceM) continue;
+          }
+          // Check against all named exclusions
+          let excluded = false;
+          for (const exc of namedExclusions) {
+            const excCoords = await geocodeLocation(`${exc.target}, ${city}`);
+            if (!excCoords) continue;
+            const exclusionRadiusM = exc.distanceM || 2000;
+            if (haversineM(excCoords.lat, excCoords.lng, coords.lat, coords.lng) < exclusionRadiusM) {
+              excluded = true;
+              break;
+            }
+          }
+          if (!excluded) {
+            const displayName = nb.replace(new RegExp(`^${city}\\s+`, 'i'), '').replace(/, .*$/, '');
+            geocodedNeighborhoods.push({ name: nb, lat: coords.lat, lng: coords.lng, displayName });
+          }
+          if (geocodedNeighborhoods.length >= spec.resultCount + 2) break;
+        }
       }
     }
 

@@ -88,6 +88,9 @@ export function buildProfiledConfig(intent: LLMIntent, validatedSectorId: string
   let city = intent.locationName || '';
   if (city.toLowerCase() === 'bangalore') city = 'Bengaluru';
   if (city.toLowerCase() === 'gurgaon') city = 'Gurugram';
+  // Preserve "Delhi NCR" as-is so DEFAULT_NEIGHBORHOODS['delhi ncr'] matches
+  if (/delhi\s*ncr/i.test(city)) city = 'Delhi NCR';
+  else if (/\bncr\b/i.test(city)) city = 'Delhi NCR';
 
   const spec: AnalysisSpec = {
     businessType: intent.businessType,

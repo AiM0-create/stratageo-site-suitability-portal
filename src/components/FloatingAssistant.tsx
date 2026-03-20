@@ -89,7 +89,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   };
 
   return (
-    <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}`}>
+    <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}${drawerOpen ? ' assistant-drawer-shift' : ''}`}>
       {/* Header bar */}
       <div className="assistant-header" onClick={() => setExpanded(!expanded)}>
         <div className="assistant-header-left">
@@ -133,15 +133,18 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
           <div className="assistant-body" ref={scrollRef}>
             {messages.length === 0 && !isLoading && (
               <div className="assistant-welcome">
-                <p className="assistant-welcome-text">
-                  Describe what you want to site and where. Use natural language — include constraints like distances, preferences, and exclusions.
+                <p className="assistant-welcome-text" style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>
+                  AI-Powered Site Suitability Analysis
                 </p>
-                <p className="assistant-welcome-examples" style={{ fontSize: '11px', color: '#64748b', margin: '6px 0 8px' }}>
-                  Try: "Cafe in Bengaluru near metro, low competition"
+                <p className="assistant-welcome-text" style={{ fontSize: '12px', marginBottom: '8px' }}>
+                  Describe your business, location, and constraints in natural language. We score real locations using OpenStreetMap data and multi-criteria decision analysis — no guesswork.
+                </p>
+                <p className="assistant-welcome-examples" style={{ fontSize: '11px', color: '#64748b', margin: '0 0 8px', lineHeight: '1.6' }}>
+                  Try: "EV charging station in Delhi NCR near highways, away from existing chargers"
                   <br />
-                  or: "Warehouse near highway in Pune, away from residential"
+                  or: "Premium retail store in Mumbai BKC area, high foot traffic"
                   <br />
-                  or: "Preschool in Mumbai within 2km of parks, not near industrial zones"
+                  or: "Solar farm near 26.9, 70.9 — flat terrain, away from settlements"
                 </p>
                 <div className="assistant-chips">
                   {SCENARIOS.map(s => (

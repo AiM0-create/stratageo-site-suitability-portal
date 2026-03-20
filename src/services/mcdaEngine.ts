@@ -9,7 +9,7 @@
  * - Evidence-tagged justifications
  */
 
-import type { MCDACriteria, ExclusionCheck, LocationData, AnalysisSpec, SpatialConstraint, UserPointConstraint } from '../types';
+import type { MCDACriteria, ExclusionCheck, LocationData, AnalysisSpec, SpatialConstraint, UserPointConstraint, CriterionDirection } from '../types';
 import type { CriterionTemplate, SectorTemplate } from './sectorTemplates';
 import type { SiteProfile } from './intentSchema';
 import { getSectorById } from './sectorTemplates';
@@ -54,6 +54,27 @@ function interpolateNegative(raw: number, t: number[]): number {
   return anchors[4] - (anchors[4] - anchors[5]) * (1 - Math.exp(-excess / range));
 }
 
+// ─── Human-readable justification ───
+
+function buildJustification(name: string, rawValue: number, score: number, radiusKm: string, direction: CriterionDirection): string {
+  const label = name.toLowerCase();
+
+  if (direction === 'negative') {
+    // Negative criteria: fewer is better
+    if (rawValue === 0) return `No ${label} detected within ${radiusKm}km — ideal for this use case.`;
+    if (score >= 7) return `Minimal ${label} presence (${rawValue}) within ${radiusKm}km — low risk.`;
+    if (score >= 4) return `Moderate ${label} concentration (${rawValue} within ${radiusKm}km) — may warrant attention.`;
+    return `High ${label} density (${rawValue} within ${radiusKm}km) — significant concern for this location.`;
+  }
+
+  // Positive criteria: more is better
+  if (rawValue === 0) return `No ${label} found within ${radiusKm}km — a gap for this use case.`;
+  if (score >= 8) return `Strong ${label} coverage (${rawValue} within ${radiusKm}km) — excellent signal.`;
+  if (score >= 5) return `Moderate ${label} presence (${rawValue} within ${radiusKm}km) — adequate but not exceptional.`;
+  if (score >= 3) return `Limited ${label} nearby (${rawValue} within ${radiusKm}km) — below ideal threshold.`;
+  return `Very few ${label} detected (${rawValue} within ${radiusKm}km) — weak signal.`;
+}
+
 // ─── Score a single criterion ───
 
 function scoreCriterion(template: CriterionTemplate, rawValue: number, radiusM: number): MCDACriteria {
@@ -67,8 +88,7 @@ function scoreCriterion(template: CriterionTemplate, rawValue: number, radiusM: 
     : interpolateNegative(rawValue, t);
 
   const radiusKm = (radiusM / 1000).toFixed(1);
-  const dirLabel = direction === 'positive' ? '' : ' (inverted — lower count = higher score)';
-  const justification = `${rawValue} ${name.toLowerCase()} features observed within ${radiusKm}km via OSM.${dirLabel}`;
+  const justification = buildJustification(name, rawValue, score, radiusKm, direction);
 
   return {
     name,
@@ -357,9 +377,9 @@ export function generateReasoning(
 
   if (positives.length > 0) {
     const topSignals = positives.slice(0, 2).map(c =>
-      `${c.name.toLowerCase()} (${c.rawValue} features, score ${c.score}/10)`
+      `${c.name.toLowerCase()} (score ${c.score}/10)`
     ).join(' and ');
-    parts.push(`${name} shows strong signals in ${topSignals} within ${radiusKm}km.`);
+    parts.push(`${name} scores well on ${topSignals} within a ${radiusKm}km radius.`);
   }
 
   // Profile alignment issues (land availability, location-type fit)
@@ -377,7 +397,7 @@ export function generateReasoning(
 
   if (negatives.length > 0) {
     const concern = negatives[0];
-    parts.push(`Note: ${concern.name.toLowerCase()} is high (${concern.rawValue} found), which may indicate saturation.`);
+    parts.push(`Concern: high ${concern.name.toLowerCase()} concentration (score ${concern.score}/10) may limit suitability.`);
   }
 
   // Exclusion notes

@@ -157,6 +157,24 @@ function extractConstraints(text: string): SpatialConstraint[] {
     });
   }
 
+  // Named area exclusions: "not in Koramangala", "but NOT Chandni Chowk", "excluding HSR Layout"
+  const namedExclusionRe = /(?:not\s+(?:in|near)\s+|but\s+not\s+|excluding?\s+|except\s+)([A-Z][a-zA-Z\s]+?)(?:\s*[,.]|\s+and\s+|\s+or\s+|$)/gi;
+  while ((match = namedExclusionRe.exec(text)) !== null) {
+    const area = match[1].trim();
+    // Skip if it looks like a generic feature we already handle
+    if (FEATURE_OSM_MAP[area.toLowerCase()]) continue;
+    // Skip if already captured
+    if (constraints.some(c => c.target.toLowerCase() === area.toLowerCase())) continue;
+    constraints.push({
+      type: 'exclusion',
+      target: area,
+      osmTags: [], // empty = named area, will be geocoded by analysisService
+      direction: 'away',
+      hardRule: true,
+      label: `Exclude area: ${area}`,
+    });
+  }
+
   return constraints;
 }
 
@@ -175,6 +193,7 @@ function findFeature(target: string): { tags: string[]; label: string } {
 // ─── City extraction ───
 
 const KNOWN_CITIES = [
+  'Delhi NCR', 'NCR', // Must be before 'Delhi' to match first
   'Bengaluru', 'Bangalore', 'Mumbai', 'Delhi', 'New Delhi', 'Hyderabad', 'Pune', 'Chennai',
   'Kolkata', 'Ahmedabad', 'Jaipur', 'Lucknow', 'Chandigarh', 'Kochi', 'Indore', 'Nagpur',
   'Noida', 'Gurugram', 'Gurgaon', 'Mysore', 'Mysuru', 'Vizag', 'Visakhapatnam',
@@ -285,6 +304,53 @@ export function parseUserPointIntent(text: string): UserPointIntent {
   return { detected: true, mode, radiusM };
 }
 
+// ─── Neighborhood extraction ───
+
+const KNOWN_NEIGHBORHOODS: Record<string, string[]> = {
+  bengaluru: ['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield', 'Jayanagar', 'JP Nagar', 'Malleshwaram', 'Marathahalli', 'Electronic City', 'Yelahanka', 'Hebbal', 'Rajajinagar', 'Banashankari', 'BTM Layout', 'Sarjapur Road'],
+  mumbai: ['Bandra', 'Andheri', 'Powai', 'Lower Parel', 'BKC', 'Malad', 'Goregaon', 'Juhu', 'Dadar', 'Worli', 'Colaba', 'Navi Mumbai', 'Thane', 'Borivali', 'Kurla'],
+  delhi: ['Connaught Place', 'Dwarka', 'Hauz Khas', 'Saket', 'Lajpat Nagar', 'Karol Bagh', 'Chandni Chowk', 'Rohini', 'Vasant Kunj', 'Defence Colony', 'Greater Kailash', 'Nehru Place', 'Janakpuri'],
+  pune: ['Koregaon Park', 'Viman Nagar', 'Hinjewadi', 'Kothrud', 'Baner', 'Aundh', 'Hadapsar', 'Wakad', 'Shivajinagar', 'Deccan'],
+  hyderabad: ['Madhapur', 'Gachibowli', 'Banjara Hills', 'Jubilee Hills', 'Kondapur', 'HITEC City', 'Secunderabad', 'Ameerpet'],
+  chennai: ['T. Nagar', 'Anna Nagar', 'Adyar', 'Velachery', 'Nungambakkam', 'OMR', 'Guindy', 'Mylapore'],
+  gurgaon: ['Cyber City', 'Sohna Road', 'Golf Course Road', 'MG Road', 'Sector 29', 'Huda City Centre', 'DLF Phase'],
+  noida: ['Sector 18', 'Sector 62', 'Sector 137', 'Greater Noida', 'Noida Expressway'],
+};
+
+function extractNeighborhoods(text: string, city: string): string[] {
+  const lower = text.toLowerCase();
+  const cityKey = city.toLowerCase().replace(/\s+/g, '');
+  const neighborhoods: string[] = [];
+
+  // Check known neighborhoods for the detected city
+  for (const [key, areas] of Object.entries(KNOWN_NEIGHBORHOODS)) {
+    if (cityKey.includes(key) || key.includes(cityKey)) {
+      for (const area of areas) {
+        if (lower.includes(area.toLowerCase())) {
+          neighborhoods.push(area);
+        }
+      }
+    }
+  }
+
+  // Also try "near [Area]" or "in [Area]" patterns for unknown neighborhoods
+  const nearAreaRe = /(?:near|in|around|at)\s+([A-Z][a-zA-Z\s]{2,20}?)(?:\s*[,.]|\s+(?:area|locality|neighborhood|in|near|for|and|but|with))/g;
+  let match;
+  while ((match = nearAreaRe.exec(text)) !== null) {
+    const candidate = match[1].trim();
+    // Skip city name itself and known cities
+    if (candidate.toLowerCase() === city.toLowerCase()) continue;
+    if (KNOWN_CITIES.some(c => c.toLowerCase() === candidate.toLowerCase())) continue;
+    // Skip if already found
+    if (neighborhoods.some(n => n.toLowerCase() === candidate.toLowerCase())) continue;
+    // Skip if it's a business type word
+    if (/^(cafe|store|shop|clinic|warehouse|office|farm|station|center|hub)$/i.test(candidate)) continue;
+    neighborhoods.push(candidate);
+  }
+
+  return neighborhoods;
+}
+
 // ─── Result count extraction ───
 
 function extractResultCount(text: string): number {
@@ -384,12 +450,16 @@ export function parsePrompt(rawPrompt: string): AnalysisSpec {
     confidence = 'medium';
   }
 
+  // 13. Extract neighborhoods mentioned in the prompt
+  const neighborhoods = extractNeighborhoods(text, city);
+
   return {
     businessType,
     sectorId: classification.sectorId,
     geography: {
       city,
       anchor: coords || undefined,
+      neighborhoods: neighborhoods.length > 0 ? neighborhoods : undefined,
     },
     constraints: allConstraints,
     userPointConstraints: [],
