@@ -11,6 +11,7 @@
 
 import type { MCDACriteria, ExclusionCheck, LocationData, AnalysisSpec, SpatialConstraint, UserPointConstraint } from '../types';
 import type { CriterionTemplate, SectorTemplate } from './sectorTemplates';
+import type { SiteProfile } from './intentSchema';
 import { getSectorById } from './sectorTemplates';
 import { buildUserPointExclusions, scoreUserPointProximity } from './userPointManager';
 
@@ -146,6 +147,110 @@ export function addUserPointCriteria(
   return criteria;
 }
 
+// ─── Profile alignment scoring ───
+// A GIS analyst doesn't just count POIs — they ask "does this LOCATION TYPE
+// match what this BUSINESS needs?" A golf course needs open land, not density.
+// A cafe needs foot traffic, not emptiness. This criterion bridges that gap.
+
+export function scoreProfileAlignment(
+  osmSignals: Record<string, number>,
+  profile: SiteProfile,
+): MCDACriteria[] {
+  const criteria: MCDACriteria[] = [];
+
+  // Estimate urban density from total observed POI count
+  // High POI count = dense urban, low = sparse/rural/periurban
+  const totalPOIs = Object.values(osmSignals).reduce((a, b) => a + b, 0);
+
+  // ── Land availability assessment ──
+  // For land-intensive businesses (solar farms, golf courses, warehouses, factories),
+  // dense urban areas are fundamentally unsuitable — no open land exists.
+  if (profile.landIntensity === 'high' || profile.landIntensity === 'medium') {
+    const isHigh = profile.landIntensity === 'high';
+    let score: number;
+    let justification: string;
+
+    // For high-land-intensity in dense urban: this is a DEALBREAKER.
+    // Weight is proportional to how mismatched the location is — in dense urban,
+    // land availability becomes the dominant criterion because without land, nothing else matters.
+    let dynamicWeight: number;
+
+    if (totalPOIs > 80) {
+      score = isHigh ? 1.0 : 2.5;
+      dynamicWeight = isHigh ? 0.45 : 0.15;
+      justification = `Dense urban area (${totalPOIs} features observed). ${isHigh ? 'No viable open land for this use case — this is a dealbreaker for land-intensive operations.' : 'Limited land availability for medium-footprint operations.'}`;
+    } else if (totalPOIs > 40) {
+      score = isHigh ? 2.5 : 4.5;
+      dynamicWeight = isHigh ? 0.30 : 0.12;
+      justification = `Moderate urban density (${totalPOIs} features). ${isHigh ? 'Open land likely insufficient for large-footprint operations.' : 'Some plots may be available but constrained.'}`;
+    } else if (totalPOIs > 15) {
+      score = isHigh ? 5.0 : 6.5;
+      dynamicWeight = isHigh ? 0.20 : 0.10;
+      justification = `Suburban/periurban density (${totalPOIs} features). ${isHigh ? 'Land parcels may exist — verify with site survey.' : 'Reasonable availability for medium-footprint.'}`;
+    } else if (totalPOIs > 5) {
+      score = isHigh ? 7.5 : 7.0;
+      dynamicWeight = isHigh ? 0.15 : 0.08;
+      justification = `Low density area (${totalPOIs} features). Good land availability expected for this use case.`;
+    } else {
+      score = isHigh ? 9.0 : 7.0;
+      dynamicWeight = isHigh ? 0.10 : 0.08;
+      justification = `Very sparse area (${totalPOIs} features). Ample open land likely available.`;
+    }
+
+    criteria.push({
+      name: 'Land availability',
+      weight: dynamicWeight,
+      score: Math.round(score * 10) / 10,
+      rawValue: totalPOIs,
+      direction: 'negative',
+      justification,
+      evidenceBasis: 'osm-observed',
+    });
+  }
+
+  // ── Urban-rural fit ──
+  // Match the business's preference for urban vs rural setting against actual density
+  const urbanPref = profile.urbanPreference;
+  if (urbanPref !== 'flexible') {
+    let score: number;
+    let justification: string;
+
+    const prefersUrban = urbanPref === 'urban_core' || urbanPref === 'urban';
+    const prefersRural = urbanPref === 'rural' || urbanPref === 'periurban';
+    const isDense = totalPOIs > 40;
+    const isSparse = totalPOIs < 10;
+
+    if (prefersUrban && isDense) {
+      score = 8.5;
+      justification = `Urban location matches the ${urbanPref.replace('_', ' ')} preference (${totalPOIs} features observed).`;
+    } else if (prefersUrban && isSparse) {
+      score = 2.0;
+      justification = `Sparse area doesn't match ${urbanPref.replace('_', ' ')} preference — insufficient urban development.`;
+    } else if (prefersRural && isSparse) {
+      score = 8.5;
+      justification = `Low-density area matches the ${urbanPref} preference (${totalPOIs} features).`;
+    } else if (prefersRural && isDense) {
+      score = 2.5;
+      justification = `Dense urban area conflicts with ${urbanPref} preference — too developed.`;
+    } else {
+      score = 5.5;
+      justification = `Moderate density (${totalPOIs} features) — partial match for ${urbanPref.replace('_', ' ')} preference.`;
+    }
+
+    criteria.push({
+      name: 'Location-type fit',
+      weight: 0.15,
+      score: Math.round(score * 10) / 10,
+      rawValue: totalPOIs,
+      direction: prefersUrban ? 'positive' : 'negative',
+      justification,
+      evidenceBasis: 'osm-observed',
+    });
+  }
+
+  return criteria;
+}
+
 // ─── Compute weighted MCDA score ───
 
 export function computeMCDAScore(criteria: MCDACriteria[]): number {
@@ -257,9 +362,17 @@ export function generateReasoning(
     parts.push(`${name} shows strong signals in ${topSignals} within ${radiusKm}km.`);
   }
 
+  // Profile alignment issues (land availability, location-type fit)
+  const profileConcerns = criteria.filter(c =>
+    (c.name === 'Land availability' || c.name === 'Location-type fit') && c.score <= 3.5
+  );
+  for (const concern of profileConcerns) {
+    parts.push(concern.justification);
+  }
+
   // Key negatives
   const negatives = criteria
-    .filter(c => c.direction === 'negative' && c.score <= 4)
+    .filter(c => c.direction === 'negative' && c.score <= 4 && c.name !== 'Land availability' && c.name !== 'Location-type fit')
     .sort((a, b) => a.score - b.score);
 
   if (negatives.length > 0) {

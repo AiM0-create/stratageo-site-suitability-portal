@@ -28,7 +28,7 @@ import { validateFeasibility } from './feasibilityValidator';
 import { getSectorById } from './sectorTemplates';
 import type { SectorTemplate } from './sectorTemplates';
 import { geocodeLocation, fetchOSMData, reverseGeocode } from './osmService';
-import { scoreNeighborhood, computeMCDAScore, checkExclusions, addUserPointCriteria, generateReasoning, generateSummary } from './mcdaEngine';
+import { scoreNeighborhood, computeMCDAScore, checkExclusions, addUserPointCriteria, scoreProfileAlignment, generateReasoning, generateSummary } from './mcdaEngine';
 import { fetchAIExplanation } from './aiClient';
 import { findDemoScenario, getDefaultDemoScenario } from '../data/demoScenarios';
 import { inferRadius } from './radiusInference';
@@ -382,6 +382,8 @@ export async function runLiveAnalysis(
         const osmResult = await fetchOSMData(candidate.lat, candidate.lng, sector, spec.constraints, searchRadiusM);
 
         let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
+        // Add profile alignment criteria — does this location type match what the business needs?
+        criteria.push(...scoreProfileAlignment(osmResult.signals, profile));
         if (spec.userPointConstraints.length > 0) {
           criteria = addUserPointCriteria(criteria, candidate.lat, candidate.lng, spec.userPointConstraints);
         }
@@ -519,6 +521,8 @@ export async function runLiveAnalysis(
         const osmResult = await fetchOSMData(gn.lat, gn.lng, sector, spec.constraints, effectiveRadius);
 
         let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
+        // Add profile alignment criteria — does this location type match what the business needs?
+        criteria.push(...scoreProfileAlignment(osmResult.signals, profile));
         if (spec.userPointConstraints.length > 0) {
           criteria = addUserPointCriteria(criteria, gn.lat, gn.lng, spec.userPointConstraints);
         }
@@ -617,13 +621,24 @@ export async function runLiveAnalysis(
 
   // Prepend feasibility assessment to summary
   if (feasibility.overallQuality === 'weak') {
-    summary = `Note: Overall suitability is low for ${spec.businessType} in this area. ${summary}`;
+    const landWarning = feasibility.warnings.find(w => w.includes('feasibility concern'));
+    if (landWarning) {
+      summary = `⚠ ${landWarning} ${summary}`;
+    } else {
+      summary = `Note: Overall suitability is low for ${spec.businessType} in this area. ${summary}`;
+    }
   }
 
   if (config.isLiveMode) {
+    const profileContext = profile.profileSummary
+      ? `Business profile: ${profile.profileSummary}. Land intensity: ${profile.landIntensity}. Urban preference: ${profile.urbanPreference}. Foot traffic dependency: ${profile.footTrafficDependency}.`
+      : undefined;
+
     const aiResult = await fetchAIExplanation({
       businessType: spec.businessType,
       city: locationLabel,
+      profileContext,
+      feasibilityWarnings: feasibility.warnings.length > 0 ? feasibility.warnings : undefined,
       locations: finalLocations.map(loc => ({
         name: loc.name,
         mcda_score: loc.mcda_score,

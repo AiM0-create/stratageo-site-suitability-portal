@@ -3,6 +3,8 @@ import { config } from '../config';
 interface AIExplanationRequest {
   businessType: string;
   city: string;
+  profileContext?: string;
+  feasibilityWarnings?: string[];
   locations: Array<{
     name: string;
     mcda_score: number;

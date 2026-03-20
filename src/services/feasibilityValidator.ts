@@ -88,20 +88,36 @@ export function validateFeasibility(
     }
   }
 
-  // 7. Profile alignment warnings
-  if (profile.landIntensity === 'high' && profile.urbanPreference === 'urban_core') {
-    warnings.push('High land-intensity projects in urban core areas may face land availability challenges not captured by OSM.');
+  // 7. Profile alignment — check if location type fundamentally mismatches business needs
+  const landCriteria = nonExcluded[0]?.criteria_breakdown.find(c => c.name === 'Land availability');
+  const locationFitCriteria = nonExcluded[0]?.criteria_breakdown.find(c => c.name === 'Location-type fit');
+
+  if (landCriteria && landCriteria.score <= 2.0 && profile.landIntensity === 'high') {
+    warnings.push(
+      `⚠ Site feasibility concern: This ${spec.businessType} requires large open land, but all candidate areas are densely developed. ` +
+      `Scores reflect amenity proximity but do not guarantee land availability. Consider periurban or rural locations.`,
+    );
   }
 
-  if (profile.marketPositioning === 'premium' && avgScore > 6) {
-    // Good match — no warning needed
-  } else if (profile.marketPositioning === 'premium' && avgScore < 5) {
+  if (locationFitCriteria && locationFitCriteria.score <= 3.0) {
+    warnings.push(
+      `Location type mismatch: The area's development pattern doesn't align with what a ${spec.businessType} typically needs.`,
+    );
+  }
+
+  if (profile.marketPositioning === 'premium' && avgScore < 5) {
     warnings.push('Premium positioning may be challenging in this area based on observed commercial and transit signals.');
   }
 
-  // Determine overall quality
+  // Determine overall quality — profile alignment can override raw scores
   let overallQuality: FeasibilityResult['overallQuality'];
-  if (avgScore >= 6 && nonExcluded.length >= spec.resultCount) {
+  const hasLandMismatch = landCriteria && landCriteria.score <= 2.0 && profile.landIntensity === 'high';
+  const hasLocationMismatch = locationFitCriteria && locationFitCriteria.score <= 2.5;
+
+  if (hasLandMismatch) {
+    // Land-intensive business in dense urban = weak regardless of other scores
+    overallQuality = 'weak';
+  } else if (avgScore >= 6 && nonExcluded.length >= spec.resultCount && !hasLocationMismatch) {
     overallQuality = 'strong';
   } else if (avgScore >= 4 && nonExcluded.length >= 1) {
     overallQuality = 'moderate';
