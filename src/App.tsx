@@ -127,12 +127,9 @@ const App: React.FC = () => {
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
     setIsLoading(true);
     setError(null);
-    setResult(null);
-    setSpec(null);
+    // Keep old results visible during loading — they'll be replaced when new results arrive
     setSelectedLocations([]);
-    setCustomWeights({});
     setHeatmapType(null);
-    setDrawerOpen(false);
     setAnalysisStatus({ message: 'Starting analysis...', progress: 5 });
 
     // Resolve context for follow-ups
@@ -204,6 +201,10 @@ const App: React.FC = () => {
     } catch (err: any) {
       const msg = err?.message || 'Analysis failed. Please try again.';
       setError(msg);
+      setResult(null);
+      setSpec(null);
+      setCustomWeights({});
+      setDrawerOpen(false);
       addMessage('assistant', msg);
     } finally {
       setIsLoading(false);
