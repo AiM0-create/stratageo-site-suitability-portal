@@ -263,8 +263,9 @@ export async function fetchOSMData(
   lng: number,
   sector: SectorTemplate,
   constraints: SpatialConstraint[] = [],
+  overrideRadiusM?: number,
 ): Promise<OsmResult> {
-  const radiusM = sector.searchRadiusM;
+  const radiusM = overrideRadiusM || sector.searchRadiusM;
   const query = buildOverpassQuery(lat, lng, radiusM, sector, constraints);
   const data = await fetchWithOverpassRetry(query);
   const elements = data.elements || [];

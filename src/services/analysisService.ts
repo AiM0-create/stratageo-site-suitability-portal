@@ -53,6 +53,42 @@ function getNeighborhoodsForCity(city: string, count: number): string[] {
   return ['City Center', 'North', 'South', 'East', 'West'].slice(0, count);
 }
 
+// ─── Haversine distance (meters) ───
+
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Cap search radius to avoid overlapping OSM queries ───
+// When neighborhoods are close together, a large radius means all locations
+// query the same OSM bounding box → identical counts → identical scores.
+// Cap at 60% of the minimum inter-neighborhood distance.
+
+function capSearchRadius(
+  coords: Array<{ lat: number; lng: number }>,
+  requestedRadius: number,
+  minRadius: number = 500,
+): number {
+  if (coords.length < 2) return requestedRadius;
+
+  let minDist = Infinity;
+  for (let i = 0; i < coords.length; i++) {
+    for (let j = i + 1; j < coords.length; j++) {
+      const d = haversineM(coords[i].lat, coords[i].lng, coords[j].lat, coords[j].lng);
+      if (d < minDist) minDist = d;
+    }
+  }
+
+  // Cap at 60% of minimum inter-neighborhood distance to avoid overlap
+  const maxSafeRadius = Math.max(minRadius, Math.floor(minDist * 0.6));
+  return Math.min(requestedRadius, maxSafeRadius);
+}
+
 // ─── Coordinate-based candidate generation ───
 
 interface CandidatePoint {
@@ -327,7 +363,7 @@ export async function runLiveAnalysis(
           else if (rev?.display_name) candidateName = rev.display_name.split(',')[0];
         } catch { /* use fallback name */ }
 
-        const osmResult = await fetchOSMData(candidate.lat, candidate.lng, sector, spec.constraints);
+        const osmResult = await fetchOSMData(candidate.lat, candidate.lng, sector, spec.constraints, searchRadiusM);
 
         let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
         if (spec.userPointConstraints.length > 0) {
@@ -369,45 +405,89 @@ export async function runLiveAnalysis(
       neighborhoods = getNeighborhoodsForCity(city, spec.resultCount + 2);
     }
 
-    for (let i = 0; i < neighborhoods.length; i++) {
-      const neighborhood = neighborhoods[i];
-      onStatus({
-        message: `Analyzing ${neighborhood}...`,
-        progress: 15 + Math.round((i / neighborhoods.length) * 50),
-      });
+    // Phase 1: Geocode all neighborhoods first
+    onStatus({ message: `Geocoding ${neighborhoods.length} candidate areas...`, progress: 12 });
+    const geocodedNeighborhoods: Array<{
+      name: string;
+      lat: number;
+      lng: number;
+      displayName: string;
+    }> = [];
 
-      const coords = await geocodeLocation(`${neighborhood}, ${city}`);
+    for (const neighborhood of neighborhoods) {
+      // Try geocoding with city context first, then fallback strategies
+      let coords = await geocodeLocation(`${neighborhood}, ${city}`);
+      if (!coords && city) {
+        // City might be a landmark/area name (e.g., "Bandra-Worli Sea Link") — try with country
+        coords = await geocodeLocation(`${neighborhood}, India`);
+      }
+      if (!coords) {
+        // Last resort: just the neighborhood name
+        coords = await geocodeLocation(neighborhood);
+      }
       if (!coords) {
         spec.parsingNotes.push(`Could not geocode "${neighborhood}" — skipped.`);
         continue;
       }
+      // Use neighborhood name (what user/GPT intended) — NOT Nominatim's display_name
+      // which often returns POI names like "South Indian Temple" or "Jantar Mantar"
+      const displayName = neighborhood;
+      geocodedNeighborhoods.push({
+        name: neighborhood,
+        lat: coords.lat,
+        lng: coords.lng,
+        displayName,
+      });
+    }
+
+    // Phase 2: Cap search radius based on actual inter-neighborhood distances
+    let effectiveRadius = searchRadiusM;
+    if (geocodedNeighborhoods.length >= 2) {
+      effectiveRadius = capSearchRadius(
+        geocodedNeighborhoods.map(n => ({ lat: n.lat, lng: n.lng })),
+        searchRadiusM,
+      );
+      if (effectiveRadius < searchRadiusM) {
+        spec.parsingNotes.push(
+          `Search radius capped from ${(searchRadiusM / 1000).toFixed(1)}km to ${(effectiveRadius / 1000).toFixed(1)}km to avoid overlapping queries between nearby areas.`,
+        );
+      }
+    }
+
+    // Phase 3: Fetch OSM data and score each neighborhood
+    for (let i = 0; i < geocodedNeighborhoods.length; i++) {
+      const gn = geocodedNeighborhoods[i];
+      onStatus({
+        message: `Analyzing ${gn.displayName}...`,
+        progress: 15 + Math.round((i / geocodedNeighborhoods.length) * 50),
+      });
 
       try {
-        const osmResult = await fetchOSMData(coords.lat, coords.lng, sector, spec.constraints);
+        const osmResult = await fetchOSMData(gn.lat, gn.lng, sector, spec.constraints, effectiveRadius);
 
         let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
         if (spec.userPointConstraints.length > 0) {
-          criteria = addUserPointCriteria(criteria, coords.lat, coords.lng, spec.userPointConstraints);
+          criteria = addUserPointCriteria(criteria, gn.lat, gn.lng, spec.userPointConstraints);
         }
 
         const mcdaScore = computeMCDAScore(criteria);
         const exclusions = checkExclusions(
-          osmResult.signals, spec.constraints, searchRadiusM,
-          coords.lat, coords.lng, spec.userPointConstraints,
+          osmResult.signals, spec.constraints, effectiveRadius,
+          gn.lat, gn.lng, spec.userPointConstraints,
         );
         const excluded = exclusions.some(e => !e.passed);
 
         const reasoning = generateReasoning(
-          coords.display_name.split(',')[0],
+          gn.displayName,
           criteria,
           exclusions,
-          searchRadiusM,
+          effectiveRadius,
         );
 
         analyzedLocations.push({
-          name: coords.display_name.split(',')[0],
-          lat: coords.lat,
-          lng: coords.lng,
+          name: gn.displayName,
+          lat: gn.lat,
+          lng: gn.lng,
           mcda_score: mcdaScore,
           criteria_breakdown: criteria,
           exclusions,
@@ -415,10 +495,10 @@ export async function runLiveAnalysis(
           reasoning,
           osmSignals: osmResult.signals,
           pois: osmResult.pois,
-          searchRadiusM,
+          searchRadiusM: effectiveRadius,
         });
       } catch {
-        spec.parsingNotes.push(`OSM data fetch failed for "${neighborhood}" — skipped.`);
+        spec.parsingNotes.push(`OSM data fetch failed for "${gn.name}" — skipped.`);
       }
     }
   }

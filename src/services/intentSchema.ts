@@ -75,35 +75,77 @@ export interface LLMIntent {
 // Used ONLY when the LLM doesn't return osmCriteria (fallback to static templates)
 
 export const SECTOR_ID_MAP: Record<string, string> = {
+  // Energy / Solar / Data Centers
   energy: 'solar',
   solar: 'solar',
   solar_energy: 'solar',
   renewable_energy: 'solar',
   infrastructure: 'solar',
-  data_center_infrastructure: 'solar',
+  data_center: 'logistics',
+  data_center_infrastructure: 'logistics',
+  // Logistics / Warehousing
   logistics: 'logistics',
   warehousing: 'logistics',
+  cold_chain: 'logistics',
   cold_chain_logistics: 'logistics',
   last_mile_fulfillment: 'logistics',
+  cold_storage: 'logistics',
+  // Food & Beverage
   retail_food: 'cafe',
   food_beverage: 'cafe',
+  food_service: 'cafe',
+  qsr: 'cafe',
   qsr_fast_casual: 'cafe',
+  restaurant: 'cafe',
+  cloud_kitchen: 'cafe',
+  // Retail
   premium_retail: 'retail',
   retail: 'retail',
   specialty_retail: 'retail',
+  luxury_retail: 'retail',
+  mass_market_retail: 'retail',
+  grocery_retail: 'retail',
+  automotive_retail: 'retail',
+  sports_retail: 'retail',
+  // EV / Transport / Fuel
   ev_mobility: 'ev',
   ev: 'ev',
+  ev_charging: 'ev',
+  electric_vehicle: 'ev',
+  electric_vehicle_infrastructure: 'ev',
   mobility: 'ev',
+  fuel_retail: 'ev',
+  fuel_station: 'ev',
+  transport: 'ev',
+  // Education
   education: 'preschool',
   early_childhood_education: 'preschool',
+  early_childhood: 'preschool',
+  // Healthcare
   healthcare: 'clinic',
   primary_healthcare: 'clinic',
+  diagnostic: 'clinic',
+  pharmacy: 'clinic',
+  // Fitness (maps to retail — physical location with foot traffic)
+  health_fitness: 'retail',
+  fitness: 'retail',
+  gym: 'retail',
+  // Coworking
   coworking: 'coworking',
   premium_coworking: 'coworking',
+  office: 'coworking',
+  // Real Estate
   real_estate: 'realestate',
+  residential: 'realestate',
   luxury_residential: 'realestate',
   affordable_housing: 'realestate',
   property: 'realestate',
+  co_living: 'realestate',
+  coliving: 'realestate',
+  // Hospitality (uses retail template — foot traffic + commercial area)
+  hospitality: 'retail',
+  hotel: 'retail',
+  boutique_hotel: 'retail',
   // Industrial / Manufacturing
   industrial: 'logistics',
   manufacturing: 'logistics',
