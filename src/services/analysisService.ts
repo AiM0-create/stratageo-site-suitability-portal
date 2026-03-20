@@ -43,6 +43,14 @@ const DEFAULT_NEIGHBORHOODS: Record<string, string[]> = {
   hyderabad: ['Madhapur', 'Gachibowli', 'Banjara Hills', 'Jubilee Hills', 'Kondapur'],
   pune: ['Koregaon Park', 'Viman Nagar', 'Hinjewadi', 'Kothrud', 'Baner'],
   chennai: ['T. Nagar', 'Anna Nagar', 'Adyar', 'Velachery', 'Nungambakkam'],
+  jaipur: ['C Scheme', 'Vaishali Nagar', 'Malviya Nagar Jaipur', 'Mansarovar', 'Raja Park'],
+  ahmedabad: ['Navrangpura', 'Satellite', 'Prahladnagar', 'Bopal', 'Maninagar'],
+  kolkata: ['Salt Lake', 'Park Street', 'New Town', 'Ballygunge', 'Alipore'],
+  lucknow: ['Hazratganj', 'Gomti Nagar', 'Aliganj', 'Indira Nagar Lucknow', 'Aminabad'],
+  chandigarh: ['Sector 17 Chandigarh', 'Sector 35 Chandigarh', 'Sector 22 Chandigarh', 'Industrial Area Chandigarh', 'Manimajra'],
+  gurgaon: ['Cyber City Gurgaon', 'Sohna Road', 'Golf Course Road Gurgaon', 'Sector 29 Gurgaon', 'MG Road Gurgaon'],
+  gurugram: ['Cyber City Gurgaon', 'Sohna Road', 'Golf Course Road Gurgaon', 'Sector 29 Gurgaon', 'MG Road Gurgaon'],
+  noida: ['Sector 18 Noida', 'Sector 62 Noida', 'Sector 137 Noida', 'Greater Noida West', 'Sector 44 Noida'],
 };
 
 function getNeighborhoodsForCity(city: string, count: number): string[] {
@@ -50,7 +58,15 @@ function getNeighborhoodsForCity(city: string, count: number): string[] {
   for (const [k, v] of Object.entries(DEFAULT_NEIGHBORHOODS)) {
     if (key.includes(k) || k.includes(key)) return v.slice(0, count);
   }
-  return ['City Center', 'North', 'South', 'East', 'West'].slice(0, count);
+  // For non-featured cities, prefix with city name so geocoding finds
+  // "Jaipur North" instead of just "North" (which geocodes to UK)
+  return [
+    `${city} City Center`,
+    `${city} North`,
+    `${city} South`,
+    `${city} East`,
+    `${city} West`,
+  ].slice(0, count);
 }
 
 // ─── Haversine distance (meters) ───
@@ -405,8 +421,11 @@ export async function runLiveAnalysis(
       neighborhoods = getNeighborhoodsForCity(city, spec.resultCount + 2);
     }
 
-    // Phase 1: Geocode all neighborhoods first
+    // Phase 1: Geocode the city itself to get an anchor for distance validation
     onStatus({ message: `Geocoding ${neighborhoods.length} candidate areas...`, progress: 12 });
+    const cityAnchor = await geocodeLocation(city);
+    const maxNeighborhoodDistanceM = 100_000; // 100km — any neighborhood beyond this is a geocoding error
+
     const geocodedNeighborhoods: Array<{
       name: string;
       lat: number;
@@ -429,15 +448,49 @@ export async function runLiveAnalysis(
         spec.parsingNotes.push(`Could not geocode "${neighborhood}" — skipped.`);
         continue;
       }
-      // Use neighborhood name (what user/GPT intended) — NOT Nominatim's display_name
-      // which often returns POI names like "South Indian Temple" or "Jantar Mantar"
-      const displayName = neighborhood;
+
+      // Sanity check: reject if geocoded location is too far from the city anchor
+      if (cityAnchor) {
+        const distFromCity = haversineM(cityAnchor.lat, cityAnchor.lng, coords.lat, coords.lng);
+        if (distFromCity > maxNeighborhoodDistanceM) {
+          spec.parsingNotes.push(
+            `"${neighborhood}" geocoded ${Math.round(distFromCity / 1000)}km from ${city} — rejected as geocoding error.`,
+          );
+          continue;
+        }
+      }
+
+      // Use a clean display name — strip city prefix from default names
+      const displayName = neighborhood
+        .replace(new RegExp(`^${city}\\s+`, 'i'), '')
+        .replace(/, .*$/, '');
       geocodedNeighborhoods.push({
         name: neighborhood,
         lat: coords.lat,
         lng: coords.lng,
         displayName,
       });
+    }
+
+    // Fallback: if no neighborhoods geocoded, use coordinate-based offsets from city center
+    if (geocodedNeighborhoods.length === 0 && cityAnchor) {
+      spec.parsingNotes.push(`No neighborhoods found for ${city} — using directional offsets from city center.`);
+      const offsetKm = Math.min(searchRadiusM / 1000, 5);
+      const offsets = [
+        { name: city, dlat: 0, dlng: 0 },
+        { name: `${city} North`, dlat: offsetKm / 111, dlng: 0 },
+        { name: `${city} South`, dlat: -offsetKm / 111, dlng: 0 },
+        { name: `${city} East`, dlat: 0, dlng: offsetKm / (111 * Math.cos(cityAnchor.lat * Math.PI / 180)) },
+        { name: `${city} West`, dlat: 0, dlng: -offsetKm / (111 * Math.cos(cityAnchor.lat * Math.PI / 180)) },
+      ];
+      for (const off of offsets.slice(0, spec.resultCount + 2)) {
+        geocodedNeighborhoods.push({
+          name: off.name,
+          lat: cityAnchor.lat + off.dlat,
+          lng: cityAnchor.lng + off.dlng,
+          displayName: off.name,
+        });
+      }
     }
 
     // Phase 2: Cap search radius based on actual inter-neighborhood distances
