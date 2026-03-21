@@ -1,206 +1,123 @@
-# Stratageo — AI-Assisted Site Suitability Portal
+# Stratageo — Site Suitability Portal
 
-A polished interactive demo portal that combines place-based signals, spatial reasoning, and explainable scoring to evaluate candidate locations for any business type.
+**Spatial intelligence for smarter site selection.**
 
-**Live demo:** Deploy to GitHub Pages (demo mode works with zero configuration).
+Stratageo is building decision-support tools that bring GIS-grade site suitability analysis to businesses, developers, and consultants — without requiring GIS expertise. The Site Suitability Portal is our public-facing demo that showcases this capability: given a business concept and a city, it evaluates candidate locations using real-world spatial data and transparent, explainable scoring.
+
+> **Try it live:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
+
+---
+
+## What It Does
+
+The portal accepts a natural-language business description — *"a mid-size warehouse near Bhiwadi"* or *"premium coworking space in Bengaluru"* — and returns a ranked shortlist of candidate neighborhoods with:
+
+- **MCDA scores** derived from real OpenStreetMap point-of-interest data
+- **Per-criteria breakdowns** (competitive landscape, transit access, commercial vibrancy, land availability, etc.)
+- **Profile-aware reasoning** that penalizes infeasible matches (e.g., a solar farm in a dense urban core)
+- **Interactive map** with marker clusters and heatmap overlays
+- **AI-generated narrative** that reads like a GIS consultant's brief, not a chatbot response
+
+The goal is not to replace a full site selection study — it's to demonstrate that spatial data, structured scoring, and domain reasoning can be combined into an accessible, instant workflow.
+
+## How Scoring Works
+
+Every location is scored using **Multi-Criteria Decision Analysis (MCDA)** — the same framework used in professional GIS suitability studies.
+
+1. **Data collection** — For each candidate neighborhood, we query OpenStreetMap via Overpass API to count relevant features (competitors, transit stops, commercial establishments, residential density, healthcare, education, etc.) within a calibrated search radius.
+
+2. **Criteria scoring** — Raw POI counts are mapped to 0–10 scores using continuous linear interpolation against sector-specific benchmarks. Each criterion has a direction: *positive* (more is better, e.g., transit access for retail) or *negative* (more is worse, e.g., competitor saturation).
+
+3. **Profile alignment** — The engine infers a **site profile** from the business type: land intensity (does it need open acreage?), urban preference (does it thrive in density or need rural space?), and catchment type. Mismatches between the profile and the observed environment are scored as explicit penalty criteria with dynamic weights — a warehouse in a CBD gets penalized hard, not just footnoted.
+
+4. **Weighted aggregation** — Criteria scores are combined using normalized weights into a single composite score per location.
+
+5. **Feasibility validation** — Before results are presented, a validator checks for dealbreaker mismatches (e.g., land-intensive use in a high-density zone) and flags them as warnings that override raw scores.
+
+Scores are **deterministic and reproducible** — they come from observed spatial data, not LLM generation.
+
+## Supported Capabilities
+
+| Capability | Details |
+|---|---|
+| **25+ business sectors** | Retail, F&B, healthcare, logistics, manufacturing, education, renewable energy, agriculture, and more |
+| **NCR-aware geography** | "Delhi NCR" spans Delhi, Noida, Gurgaon neighborhoods automatically |
+| **Named exclusions** | "not in Koramangala" creates a geocoded exclusion buffer |
+| **Small-town support** | Directional offset fallback for towns without mapped neighborhoods |
+| **Hindi/Hinglish input** | Natural language parsing handles mixed-script prompts |
+| **Coordinate validation** | 100km sanity check rejects geocoding errors |
+| **Dynamic search radius** | Calibrated per-city based on inter-neighborhood distances |
 
 ## Architecture
 
 ```
-Frontend (React + Vite)          Backend (Serverless, optional)
-┌────────────────────────┐      ┌─────────────────────────┐
-│  Static site on         │      │  Vercel/Netlify/CF      │
-│  GitHub Pages           │ ───► │  Functions              │
-│                         │      │                         │
-│  - Guided input flow    │      │  /api/intent  ─► OpenAI │
-│  - Deterministic scoring│      │  /api/explain ─► OpenAI │
-│  - OSM data fetching    │      │                         │
-│  - Map visualization    │      │  OPENAI_API_KEY is      │
-│  - Template explanations│      │  server-side only       │
-│  - Demo mode fallback   │      └─────────────────────────┘
-└────────────────────────┘
+User prompt
+    │
+    ▼
+┌─────────────────────┐     ┌──────────────────────┐
+│  Intent Extraction   │────►│  GPT-4o-mini (API)   │
+│  (with local         │◄────│  Structured JSON out  │
+│   parser fallback)   │     └──────────────────────┘
+└─────────┬───────────┘
+          │ sector, city, neighborhoods, profile, exclusions
+          ▼
+┌─────────────────────┐     ┌──────────────────────┐
+│  Spatial Data Layer  │────►│  Nominatim + Overpass │
+│  Geocoding + POI     │◄────│  (OpenStreetMap)      │
+│  collection          │     └──────────────────────┘
+└─────────┬───────────┘
+          │ coordinates, POI counts per neighborhood
+          ▼
+┌─────────────────────┐
+│  MCDA Scoring Engine │  Deterministic, profile-aware
+│  + Feasibility Check │  No AI in the scoring loop
+└─────────┬───────────┘
+          │ ranked locations with breakdowns
+          ▼
+┌─────────────────────┐     ┌──────────────────────┐
+│  Results Layer       │────►│  GPT-4o-mini (API)   │
+│  Map + Charts +      │◄────│  Narrative explanation│
+│  Exportable reports  │     └──────────────────────┘
+└─────────────────────┘
 ```
 
-**Key design decisions:**
-- Frontend is fully static and deployable on GitHub Pages
-- OpenAI API key is never exposed in browser code
-- Demo Mode works completely without any backend or API keys
-- AI enhances explanations but never controls scoring or core logic
-- Deterministic MCDA scoring from real OSM data
+**Key principle:** AI handles language (parsing prompts, writing narratives) but never controls scoring. The analytical core is deterministic and auditable.
 
-## Quick Start
+## Tech Stack
 
-```bash
-npm install
-npm run dev
-```
+- **Frontend:** React 19, TypeScript, Vite 6 — static SPA deployed on GitHub Pages
+- **Maps:** Leaflet + leaflet.heat (CDN), Recharts for score visualizations
+- **Spatial data:** OpenStreetMap via Nominatim (geocoding) and Overpass API (POI queries)
+- **AI layer:** OpenAI GPT-4o-mini via serverless proxy on Vercel (optional — demo mode works without it)
+- **Scoring:** Custom MCDA engine with continuous interpolation, profile-aware criteria, and dynamic weight scaling
 
-Opens at `http://localhost:3000`. Default mode is **Demo Mode** with pre-built scenarios.
+## Versioning
 
-## Modes
+| Version | Status | Highlights |
+|---------|--------|------------|
+| **v0.5.0** | Current | Profile-aware MCDA scoring, NCR support, named exclusions, feasibility validation, professional GIS-grade explanations, Hindi/Hinglish support |
+| **v0.4.0** | — | Continuous linear scoring, geocoding robustness, coordinate validation, search radius calibration |
+| **v0.3.0** | — | LLM-first intent extraction, session memory, guided input flow |
+| **v0.2.0** | — | Dynamic MCDA, CSV spatial constraints, sector classification |
+| **v0.1.0** | — | Initial portal with basic scoring and map visualization |
 
-### Demo Mode (default)
-- No API keys needed
-- Uses curated scenario data for featured business types and cities
-- Template-based explanations and scoring
-- Safe for public deployment on GitHub Pages
+## Roadmap
 
-### Live Mode
-- Fetches real OSM data via Nominatim + Overpass APIs
-- Deterministic MCDA scoring from real-world POI counts
-- Optional AI enhancement via backend proxy (if configured)
-- Graceful fallback to template explanations if AI is unavailable
-
-To enable live mode:
-```bash
-# In .env
-VITE_APP_MODE=live
-VITE_AI_BACKEND_URL=https://your-backend.vercel.app
-```
-
-## GitHub Pages Deployment
-
-1. Set `base` in `vite.config.ts` to your repo name:
-   ```ts
-   base: '/stratageo-site-suitability-portal/',
-   ```
-
-2. Build:
-   ```bash
-   npm run build
-   ```
-
-3. Deploy `dist/` folder to GitHub Pages:
-   - Push to a `gh-pages` branch, or
-   - Use GitHub Actions, or
-   - Use `npx gh-pages -d dist`
-
-No environment variables are needed for demo mode deployment.
-
-## Backend Deployment (Optional)
-
-The `api/` directory contains two serverless functions for OpenAI integration.
-
-### Vercel
-
-1. Create a new Vercel project from this repo
-2. Set root directory to `api/`
-3. Add environment variable: `OPENAI_API_KEY`
-4. Deploy
-
-The functions auto-deploy as `/api/explain` and `/api/intent`.
-
-### Netlify Functions
-
-Move the files to `netlify/functions/` and adapt the handler signature.
-
-### Manual
-
-```bash
-cd api
-npm install
-# Set OPENAI_API_KEY in environment
-# Deploy with your preferred platform
-```
-
-### API Endpoints
-
-**POST /api/explain** — Generate AI explanations for scored locations
-```json
-{
-  "businessType": "Cafe",
-  "city": "Bengaluru",
-  "locations": [
-    {
-      "name": "Koramangala",
-      "mcda_score": 7.8,
-      "criteria_breakdown": [...],
-      "osmCounts": { "competitors": 23, "transport": 12, "commercial": 45, "residential": 18 }
-    }
-  ]
-}
-```
-
-**POST /api/intent** — Parse natural language into analysis parameters
-```json
-{
-  "prompt": "I want to open a cafe in Bengaluru"
-}
-```
-
-## Project Structure
-
-```
-src/
-├── App.tsx                 # Main app shell and state management
-├── main.tsx                # Entry point
-├── vite-env.d.ts           # Vite type declarations
-├── config/
-│   └── index.ts            # App configuration, sectors, cities
-├── types/
-│   └── index.ts            # TypeScript interfaces
-├── data/
-│   └── demoScenarios.ts    # Curated demo scenario data
-├── services/
-│   ├── analysisService.ts  # Orchestrates demo/live analysis
-│   ├── osmService.ts       # Nominatim geocoding + Overpass queries
-│   ├── scoringEngine.ts    # Deterministic MCDA scoring
-│   └── aiClient.ts         # AI backend client (optional)
-├── components/
-│   ├── Header.tsx           # Navigation bar
-│   ├── Hero.tsx             # Landing hero section
-│   ├── AnalysisInput.tsx    # Business type + city selection
-│   ├── AnalysisProgress.tsx # Loading/progress indicator
-│   ├── MapView.tsx          # Leaflet map with markers/heatmaps
-│   ├── ResultsPanel.tsx     # Ranked results, scores, charts
-│   ├── Methodology.tsx      # How-it-works + disclaimer
-│   ├── ErrorBanner.tsx      # Error display
-│   └── Footer.tsx           # Site footer
-└── styles/
-    └── main.css             # Complete design system
-api/
-├── explain.js              # OpenAI explanation endpoint
-├── intent.js               # OpenAI intent parsing endpoint
-└── package.json            # Backend dependencies
-```
-
-## Scoring Methodology
-
-The portal uses Multi-Criteria Decision Analysis (MCDA) with six criteria:
-
-| Criteria | Weight | Signal Source |
-|----------|--------|--------------|
-| Competitive Landscape | 0.20 | OSM competitor POI count |
-| Transit Accessibility | 0.15 | OSM transit stop count |
-| Commercial Vibrancy | 0.20 | OSM shop/office/restaurant count |
-| Residential Catchment | 0.15 | OSM residential building count |
-| Pedestrian Footfall | 0.15 | Combined commercial + transit density |
-| Complementary Infrastructure | 0.15 | Combined amenity density |
-
-Scores are deterministic — computed from real OSM data, not AI-generated. Weights are interactively adjustable in the results panel.
-
-## Cost Control
-
-- AI is only called on explicit user action (never on slider changes or UI interactions)
-- Default model: `gpt-4o-mini` (lowest cost)
-- Prompts are compact (<300 tokens input, <600 tokens output)
-- Template explanations serve as fallback when AI is unavailable
-- Client-side scoring is fully deterministic — no AI needed for core functionality
+- Custom criteria definition and weight adjustment UI
+- Multi-city comparative reports
+- Traffic and footfall estimation from supplementary data sources
+- Sector-specific scoring templates with editable parameters
+- Saved analyses and user workspaces
+- Richer demo scenarios across more cities and sectors
+- Exportable PDF reports with branded formatting
 
 ## Known Limitations
 
-- OSM data coverage varies by region; less-mapped cities may return sparse results
-- Scoring reflects relative suitability from available spatial signals, not absolute recommendations
-- Demo scenarios are illustrative; real-world analysis requires richer data sources
-- Heatmap visualization depends on POI density in the area
-- PDF export uses html2canvas which may not capture all map tile states
+- OpenStreetMap coverage varies by region — less-mapped cities may produce sparse or skewed results
+- Scoring reflects *relative* suitability from available spatial signals, not absolute investment recommendations
+- Heatmap quality depends on POI density in the area
+- Demo scenarios are illustrative; production-grade analysis requires richer and proprietary data sources
 
-## Phase 2 Roadmap
+## License
 
-- Custom criteria definition UI
-- Comparison report export
-- Sector-specific scoring templates
-- Historical data overlays
-- Traffic and footfall estimation from additional data sources
-- User accounts and saved analyses
-- Richer demo scenarios for more cities/sectors
+Proprietary. All rights reserved.
