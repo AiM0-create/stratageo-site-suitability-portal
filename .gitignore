@@ -27,3 +27,5 @@ api/node_modules
 *.sw?
 
 .vercel
+.claude
+test-prompts.js
