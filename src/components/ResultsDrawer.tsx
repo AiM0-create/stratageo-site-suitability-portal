@@ -212,6 +212,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         {/* Heatmap layer toggles */}
         {poiTypes.length > 0 && (
           <div className="drawer-layers">
+            <div className="drawer-layers-label">Heatmap Layers</div>
             {poiTypes.map(t => (
               <button
                 key={t}
