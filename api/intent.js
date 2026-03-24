@@ -42,13 +42,13 @@ Return JSON with these exact fields:
 
   "siteProfile": {
     "marketPositioning": "premium | mid_market | mass_market | utility_scale | industrial | institutional | unknown",
-    "landIntensity": "high | medium | low — how much land/space the project needs",
+    "landIntensity": "high | medium | low — physical land/space footprint. HIGH = needs acres of open land (solar farms, factories, golf courses, wind farms, large hospitals 100+ beds, data centers, warehouses >10000sqft). MEDIUM = needs a full building or large floor plate (supermarkets, gyms, schools, clinics). LOW = fits in a small shop/office unit <2000sqft (cafes, salons, bookstores, repair shops, pharmacies, boutiques, kirana stores, tuition centers, laundromats, pet shops).",
     "urbanPreference": "urban_core | urban | suburban | periurban | rural | flexible",
     "infrastructureDependency": "high | medium | low — does it need heavy infrastructure (power, fiber, water)?",
     "footTrafficDependency": "high | medium | low | none — does it need walk-in customers?",
     "competitionSensitivity": "avoid_competition | tolerate_clustering | prefer_clustering",
     "accessProfile": "pedestrian | vehicle | freight | mixed | minimal",
-    "environmentalSensitivity": "high | medium | low — sensitivity to pollution, noise, flood, etc.",
+    "environmentalSensitivity": "high | medium | low — HIGH for: waste/chemical processing, projects near water/forests/hospitals/schools, anything with emissions or hazardous materials. MEDIUM for most commercial. LOW for offices, small retail.",
     "searchRadiusM": "number — recommended search radius in meters based on project type (500-20000)",
     "profileSummary": "1 sentence describing the ideal site characteristics"
   },
