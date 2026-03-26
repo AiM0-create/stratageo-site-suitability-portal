@@ -96,6 +96,12 @@ Be concise, honest, and spatially-aware. Prioritize real-world feasibility over 
     }
 
     const parsed = JSON.parse(text);
+    const tokenUsage = response.usage || {};
+    parsed._tokenUsage = {
+      promptTokens: tokenUsage.prompt_tokens || 0,
+      completionTokens: tokenUsage.completion_tokens || 0,
+      totalTokens: tokenUsage.total_tokens || 0,
+    };
     return sendJSON(res, 200, parsed);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

@@ -29,3 +29,6 @@ api/node_modules
 .vercel
 .claude
 test-prompts.js
+audit-results.json
+audit-test.js
+test-suite.js

@@ -3,6 +3,8 @@ import type { AnalysisStatus } from '../types';
 import type { WorkingMemory } from '../types/session';
 import { config } from '../config';
 import { demoScenarios } from '../data/demoScenarios';
+import { useAuth } from '../contexts/AuthContext';
+import { MAX_PROMPTS_PER_USER } from '../config/firebase';
 
 interface FloatingAssistantProps {
   messages: Array<{ role: 'user' | 'assistant'; text: string }>;
@@ -51,13 +53,17 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   onClearMemoryField,
   sessionTitle,
 }) => {
+  const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
   const [input, setInput] = useState('');
   const [showSectors, setShowSectors] = useState(false);
+  const [showPromptGuide, setShowPromptGuide] = useState(false);
   const [selectedSector, setSelectedSector] = useState('');
   const [city, setCity] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
+
+  const promptsLeft = user ? (user.isAdmin ? Infinity : Math.max(0, MAX_PROMPTS_PER_USER - user.promptsUsed)) : 0;
 
   useEffect(() => {
     if (expanded && scrollRef.current) {
@@ -137,8 +143,67 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                   AI-Powered Site Suitability Analysis
                 </p>
                 <p className="assistant-welcome-text" style={{ fontSize: '12px', marginBottom: '8px' }}>
-                  Describe your business, location, and constraints in natural language. We score real locations using OpenStreetMap data and multi-criteria decision analysis — no guesswork.
+                  Describe your business, location, and constraints in natural language. We score real locations using Google Places and OpenStreetMap data with multi-criteria decision analysis.
                 </p>
+
+                {/* Prompt limit reminder for non-admin users */}
+                {user && !user.isAdmin && (
+                  <div className="assistant-prompt-reminder">
+                    <span className="assistant-prompt-reminder-icon">💡</span>
+                    <span>You have <strong>{promptsLeft} of {MAX_PROMPTS_PER_USER} queries</strong> remaining. Make each one count — <button className="assistant-guide-link" onClick={() => setShowPromptGuide(!showPromptGuide)}>see tips for better results</button>.</span>
+                  </div>
+                )}
+
+                {/* Prompt guide — shown on click */}
+                {showPromptGuide && (
+                  <div className="assistant-prompt-guide">
+                    <div className="assistant-guide-header">
+                      <strong>How to write better site suitability queries</strong>
+                      <button className="assistant-guide-close" onClick={() => setShowPromptGuide(false)}>&times;</button>
+                    </div>
+                    <div className="assistant-guide-body">
+                      <div className="assistant-guide-item">
+                        <span className="assistant-guide-do">✅</span>
+                        <div>
+                          <strong>Be specific about business type</strong>
+                          <p>"Premium co-working space" not just "office"</p>
+                        </div>
+                      </div>
+                      <div className="assistant-guide-item">
+                        <span className="assistant-guide-do">✅</span>
+                        <div>
+                          <strong>Name a city or area</strong>
+                          <p>"in Bengaluru HSR Layout" or "near 12.97, 77.59"</p>
+                        </div>
+                      </div>
+                      <div className="assistant-guide-item">
+                        <span className="assistant-guide-do">✅</span>
+                        <div>
+                          <strong>Add spatial constraints</strong>
+                          <p>"near metro stations", "away from industrial zones", "not in Whitefield"</p>
+                        </div>
+                      </div>
+                      <div className="assistant-guide-item">
+                        <span className="assistant-guide-do">✅</span>
+                        <div>
+                          <strong>Mention what matters for the site</strong>
+                          <p>"high foot traffic", "good road access", "low competition"</p>
+                        </div>
+                      </div>
+                      <div className="assistant-guide-item">
+                        <span className="assistant-guide-dont">❌</span>
+                        <div>
+                          <strong>Avoid vague prompts</strong>
+                          <p>"best place for business" → too generic, no location</p>
+                        </div>
+                      </div>
+                      <div className="assistant-guide-example">
+                        <strong>Great example:</strong> "Cold storage warehouse near Gurgaon, close to NH-48, away from residential areas, needs truck access and power infrastructure"
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <p className="assistant-welcome-examples" style={{ fontSize: '11px', color: '#64748b', margin: '0 0 8px', lineHeight: '1.6' }}>
                   Try: "EV charging station in Delhi NCR near highways, away from existing chargers"
                   <br />
@@ -284,6 +349,14 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               <span className="csv-chip-icon">&#128205;</span>
               <span>{csvPointCount} location{csvPointCount !== 1 ? 's' : ''} loaded</span>
               <button className="csv-chip-clear" onClick={onClearCSV} title="Clear CSV data">&times;</button>
+            </div>
+          )}
+
+          {/* Remaining prompts badge (shown after first message for non-admins) */}
+          {user && !user.isAdmin && messages.length > 0 && (
+            <div className="assistant-prompts-remaining">
+              <span>{promptsLeft} of {MAX_PROMPTS_PER_USER} queries left</span>
+              {promptsLeft <= 1 && promptsLeft > 0 && <span className="assistant-prompts-warning"> — last one!</span>}
             </div>
           )}
 

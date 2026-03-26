@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, HeatmapType, UserPoint } from './types';
 import { config } from './config';
 import { runDemoAnalysis, runLiveAnalysis } from './services/analysisService';
+import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
 import { resolveContext } from './services/contextResolver';
@@ -220,6 +221,13 @@ const App: React.FC = () => {
       // ─── Log usage to Firestore ───
       if (user) {
         const topLoc = analysisResult.result.locations.filter(l => !l.excluded)[0];
+        const diag = getLastDiagnostics();
+        const tokensUsed = diag?.tokenUsage?.totalTokens || 0;
+        // Determine data source from grounding_sources
+        const sources = analysisResult.result.grounding_sources.map(s => s.title.toLowerCase());
+        const hasPlaces = sources.some(s => s.includes('google places'));
+        const hasOSM = sources.some(s => s.includes('openstreetmap') || s.includes('overpass'));
+        const dataSource = hasPlaces && hasOSM ? 'hybrid' : hasPlaces ? 'google-places' : config.isDemoMode ? 'demo' : 'osm';
         logPrompt({
           userId: user.uid,
           email: user.email,
@@ -231,6 +239,8 @@ const App: React.FC = () => {
           topScore: topLoc?.mcda_score ?? null,
           pdfExported: false,
           isFollowUp: resolved.isFollowUp,
+          tokensUsed,
+          dataSource: dataSource as any,
         });
       }
     } catch (err: any) {

@@ -204,7 +204,15 @@ export default async function handler(req, res) {
       });
     }
 
-    console.log(`[intent] SUCCESS in ${elapsed}ms: ${parsed.businessType} / ${parsed.sector} (${parsed.confidence})`);
+    // Attach token usage for tracking
+    const tokenUsage = response.usage || {};
+    parsed._tokenUsage = {
+      promptTokens: tokenUsage.prompt_tokens || 0,
+      completionTokens: tokenUsage.completion_tokens || 0,
+      totalTokens: tokenUsage.total_tokens || 0,
+    };
+
+    console.log(`[intent] SUCCESS in ${elapsed}ms: ${parsed.businessType} / ${parsed.sector} (${parsed.confidence}) [${tokenUsage.total_tokens || 0} tokens]`);
     return sendJSON(res, 200, parsed);
   } catch (error) {
     const elapsed = Date.now() - startTime;

@@ -973,3 +973,57 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   padding: 12px 24px; border-top: 1px solid var(--gray-200);
   display: flex; justify-content: flex-end;
 }
+.sg-admin-source-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 500;
+}
+.sg-admin-source-google-places { background: #e8f5e9; color: #2e7d32; }
+.sg-admin-source-hybrid { background: #e3f2fd; color: #1565c0; }
+.sg-admin-source-osm { background: #fff3e0; color: #e65100; }
+.sg-admin-source-demo { background: var(--gray-100); color: var(--gray-500); }
+
+/* ─── Prompt Guide ─── */
+.assistant-prompt-reminder {
+  display: flex; align-items: flex-start; gap: 6px;
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 8px; font-size: 11px; color: #1e40af; line-height: 1.5;
+}
+.assistant-prompt-reminder-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.assistant-guide-link {
+  background: none; border: none; color: #1d4ed8; cursor: pointer;
+  text-decoration: underline; font-size: 11px; padding: 0;
+}
+.assistant-guide-link:hover { color: #1e40af; }
+
+.assistant-prompt-guide {
+  background: #f8fafc; border: 1px solid var(--gray-200); border-radius: 8px;
+  margin-bottom: 8px; overflow: hidden;
+}
+.assistant-guide-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 10px; background: var(--gray-50); border-bottom: 1px solid var(--gray-200);
+  font-size: 12px; color: #1e293b;
+}
+.assistant-guide-close {
+  background: none; border: none; font-size: 16px; cursor: pointer;
+  color: var(--gray-400); padding: 0 4px;
+}
+.assistant-guide-body { padding: 8px 10px; }
+.assistant-guide-item {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin-bottom: 6px; font-size: 11px; line-height: 1.4;
+}
+.assistant-guide-item p { margin: 2px 0 0; color: var(--gray-500); font-size: 10px; }
+.assistant-guide-do { font-size: 12px; flex-shrink: 0; }
+.assistant-guide-dont { font-size: 12px; flex-shrink: 0; }
+.assistant-guide-example {
+  background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;
+  padding: 6px 8px; font-size: 10px; line-height: 1.5; margin-top: 6px; color: #166534;
+}
+.assistant-guide-example strong { color: #15803d; }
+
+.assistant-prompts-remaining {
+  text-align: center; padding: 3px 0; font-size: 10px; color: var(--gray-400);
+  border-top: 1px solid var(--gray-100);
+}
+.assistant-prompts-warning { color: #dc2626; font-weight: 600; }

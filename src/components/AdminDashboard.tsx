@@ -67,6 +67,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                     <div className="sg-admin-card-value">{stats.totalPrompts}</div>
                     <div className="sg-admin-card-label">Total Prompts</div>
                   </div>
+                  <div className="sg-admin-card">
+                    <div className="sg-admin-card-value">{stats.totalTokens.toLocaleString()}</div>
+                    <div className="sg-admin-card-label">Tokens Used</div>
+                  </div>
+                  <div className="sg-admin-card">
+                    <div className="sg-admin-card-value">~₹{((stats.totalTokens / 1_000_000) * 2.5).toFixed(1)}</div>
+                    <div className="sg-admin-card-label">Est. API Cost</div>
+                  </div>
                   <div className="sg-admin-card sg-admin-card-highlight">
                     <div className="sg-admin-card-value">{stats.usersAtLimit}</div>
                     <div className="sg-admin-card-label">Users at Limit ({MAX_PROMPTS_PER_USER}/{MAX_PROMPTS_PER_USER})</div>
@@ -166,6 +174,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                       <th>Sector</th>
                       <th>City</th>
                       <th>Score</th>
+                      <th>Tokens</th>
+                      <th>Source</th>
                       <th>Latency</th>
                       <th>Time</th>
                     </tr>
@@ -181,12 +191,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                         <td>{p.sector}</td>
                         <td>{p.city}</td>
                         <td>{p.topScore?.toFixed(1) || '-'}</td>
+                        <td>{p.tokensUsed || '-'}</td>
+                        <td><span className={`sg-admin-source-badge sg-admin-source-${p.dataSource || 'osm'}`}>{p.dataSource === 'google-places' ? 'Places' : p.dataSource === 'hybrid' ? 'Hybrid' : p.dataSource === 'demo' ? 'Demo' : 'OSM'}</span></td>
                         <td>{(p.latencyMs / 1000).toFixed(1)}s</td>
                         <td>{p.timestamp ? timeAgo(p.timestamp) : '-'}</td>
                       </tr>
                     ))}
                     {filteredPrompts.length === 0 && (
-                      <tr><td colSpan={7} className="sg-admin-empty">No prompts yet</td></tr>
+                      <tr><td colSpan={9} className="sg-admin-empty">No prompts yet</td></tr>
                     )}
                   </tbody>
                 </table>

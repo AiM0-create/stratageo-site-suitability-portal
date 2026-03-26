@@ -54,7 +54,7 @@ const ComparisonChart: React.FC<{ locations: LocationData[] }> = ({ locations })
 };
 
 const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
-  const label = basis === 'osm-observed' ? 'OSM' : basis === 'osm-derived' ? 'Derived' : basis === 'constraint-rule' ? 'Rule' : basis === 'ai-generated' ? 'AI' : 'Default';
+  const label = basis === 'osm-observed' ? 'Places + OSM' : basis === 'osm-derived' ? 'Derived' : basis === 'constraint-rule' ? 'Rule' : basis === 'ai-generated' ? 'AI' : 'Default';
   const cls = basis === 'osm-observed' ? 'evidence-osm' : basis === 'constraint-rule' ? 'evidence-rule' : basis === 'ai-generated' ? 'evidence-ai' : 'evidence-default';
   return <span className={`evidence-tag ${cls}`}>{label}</span>;
 };

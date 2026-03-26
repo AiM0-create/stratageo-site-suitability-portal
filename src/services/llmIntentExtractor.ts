@@ -15,6 +15,12 @@ const INTENT_TIMEOUT_MS = 45_000;
 
 // ─── Diagnostic state (readable by UI debug panel) ───
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface IntentDiagnostics {
   attempted: boolean;
   succeeded: boolean;
@@ -25,6 +31,7 @@ export interface IntentDiagnostics {
   responseTimeMs: number | null;
   rawIntent: LLMIntent | null;
   timestamp: string;
+  tokenUsage: TokenUsage | null;
 }
 
 let _lastDiagnostics: IntentDiagnostics = {
@@ -37,6 +44,7 @@ let _lastDiagnostics: IntentDiagnostics = {
   responseTimeMs: null,
   rawIntent: null,
   timestamp: '',
+  tokenUsage: null,
 };
 
 export function getLastDiagnostics(): IntentDiagnostics {
@@ -98,6 +106,7 @@ export async function extractIntent(rawPrompt: string, sessionContext?: string):
       httpStatus: null,
       responseTimeMs: null,
       rawIntent: null,
+      tokenUsage: null,
     });
     return null;
   }
@@ -174,8 +183,16 @@ export async function extractIntent(rawPrompt: string, sessionContext?: string):
       return null;
     }
 
-    // SUCCESS
-    console.log(`[Stratageo] GPT intent extraction SUCCEEDED in ${elapsed}ms: ${data.businessType} / ${data.sector} (${data.confidence} confidence)`);
+    // SUCCESS — capture token usage from API response
+    const rawData = data as any;
+    const tokenUsage: TokenUsage | null = rawData._tokenUsage ? {
+      promptTokens: rawData._tokenUsage.promptTokens || 0,
+      completionTokens: rawData._tokenUsage.completionTokens || 0,
+      totalTokens: rawData._tokenUsage.totalTokens || 0,
+    } : null;
+    delete rawData._tokenUsage;
+
+    console.log(`[Stratageo] GPT intent extraction SUCCEEDED in ${elapsed}ms: ${data.businessType} / ${data.sector} (${data.confidence} confidence) [${tokenUsage?.totalTokens || 0} tokens]`);
     setDiagnostics({
       attempted: true,
       succeeded: true,
@@ -185,6 +202,7 @@ export async function extractIntent(rawPrompt: string, sessionContext?: string):
       httpStatus: response.status,
       responseTimeMs: elapsed,
       rawIntent: data,
+      tokenUsage,
     });
     return data;
 
@@ -209,6 +227,7 @@ export async function extractIntent(rawPrompt: string, sessionContext?: string):
       httpStatus: null,
       responseTimeMs: elapsed,
       rawIntent: null,
+      tokenUsage: null,
     });
     return null;
   }

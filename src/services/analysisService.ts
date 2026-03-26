@@ -657,7 +657,7 @@ export async function runLiveAnalysis(
         spec,
         locations: finalLocations,
         grounding_sources: [
-          { title: 'OpenStreetMap / Overpass API', uri: 'https://overpass-api.de/', retrievedAt: new Date().toISOString(), reliability: 'Varies by region' },
+          { title: 'Google Places API + OpenStreetMap', uri: 'https://developers.google.com/maps/documentation/places', retrievedAt: new Date().toISOString(), reliability: 'Google Places for POIs, OSM for infrastructure' },
           { title: 'User-supplied CSV data', uri: 'user-upload', retrievedAt: new Date().toISOString(), reliability: 'User-provided' },
         ],
       },
@@ -742,7 +742,7 @@ export async function runLiveAnalysis(
       spec,
       locations: finalLocations,
       grounding_sources: [
-        { title: 'OpenStreetMap / Overpass API', uri: 'https://overpass-api.de/', retrievedAt: new Date().toISOString(), reliability: 'Varies by region — community-maintained' },
+        { title: 'Google Places API + OpenStreetMap', uri: 'https://developers.google.com/maps/documentation/places', retrievedAt: new Date().toISOString(), reliability: 'Google Places for POIs, OSM for infrastructure' },
         { title: 'Nominatim Geocoding', uri: 'https://nominatim.openstreetmap.org/', retrievedAt: new Date().toISOString(), reliability: 'Based on OSM address data' },
       ],
     },

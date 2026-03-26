@@ -17,6 +17,8 @@ export interface PromptLog {
   topScore: number | null;
   pdfExported: boolean;
   isFollowUp: boolean;
+  tokensUsed: number;
+  dataSource: 'google-places' | 'osm' | 'hybrid' | 'demo';
 }
 
 export async function logPrompt(data: Omit<PromptLog, 'timestamp'>): Promise<void> {
@@ -54,11 +56,14 @@ export interface PromptEntry {
   resultCount: number;
   topScore: number | null;
   isFollowUp: boolean;
+  tokensUsed: number;
+  dataSource: string;
 }
 
 export interface AdminStats {
   totalUsers: number;
   totalPrompts: number;
+  totalTokens: number;
   usersAtLimit: number;
   topSectors: { name: string; count: number }[];
   topCities: { name: string; count: number }[];
@@ -97,9 +102,12 @@ export async function fetchAdminStats(): Promise<AdminStats> {
   const recentPrompts: PromptEntry[] = [];
   const sectorCounts: Record<string, number> = {};
   const cityCounts: Record<string, number> = {};
+  let totalTokens = 0;
 
   promptsSnap.forEach((d) => {
     const data = d.data();
+    const tokens = data.tokensUsed || 0;
+    totalTokens += tokens;
     recentPrompts.push({
       id: d.id,
       userId: data.userId || '',
@@ -112,6 +120,8 @@ export async function fetchAdminStats(): Promise<AdminStats> {
       resultCount: data.resultCount || 0,
       topScore: data.topScore ?? null,
       isFollowUp: data.isFollowUp || false,
+      tokensUsed: tokens,
+      dataSource: data.dataSource || 'osm',
     });
 
     if (data.sector) sectorCounts[data.sector] = (sectorCounts[data.sector] || 0) + 1;
@@ -131,6 +141,7 @@ export async function fetchAdminStats(): Promise<AdminStats> {
   return {
     totalUsers: users.length,
     totalPrompts: recentPrompts.length,
+    totalTokens,
     usersAtLimit,
     topSectors,
     topCities,

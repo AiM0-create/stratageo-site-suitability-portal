@@ -125,7 +125,7 @@ function MethodologyTab() {
       <ol className="dialog-steps">
         <li><strong>Intent parsing</strong> — Your query is analyzed by AI to extract the business type, location, constraints, and a site-seeking profile (land intensity, urban preference, access needs, environmental sensitivity).</li>
         <li><strong>Candidate identification</strong> — 3-5 neighborhoods are selected for the target city using curated local knowledge or AI-extracted locations from your query.</li>
-        <li><strong>Spatial data collection</strong> — Real-world data is gathered from OpenStreetMap via Overpass API: competitor counts, transit stops, road networks, industrial zones, residential density, and more — within a dynamically calculated search radius.</li>
+        <li><strong>Spatial data collection</strong> — Real-world POI data is gathered from Google Places API for commercial features (restaurants, transit, hospitals, shopping) and supplemented by OpenStreetMap for infrastructure signals (road networks, industrial zones, land use, residential density) — within a dynamically calculated search radius.</li>
         <li><strong>MCDA scoring</strong> — Each location is scored using Multi-Criteria Decision Analysis with continuous linear interpolation. Criteria and weights are dynamically generated per business type — a warehouse is scored on road access and industrial proximity, while a cafe is scored on foot traffic and competition.</li>
         <li><strong>Profile alignment</strong> — Scores are adjusted for site-profile fit. A solar farm in an urban core gets penalized for land unavailability. A retail store in a rural area gets flagged for low foot traffic. This prevents high scores for physically infeasible locations.</li>
         <li><strong>AI explanation</strong> — A GIS-aware AI generates a business-readable narrative explaining the rankings, flagging concerns, and contextualizing the scores.</li>
@@ -138,10 +138,10 @@ function MethodologyTab() {
           <tr><th>Example Criteria</th><th>Direction</th><th>Source</th></tr>
         </thead>
         <tbody>
-          <tr><td>Proximity to major roads</td><td>Positive</td><td>OSM highway network</td></tr>
-          <tr><td>Nearby industrial zones</td><td>Positive</td><td>OSM landuse=industrial</td></tr>
-          <tr><td>Access to utilities</td><td>Positive</td><td>OSM power/water infrastructure</td></tr>
-          <tr><td>Distance from residential</td><td>Negative</td><td>OSM residential buildings</td></tr>
+          <tr><td>Proximity to major roads</td><td>Positive</td><td>OSM road network</td></tr>
+          <tr><td>Nearby industrial zones</td><td>Positive</td><td>OSM landuse data</td></tr>
+          <tr><td>Access to utilities</td><td>Positive</td><td>OSM infrastructure</td></tr>
+          <tr><td>Distance from residential</td><td>Negative</td><td>OSM building data</td></tr>
           <tr><td>Land availability</td><td>Profile-based</td><td>Total POI density vs. land need</td></tr>
         </tbody>
       </table>
@@ -149,13 +149,14 @@ function MethodologyTab() {
 
       <h3>Data sources</h3>
       <ul className="guide-tips">
-        <li><strong>OpenStreetMap</strong> — Spatial features via Overpass API (nodes, ways, relations)</li>
+        <li><strong>Google Places API</strong> — Accurate POI data for commercial features (restaurants, transit, hospitals, shopping, banks)</li>
+        <li><strong>OpenStreetMap</strong> — Infrastructure and land-use data via Overpass API (road networks, industrial zones, residential density)</li>
         <li><strong>Nominatim</strong> — Geocoding for cities and neighborhoods</li>
         <li><strong>AI models</strong> — GPT-4o-mini for intent parsing and explanation generation</li>
       </ul>
 
       <h3>Limitations</h3>
-      <p>This is a screening-level tool using publicly available data. Scores indicate relative suitability based on spatial signals observable from OSM. Real site suitability studies by Stratageo incorporate proprietary datasets, satellite imagery, demographic analysis, and on-ground validation for production-grade recommendations.</p>
+      <p>This is a screening-level tool using Google Places and OpenStreetMap data. Scores indicate relative suitability based on observable spatial signals. Full site suitability studies by Stratageo incorporate proprietary datasets, satellite imagery, demographic analysis, and on-ground validation for production-grade recommendations.</p>
     </>
   );
 }
