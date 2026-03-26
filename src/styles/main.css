@@ -45,6 +45,9 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
 .sg-legend-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .sg-legend-circle { width: 9px; height: 9px; border-radius: 50%; border: 1.5px dashed var(--blue-600); flex-shrink: 0; }
 
+/* Push Leaflet zoom controls below topbar */
+.leaflet-top.leaflet-right { top: 50px !important; }
+
 /* Map markers */
 .sg-marker { background: none !important; border: none !important; }
 .sg-marker-pin {
