@@ -1,0 +1,140 @@
+/**
+ * Usage Tracker — Logs every prompt to Firestore for admin analytics.
+ */
+
+import { collection, addDoc, serverTimestamp, query, orderBy, getDocs, where, limit as fbLimit } from 'firebase/firestore';
+import { db } from '../config/firebase';
+
+export interface PromptLog {
+  userId: string;
+  email: string;
+  prompt: string;
+  sector: string;
+  city: string;
+  timestamp: any;
+  latencyMs: number;
+  resultCount: number;
+  topScore: number | null;
+  pdfExported: boolean;
+  isFollowUp: boolean;
+}
+
+export async function logPrompt(data: Omit<PromptLog, 'timestamp'>): Promise<void> {
+  try {
+    await addDoc(collection(db, 'prompts'), {
+      ...data,
+      timestamp: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('Failed to log prompt:', err);
+  }
+}
+
+// ─── Admin analytics queries ───
+
+export interface UserSummary {
+  uid: string;
+  email: string;
+  displayName: string;
+  promptsUsed: number;
+  isAdmin: boolean;
+  lastLogin: Date | null;
+  createdAt: Date | null;
+}
+
+export interface PromptEntry {
+  id: string;
+  userId: string;
+  email: string;
+  prompt: string;
+  sector: string;
+  city: string;
+  timestamp: Date | null;
+  latencyMs: number;
+  resultCount: number;
+  topScore: number | null;
+  isFollowUp: boolean;
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  totalPrompts: number;
+  usersAtLimit: number;
+  topSectors: { name: string; count: number }[];
+  topCities: { name: string; count: number }[];
+  users: UserSummary[];
+  recentPrompts: PromptEntry[];
+}
+
+export async function fetchAdminStats(): Promise<AdminStats> {
+  // Fetch all users
+  const usersSnap = await getDocs(collection(db, 'users'));
+  const users: UserSummary[] = [];
+  let usersAtLimit = 0;
+
+  usersSnap.forEach((d) => {
+    const data = d.data();
+    const u: UserSummary = {
+      uid: d.id,
+      email: data.email || '',
+      displayName: data.displayName || '',
+      promptsUsed: data.promptsUsed || 0,
+      isAdmin: data.isAdmin || false,
+      lastLogin: data.lastLogin?.toDate?.() || null,
+      createdAt: data.createdAt?.toDate?.() || null,
+    };
+    users.push(u);
+    if (!u.isAdmin && u.promptsUsed >= 4) usersAtLimit++;
+  });
+
+  // Fetch recent prompts (last 100)
+  const promptsQuery = query(
+    collection(db, 'prompts'),
+    orderBy('timestamp', 'desc'),
+    fbLimit(100),
+  );
+  const promptsSnap = await getDocs(promptsQuery);
+  const recentPrompts: PromptEntry[] = [];
+  const sectorCounts: Record<string, number> = {};
+  const cityCounts: Record<string, number> = {};
+
+  promptsSnap.forEach((d) => {
+    const data = d.data();
+    recentPrompts.push({
+      id: d.id,
+      userId: data.userId || '',
+      email: data.email || '',
+      prompt: data.prompt || '',
+      sector: data.sector || '',
+      city: data.city || '',
+      timestamp: data.timestamp?.toDate?.() || null,
+      latencyMs: data.latencyMs || 0,
+      resultCount: data.resultCount || 0,
+      topScore: data.topScore ?? null,
+      isFollowUp: data.isFollowUp || false,
+    });
+
+    if (data.sector) sectorCounts[data.sector] = (sectorCounts[data.sector] || 0) + 1;
+    if (data.city) cityCounts[data.city] = (cityCounts[data.city] || 0) + 1;
+  });
+
+  const topSectors = Object.entries(sectorCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, count]) => ({ name, count }));
+
+  const topCities = Object.entries(cityCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, count]) => ({ name, count }));
+
+  return {
+    totalUsers: users.length,
+    totalPrompts: recentPrompts.length,
+    usersAtLimit,
+    topSectors,
+    topCities,
+    users: users.sort((a, b) => (b.lastLogin?.getTime() || 0) - (a.lastLogin?.getTime() || 0)),
+    recentPrompts,
+  };
+}

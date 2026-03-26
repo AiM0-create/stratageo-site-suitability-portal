@@ -6,6 +6,8 @@ import { recalculateWithWeights } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
 import { resolveContext } from './services/contextResolver';
 import { useSession } from './contexts/SessionContext';
+import { useAuth } from './contexts/AuthContext';
+import { logPrompt } from './services/usageTracker';
 import { TopBar } from './components/TopBar';
 import { MapView } from './components/MapView';
 import { FloatingAssistant } from './components/FloatingAssistant';
@@ -13,11 +15,15 @@ import { ResultsDrawer } from './components/ResultsDrawer';
 import { MethodologyDialog } from './components/MethodologyDialog';
 import { GuidedTour } from './components/GuidedTour';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
+import { LoginScreen } from './components/LoginScreen';
+import { AdminDashboard } from './components/AdminDashboard';
+import { PromptLimitModal } from './components/PromptLimitModal';
 
 declare const html2canvas: any;
 declare const jspdf: any;
 
 const App: React.FC = () => {
+  const { user, loading: authLoading, logout, consumePrompt } = useAuth();
   const { state: sessionState, addMessage, updateMemory, newSession, switchSession, clearMemoryField, dispatch } = useSession();
   const { currentSession, sessionIndex } = sessionState;
 
@@ -35,6 +41,8 @@ const App: React.FC = () => {
   const [resultCount, setResultCount] = useState(3);
   const [userPoints, setUserPoints] = useState<UserPoint[]>([]);
   const [showBuffers, setShowBuffers] = useState(true);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [limitModalOpen, setLimitModalOpen] = useState(false);
 
   // ─── Results cache: preserve results across session switches ───
   interface CachedResults {
@@ -127,6 +135,14 @@ const App: React.FC = () => {
   }, [addMessage, updateMemory]);
 
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
+    // ─── Prompt limit check ───
+    const canProceed = await consumePrompt();
+    if (!canProceed) {
+      setLimitModalOpen(true);
+      return;
+    }
+
+    const analysisStartTime = Date.now();
     setIsLoading(true);
     setError(null);
     // Keep old results visible during loading — they'll be replaced when new results arrive
@@ -200,6 +216,23 @@ const App: React.FC = () => {
         const title = `${parsedSpec.businessType} in ${parsedSpec.geography.city || 'coordinates'}`;
         dispatch({ type: 'SET_TITLE', title });
       }
+
+      // ─── Log usage to Firestore ───
+      if (user) {
+        const topLoc = analysisResult.result.locations.filter(l => !l.excluded)[0];
+        logPrompt({
+          userId: user.uid,
+          email: user.email,
+          prompt: rawPrompt,
+          sector: parsedSpec.sectorId || parsedSpec.businessType,
+          city: parsedSpec.geography.city || '',
+          latencyMs: Date.now() - analysisStartTime,
+          resultCount: analysisResult.result.locations.length,
+          topScore: topLoc?.mcda_score ?? null,
+          pdfExported: false,
+          isFollowUp: resolved.isFollowUp,
+        });
+      }
     } catch (err: any) {
       const msg = err?.message || 'Analysis failed. Please try again.';
       setError(msg);
@@ -211,7 +244,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [resultCount, userPoints, currentSession.memory, currentSession.messages, currentSession.title, addMessage, updateMemory, dispatch]);
+  }, [resultCount, userPoints, currentSession.memory, currentSession.messages, currentSession.title, addMessage, updateMemory, dispatch, consumePrompt, user]);
 
   const handleSelectLocation = useCallback((location: LocationData) => {
     const lat = Number(location.lat);
@@ -487,6 +520,25 @@ const App: React.FC = () => {
     finally { setIsLoading(false); }
   }, [result, locations, spec]);
 
+  // ─── Auth gate ───
+  if (authLoading) {
+    return (
+      <div className="sg-login-screen">
+        <div className="sg-login-card" style={{ textAlign: 'center', padding: '60px 40px' }}>
+          <div className="sg-login-brand">
+            <span className="sg-login-logo-strata">STRATA</span>
+            <span className="sg-login-logo-geo">GEO</span>
+          </div>
+          <p style={{ color: '#64748b', marginTop: 16 }}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen />;
+  }
+
   return (
     <div className="portal">
       <MapView
@@ -510,6 +562,23 @@ const App: React.FC = () => {
         currentSessionId={currentSession.id}
         onSwitchSession={handleSwitchSession}
       />
+
+      {/* User badge + admin controls */}
+      <div className="sg-user-badge" style={{ position: 'fixed', top: 10, right: 16, zIndex: 1001 }}>
+        {user.photoURL && <img src={user.photoURL} alt="" className="sg-user-avatar" />}
+        <div className="sg-user-info">
+          <span className="sg-user-name">{user.displayName || user.email}</span>
+          <span className={`sg-user-prompts ${!user.isAdmin && user.promptsRemaining <= 1 ? 'sg-user-prompts-warn' : ''}`}>
+            {user.isAdmin ? 'Unlimited' : `${user.promptsRemaining} prompts left`}
+          </span>
+        </div>
+        {user.isAdmin && (
+          <button className="sg-admin-trigger" onClick={() => setAdminOpen(true)}>
+            Admin
+          </button>
+        )}
+        <button className="sg-user-logout" onClick={logout}>Sign out</button>
+      </div>
 
       <FloatingAssistant
         messages={messages}
@@ -564,6 +633,9 @@ const App: React.FC = () => {
       />
 
       <DiagnosticsPanel />
+
+      <AdminDashboard open={adminOpen} onClose={() => setAdminOpen(false)} />
+      <PromptLimitModal open={limitModalOpen} onClose={() => setLimitModalOpen(false)} />
     </div>
   );
 };

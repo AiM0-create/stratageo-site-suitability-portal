@@ -28,6 +28,7 @@ import { validateFeasibility } from './feasibilityValidator';
 import { getSectorById } from './sectorTemplates';
 import type { SectorTemplate } from './sectorTemplates';
 import { geocodeLocation, fetchOSMData, reverseGeocode } from './osmService';
+import { fetchPlacesData } from './placesService';
 import { scoreNeighborhood, computeMCDAScore, checkExclusions, addUserPointCriteria, scoreProfileAlignment, generateReasoning, generateSummary } from './mcdaEngine';
 import { fetchAIExplanation } from './aiClient';
 import { findDemoScenario, getDefaultDemoScenario } from '../data/demoScenarios';
@@ -382,7 +383,7 @@ export async function runLiveAnalysis(
           else if (rev?.display_name) candidateName = rev.display_name.split(',')[0];
         } catch { /* use fallback name */ }
 
-        const osmResult = await fetchOSMData(candidate.lat, candidate.lng, sector, spec.constraints, searchRadiusM);
+        const osmResult = await fetchPlacesData(candidate.lat, candidate.lng, sector, spec.constraints, searchRadiusM);
 
         let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
         // Add profile alignment criteria — does this location type match what the business needs?
@@ -582,7 +583,7 @@ export async function runLiveAnalysis(
       });
 
       try {
-        const osmResult = await fetchOSMData(gn.lat, gn.lng, sector, spec.constraints, effectiveRadius);
+        const osmResult = await fetchPlacesData(gn.lat, gn.lng, sector, spec.constraints, effectiveRadius);
 
         let criteria = scoreNeighborhood(osmResult.signals, sector, spec);
         // Add profile alignment criteria — does this location type match what the business needs?
