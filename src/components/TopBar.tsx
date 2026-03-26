@@ -50,6 +50,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, o
         <span className={`topbar-badge ${mode === 'demo' ? 'badge-demo' : 'badge-live'}`}>
           {mode === 'demo' ? 'Demo' : 'Live'}
         </span>
+        <span className="topbar-version">v0.8.0</span>
       </div>
       <div className="topbar-right">
         {/* Session history */}
