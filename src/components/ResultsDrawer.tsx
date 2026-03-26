@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { LocationData, AnalysisResult, AnalysisSpec, HeatmapType } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { compareToBenchmark } from '../services/benchmarks';
 
 interface ResultsDrawerProps {
   open: boolean;
@@ -112,6 +113,24 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
       <div className="drawer-body">
         {/* Summary */}
         <p className="drawer-summary">{result.summary}</p>
+
+        {/* Benchmark comparison */}
+        {spec && ranked[0] && !ranked[0].excluded && (() => {
+          const bench = compareToBenchmark(ranked[0].mcda_score, spec.sectorId, spec.geography?.city);
+          if (!bench) return null;
+          const deltaClass = bench.delta > 0.5 ? 'above' : bench.delta < -0.5 ? 'below' : 'at';
+          return (
+            <div className="sg-benchmark">
+              <span className="sg-benchmark-score">
+                {ranked[0].mcda_score.toFixed(1)}/10
+              </span>
+              <span className={`sg-benchmark-delta ${deltaClass}`}>
+                {bench.delta > 0 ? '+' : ''}{bench.delta.toFixed(1)} vs avg
+              </span>
+              <span className="sg-benchmark-insight">{bench.insight}</span>
+            </div>
+          );
+        })()}
 
         {/* Analysis Assumptions Panel */}
         {spec && (

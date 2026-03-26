@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, HeatmapType, UserPoint } from './types';
 import { config } from './config';
 import { runDemoAnalysis, runLiveAnalysis } from './services/analysisService';
@@ -6,6 +7,8 @@ import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
 import { resolveContext } from './services/contextResolver';
+import { compareToBenchmark } from './services/benchmarks';
+import { saveAnalysis, fetchSharedAnalysis } from './services/analysisStore';
 import { useSession } from './contexts/SessionContext';
 import { useAuth } from './contexts/AuthContext';
 import { logPrompt } from './services/usageTracker';
@@ -19,6 +22,7 @@ import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 import { LoginScreen } from './components/LoginScreen';
 import { AdminDashboard } from './components/AdminDashboard';
 import { PromptLimitModal } from './components/PromptLimitModal';
+import SavedAnalyses from './components/SavedAnalyses';
 
 declare const html2canvas: any;
 declare const jspdf: any;
@@ -44,6 +48,41 @@ const App: React.FC = () => {
   const [showBuffers, setShowBuffers] = useState(true);
   const [adminOpen, setAdminOpen] = useState(false);
   const [limitModalOpen, setLimitModalOpen] = useState(false);
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [shareToast, setShareToast] = useState<string | null>(null);
+  const [isSharedView, setIsSharedView] = useState(false);
+  const [lastPrompt, setLastPrompt] = useState('');
+
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // ─── Handle shared analysis links ───
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.startsWith('/share/')) {
+      const shareId = path.replace('/share/', '');
+      if (shareId) {
+        setIsLoading(true);
+        fetchSharedAnalysis(shareId).then(analysis => {
+          if (analysis) {
+            setResult(analysis.result);
+            setSpec(analysis.spec);
+            setDrawerOpen(true);
+            setIsSharedView(true);
+            if (analysis.result.locations.length > 0) {
+              const weights: Record<string, number> = {};
+              analysis.result.locations[0].criteria_breakdown.forEach(c => { weights[c.name] = c.weight; });
+              setCustomWeights(weights);
+            }
+          } else {
+            setError('Shared analysis not found or has expired.');
+          }
+        }).catch(() => {
+          setError('Failed to load shared analysis.');
+        }).finally(() => setIsLoading(false));
+      }
+    }
+  }, [location.pathname]);
 
   // ─── Results cache: preserve results across session switches ───
   interface CachedResults {
@@ -154,6 +193,7 @@ const App: React.FC = () => {
     // Resolve context for follow-ups
     const resolved = resolveContext(rawPrompt, currentSession.memory, currentSession.messages);
 
+    setLastPrompt(rawPrompt);
     addMessage('user', rawPrompt, { intent: resolved.isFollowUp ? 'followup' : 'query' });
 
     if (resolved.isFollowUp) {
@@ -195,10 +235,23 @@ const App: React.FC = () => {
 
       const top = analysisResult.result.locations.filter(l => !l.excluded)[0];
       const excludedCount = analysisResult.result.locations.filter(l => l.excluded).length;
+
+      // Add benchmark comparison
+      let benchmarkNote = '';
+      if (top && parsedSpec.sectorId) {
+        const bench = compareToBenchmark(top.mcda_score, parsedSpec.sectorId, parsedSpec.geography.city);
+        if (bench) benchmarkNote = ` (${bench.ratingLabel})`;
+      }
+
       addMessage('assistant', top
-        ? `Screened ${analysisResult.result.locations.length} areas in ${analysisResult.result.target_location}. ${top.name} ranks highest at ${top.mcda_score}/10.${excludedCount > 0 ? ` ${excludedCount} excluded by constraints.` : ''}`
+        ? `Screened ${analysisResult.result.locations.length} areas in ${analysisResult.result.target_location}. ${top.name} ranks highest at ${top.mcda_score}/10${benchmarkNote}.${excludedCount > 0 ? ` ${excludedCount} excluded by constraints.` : ''}`
         : analysisResult.result.summary,
       );
+
+      // Save analysis to Firestore
+      if (user) {
+        saveAnalysis(user.uid, user.email, rawPrompt, analysisResult.result, analysisResult.spec).catch(() => {});
+      }
 
       // Update working memory from results
       updateMemory({
@@ -508,6 +561,28 @@ const App: React.FC = () => {
       }
 
       // ═══════════════════════════════════════
+      // BENCHMARK COMPARISON
+      // ═══════════════════════════════════════
+      if (spec && spec.sectorId) {
+        const topNonExcluded = ranked.find(l => !l.excluded);
+        if (topNonExcluded) {
+          const bench = compareToBenchmark(topNonExcluded.mcda_score, spec.sectorId, spec.geography?.city);
+          if (bench) {
+            ensureSpace(22);
+            pdf.setDrawColor(226, 232, 240); pdf.line(m, y, pw - m, y); y += 4;
+            pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(30, 41, 59);
+            pdf.text('Industry Benchmark', m, y); y += 4;
+            pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(55, 65, 81);
+            pdf.text(`Sector average: ${bench.sectorAvg.toFixed(1)}/10${bench.cityAvg ? `  |  City average (${spec.geography.city}): ${bench.cityAvg.toFixed(1)}/10` : ''}`, m, y); y += 3.5;
+            pdf.text(`Top location score: ${topNonExcluded.mcda_score.toFixed(1)}/10 — ${bench.ratingLabel}`, m, y); y += 3.5;
+            pdf.setTextColor(100, 116, 139);
+            const insightLines = pdf.splitTextToSize(bench.insight, cw);
+            pdf.text(insightLines.slice(0, 1), m, y); y += 4;
+          }
+        }
+      }
+
+      // ═══════════════════════════════════════
       // METHODOLOGY FOOTER
       // ═══════════════════════════════════════
       ensureSpace(20);
@@ -515,7 +590,7 @@ const App: React.FC = () => {
       pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(100, 116, 139);
       pdf.text('Methodology', m, y); y += 3;
       pdf.setFont('helvetica', 'normal');
-      const methLines = pdf.splitTextToSize('Scored using Multi-Criteria Decision Analysis (MCDA) with continuous linear interpolation. Spatial data from OpenStreetMap (Overpass API). Criteria weights dynamically generated per business profile. Screening-level assessment — field validation recommended.', cw);
+      const methLines = pdf.splitTextToSize('Scored using Multi-Criteria Decision Analysis (MCDA) with continuous linear interpolation. Spatial data sourced from Google Places API and OpenStreetMap. Criteria weights dynamically generated per business profile. Screening-level assessment — field validation recommended.', cw);
       pdf.text(methLines, m, y);
 
       // Page footers
@@ -529,6 +604,33 @@ const App: React.FC = () => {
     } catch { setError('PDF export failed.'); }
     finally { setIsLoading(false); }
   }, [result, locations, spec]);
+
+  // ─── Share analysis ───
+  const handleShareAnalysis = useCallback(async (shareId: string) => {
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = `${baseUrl}#/share/${shareId}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareToast('Link copied! Anyone with this link can view the analysis.');
+      setTimeout(() => setShareToast(null), 3000);
+    } catch {
+      setShareToast(shareUrl);
+      setTimeout(() => setShareToast(null), 5000);
+    }
+  }, []);
+
+  // ─── Load saved analysis ───
+  const handleLoadAnalysis = useCallback((analysis: any) => {
+    setResult(analysis.result);
+    setSpec(analysis.spec);
+    setDrawerOpen(true);
+    setSavedOpen(false);
+    if (analysis.result.locations?.length > 0) {
+      const weights: Record<string, number> = {};
+      analysis.result.locations[0].criteria_breakdown.forEach((c: any) => { weights[c.name] = c.weight; });
+      setCustomWeights(weights);
+    }
+  }, []);
 
   // ─── Auth gate ───
   if (authLoading) {
@@ -574,6 +676,14 @@ const App: React.FC = () => {
         user={user}
         onLogout={logout}
         onAdminOpen={() => setAdminOpen(true)}
+        onSavedOpen={() => setSavedOpen(true)}
+        onShareAnalysis={result ? () => {
+          if (user && result && spec) {
+            saveAnalysis(user.uid, user.email, lastPrompt, result, spec).then(shareId => {
+              handleShareAnalysis(shareId);
+            }).catch(() => setShareToast('Failed to generate share link.'));
+          }
+        } : undefined}
       />
 
       <FloatingAssistant
@@ -632,6 +742,24 @@ const App: React.FC = () => {
 
       <AdminDashboard open={adminOpen} onClose={() => setAdminOpen(false)} />
       <PromptLimitModal open={limitModalOpen} onClose={() => setLimitModalOpen(false)} />
+
+      <SavedAnalyses
+        open={savedOpen}
+        onClose={() => setSavedOpen(false)}
+        onLoadAnalysis={handleLoadAnalysis}
+        onShareAnalysis={handleShareAnalysis}
+      />
+
+      {shareToast && <div className="sg-share-toast">{shareToast}</div>}
+
+      {isSharedView && (
+        <div className="sg-share-banner">
+          <span>Viewing shared analysis (read-only)</span>
+          <a href={window.location.origin + window.location.pathname} onClick={(e) => { e.preventDefault(); setIsSharedView(false); navigate('/'); }}>
+            Go to Portal
+          </a>
+        </div>
+      )}
     </div>
   );
 };
