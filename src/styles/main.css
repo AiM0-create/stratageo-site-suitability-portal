@@ -807,30 +807,35 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .sg-user-logout { font-size: 10px; padding: 4px 8px; border-radius: 4px; }
   .sg-admin-trigger { font-size: 10px; padding: 4px 8px; border-radius: 4px; }
 
-  /* --- Assistant panel: constrained height, uniform spacing --- */
+  /* --- Assistant panel: fixed to bottom, never overflows screen --- */
   .assistant {
-    max-width: 94%; border-radius: 14px;
-    bottom: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    position: fixed; /* fixed instead of absolute — ignores scroll, uses real viewport */
+    max-width: 94%; border-radius: 14px 14px 0 0;
+    bottom: 0; left: 50%; transform: translateX(-50%);
+    bottom: env(safe-area-inset-bottom, 0px);
+    /* Hard cap: viewport minus topbar(48) minus browser chrome(~110) minus gap */
+    max-height: calc(100vh - 170px);
+    max-height: calc(100dvh - 60px);
   }
   .assistant-expanded {
-    max-height: 42vh;  /* fallback */
-    max-height: 42dvh; /* dynamic viewport — excludes browser chrome */
+    max-height: calc(100vh - 170px);
+    max-height: calc(100dvh - 60px);
   }
+  .assistant-collapsed { max-height: 44px; }
   .assistant-header { padding: 8px 12px; }
-  .assistant-body { padding: 6px 12px; }
+  .assistant-body { padding: 6px 12px; flex: 1; min-height: 0; overflow-y: auto; }
   .assistant-welcome h3 { font-size: 14px; margin-bottom: 2px; }
-  .assistant-welcome-text { font-size: 11px; line-height: 1.4; margin-bottom: 6px; }
+  .assistant-welcome-text { font-size: 11px; line-height: 1.4; margin-bottom: 4px; }
   .assistant-chips { gap: 5px; margin-bottom: 2px; }
   .assistant-chip { font-size: 11px; padding: 5px 11px; border-radius: 16px; }
   .assistant-sector-grid { grid-template-columns: repeat(3, 1fr); }
 
-  /* --- Input bar: compact --- */
-  .assistant-input { padding: 6px 10px; gap: 6px; }
+  /* --- Input bar: always visible at bottom of panel --- */
+  .assistant-input { padding: 6px 10px; gap: 6px; flex-shrink: 0; }
   .assistant-text-input { font-size: 14px; padding: 7px 10px; border-radius: 8px; }
   .assistant-input-field { font-size: 14px; padding: 7px 10px; }
   .assistant-send { padding: 7px 12px; font-size: 12px; border-radius: 8px; }
-  .assistant-controls { padding: 2px 12px 0; }
+  .assistant-controls { padding: 2px 12px 0; flex-shrink: 0; }
   .assistant-mode-btn { padding: 4px; }
   .csv-upload-btn { padding: 4px; }
 
@@ -868,10 +873,12 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .assistant-welcome-examples { display: none; }
   .assistant-welcome-desc {
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; font-size: 11px !important; margin-bottom: 6px !important;
+    overflow: hidden; font-size: 11px !important; margin-bottom: 4px !important;
+    line-height: 1.4 !important;
   }
   .assistant-prompt-reminder { font-size: 10px; padding: 5px 8px; margin-bottom: 4px; }
-  .assistant-prompt-guide { display: none; } /* Guide is too tall for mobile — accessible via desktop */
+  .assistant-prompt-guide { display: none; }
+  .assistant-prompts-remaining { font-size: 9px; padding: 2px 0; }
 }
 
 /* ─── Small mobile (under 480px) ─── */
@@ -883,10 +890,14 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
 
   .assistant {
     max-width: 100%; left: 0; transform: none;
-    margin: 0 8px; bottom: 10px;
-    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    margin: 0; border-radius: 12px 12px 0 0;
+    bottom: 0; bottom: env(safe-area-inset-bottom, 0px);
   }
-  .assistant-expanded { max-height: 40vh; max-height: 40dvh; }
+  .assistant-expanded {
+    max-height: calc(100vh - 160px);
+    max-height: calc(100dvh - 56px);
+  }
+  .assistant-welcome-desc { display: none; } /* Hide description on small phones — chips suffice */
   .assistant-sector-grid { grid-template-columns: repeat(2, 1fr); }
   /* 16px font-size prevents iOS auto-zoom on input focus */
   .assistant-text-input { font-size: 16px; padding: 8px 10px; }
@@ -904,8 +915,11 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .topbar-logo { font-size: 13px; }
   .sg-user-badge { display: none; }
 
-  .assistant { margin: 0 6px; }
-  .assistant-expanded { max-height: 38vh; max-height: 38dvh; }
+  .assistant { margin: 0; }
+  .assistant-expanded {
+    max-height: calc(100vh - 150px);
+    max-height: calc(100dvh - 52px);
+  }
   .assistant-chip { font-size: 10px; padding: 5px 10px; }
   .assistant-welcome-text { font-size: 11px; }
 }
