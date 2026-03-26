@@ -157,6 +157,33 @@ export const SECTOR_ID_MAP: Record<string, string> = {
   waste_management: 'logistics',
   waste_processing: 'logistics',
   recycling: 'logistics',
+  // Commercial Infrastructure / Parking
+  commercial_infrastructure: 'logistics',
+  parking: 'logistics',
+  parking_facility: 'logistics',
+  // Pet Services
+  pet_services: 'clinic',
+  premium_pet_services: 'clinic',
+  pet_care: 'clinic',
+  veterinary: 'clinic',
+  // Brewery / Bar (F&B)
+  brewery: 'cafe',
+  microbrewery: 'cafe',
+  bar: 'cafe',
+  pub: 'cafe',
+  taproom: 'cafe',
+  // Recreation / Sports
+  recreation: 'retail',
+  sports_facility: 'retail',
+  golf_course: 'retail',
+  // Tourism
+  eco_tourism: 'realestate',
+  agri_tourism: 'realestate',
+  resort: 'retail',
+  luxury_hospitality: 'retail',
+  // Budget variants
+  budget_retail: 'retail',
+  budget_hotel: 'retail',
 };
 
 export function resolveSectorId(llmSector: string): string | null {

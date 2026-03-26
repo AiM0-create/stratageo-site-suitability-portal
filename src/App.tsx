@@ -11,6 +11,7 @@ import { MapView } from './components/MapView';
 import { FloatingAssistant } from './components/FloatingAssistant';
 import { ResultsDrawer } from './components/ResultsDrawer';
 import { MethodologyDialog } from './components/MethodologyDialog';
+import { GuidedTour } from './components/GuidedTour';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 
 declare const html2canvas: any;
@@ -30,6 +31,7 @@ const App: React.FC = () => {
   const [heatmapType, setHeatmapType] = useState<HeatmapType>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [methodologyOpen, setMethodologyOpen] = useState(false);
+  const [tourActive, setTourActive] = useState(false);
   const [resultCount, setResultCount] = useState(3);
   const [userPoints, setUserPoints] = useState<UserPoint[]>([]);
   const [showBuffers, setShowBuffers] = useState(true);
@@ -552,6 +554,13 @@ const App: React.FC = () => {
       <MethodologyDialog
         open={methodologyOpen}
         onClose={() => setMethodologyOpen(false)}
+        onStartTour={() => setTourActive(true)}
+      />
+
+      <GuidedTour
+        active={tourActive}
+        onEnd={() => setTourActive(false)}
+        hasResults={!!result}
       />
 
       <DiagnosticsPanel />
