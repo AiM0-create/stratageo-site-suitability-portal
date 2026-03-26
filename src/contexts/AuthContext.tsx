@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth';
+import { signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, googleProvider, ADMIN_EMAILS, MAX_PROMPTS_PER_USER } from '../config/firebase';
 
@@ -17,6 +17,7 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   consumePrompt: () => Promise<boolean>; // returns false if limit reached
   refreshPromptCount: () => Promise<void>;
@@ -100,6 +101,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [buildAuthUser]);
 
+  const signInWithEmail = useCallback(async (email: string, password: string) => {
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      const authUser = await buildAuthUser(result.user);
+      setUser(authUser);
+    } catch (err: any) {
+      console.error('Email sign-in error:', err);
+      throw err;
+    }
+  }, [buildAuthUser]);
+
   const logout = useCallback(async () => {
     await signOut(auth);
     setUser(null);
@@ -139,7 +151,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, logout, consumePrompt, refreshPromptCount }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signInWithEmail, logout, consumePrompt, refreshPromptCount }}>
       {children}
     </AuthContext.Provider>
   );

@@ -799,6 +799,30 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
 .sg-login-btn:hover { background: var(--gray-50); border-color: var(--gray-300); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 .sg-login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .sg-login-btn-loading { color: var(--gray-500); }
+.sg-login-btn-email { margin-top: 0; }
+.sg-login-btn-email span { color: var(--gray-600); }
+.sg-login-btn-submit { background: var(--blue-600) !important; color: white !important; border-color: var(--blue-600) !important; }
+.sg-login-btn-submit span, .sg-login-btn-submit { color: white !important; }
+.sg-login-btn-submit:hover { background: var(--blue-700) !important; }
+.sg-login-divider {
+  display: flex; align-items: center; gap: 12px; margin: 14px 0;
+  font-size: 11px; color: var(--gray-400);
+}
+.sg-login-divider::before, .sg-login-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--gray-200);
+}
+.sg-login-email-form { display: flex; flex-direction: column; gap: 10px; }
+.sg-login-input {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--gray-200);
+  border-radius: 8px; font-size: 13px; color: var(--gray-700);
+  outline: none; transition: border-color 0.2s;
+}
+.sg-login-input:focus { border-color: var(--blue-600); }
+.sg-login-back {
+  background: none; border: none; color: var(--gray-400); font-size: 12px;
+  cursor: pointer; padding: 4px 0;
+}
+.sg-login-back:hover { color: var(--gray-600); }
 .sg-login-error { color: var(--red-600); font-size: 12px; margin-top: 12px; }
 .sg-login-note { font-size: 11px; color: var(--gray-400); margin-top: 16px; line-height: 1.5; }
 .sg-login-footer {

@@ -2,17 +2,41 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const LoginScreen: React.FC = () => {
-  const { signInWithGoogle } = useAuth();
+  const { signInWithGoogle, signInWithEmail } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
-  const handleSignIn = async () => {
+  const handleGoogleSignIn = async () => {
     setLoading(true);
     setError(null);
     try {
       await signInWithGoogle();
     } catch (err: any) {
       setError(err.message || 'Sign-in failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEmailSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) { setError('Please enter email and password.'); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      await signInWithEmail(email, password);
+    } catch (err: any) {
+      // Friendly error messages
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        setError('Invalid email or password.');
+      } else if (err.code === 'auth/too-many-requests') {
+        setError('Too many attempts. Please try again later.');
+      } else {
+        setError(err.message || 'Sign-in failed.');
+      }
     } finally {
       setLoading(false);
     }
@@ -56,12 +80,13 @@ export const LoginScreen: React.FC = () => {
           </div>
         </div>
 
+        {/* Google Sign-in — primary for clients */}
         <button
           className="sg-login-btn"
-          onClick={handleSignIn}
+          onClick={handleGoogleSignIn}
           disabled={loading}
         >
-          {loading ? (
+          {loading && !showEmailForm ? (
             <span className="sg-login-btn-loading">Signing in...</span>
           ) : (
             <>
@@ -75,6 +100,49 @@ export const LoginScreen: React.FC = () => {
             </>
           )}
         </button>
+
+        {/* Divider */}
+        <div className="sg-login-divider">
+          <span>or</span>
+        </div>
+
+        {/* Email/Password — for Stratageo team */}
+        {!showEmailForm ? (
+          <button
+            className="sg-login-btn sg-login-btn-email"
+            onClick={() => setShowEmailForm(true)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20">
+              <rect x="2" y="4" width="20" height="16" rx="2"/>
+              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+            </svg>
+            <span>Sign in with Email</span>
+          </button>
+        ) : (
+          <form className="sg-login-email-form" onSubmit={handleEmailSignIn}>
+            <input
+              type="email"
+              placeholder="Email address"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              className="sg-login-input"
+              autoFocus
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              className="sg-login-input"
+            />
+            <button type="submit" className="sg-login-btn sg-login-btn-submit" disabled={loading}>
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+            <button type="button" className="sg-login-back" onClick={() => { setShowEmailForm(false); setError(null); }}>
+              Back to all options
+            </button>
+          </form>
+        )}
 
         {error && <p className="sg-login-error">{error}</p>}
 
