@@ -44,7 +44,7 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, o
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <a href="/" className="topbar-logo" aria-label="Stratageo">
+        <a href="https://stratageo.in/index.html" className="topbar-logo" aria-label="Stratageo">
           <span className="logo-strata">STRATA</span><span className="logo-geo">GEO</span>
         </a>
         <span className={`topbar-badge ${mode === 'demo' ? 'badge-demo' : 'badge-live'}`}>
