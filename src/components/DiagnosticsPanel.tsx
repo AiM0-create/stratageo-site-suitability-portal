@@ -62,7 +62,7 @@ export const DiagnosticsPanel: React.FC = () => {
   };
 
   return (
-    <div style={{
+    <div className="sg-diag-wrap" style={{
       position: 'fixed',
       bottom: '12px',
       left: '12px',

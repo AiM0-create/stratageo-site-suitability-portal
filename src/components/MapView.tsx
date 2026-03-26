@@ -62,7 +62,7 @@ export const MapView: React.FC<MapViewProps> = ({
       maxZoom: 19,
     }).addTo(map);
 
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
+    L.control.zoom({ position: 'topright' }).addTo(map);
     map.on('click', onDeselectAll);
 
     mapRef.current = map;

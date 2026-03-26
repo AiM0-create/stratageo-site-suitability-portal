@@ -763,16 +763,21 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .sg-saved-panel { width: 300px; }
 }
 
-/* Mobile landscape / small tablet (640px - 768px) */
+/* =============================================
+   RESPONSIVE BREAKPOINTS
+   Spacing rhythm: 16px (desktop) → 12px (tablet) → 8px (mobile)
+   ============================================= */
+
+/* Small tablet (768px) */
 @media (max-width: 768px) {
-  .topbar { padding: 0 10px; height: 42px; }
+  .topbar { padding: 0 12px; }
   .topbar-logo { font-size: 14px; }
   .topbar-version { display: none; }
   .sg-user-info { display: none; }
   .sg-admin-trigger { font-size: 9px; padding: 2px 6px; }
   .sg-user-logout { font-size: 9px; }
   .assistant { max-width: 96%; }
-  .assistant-expanded { max-height: 55vh; }
+  .assistant-expanded { max-height: 50vh; }
   .drawer { width: 320px; }
   .sg-admin-cards { grid-template-columns: repeat(2, 1fr); }
   .sg-admin-table { font-size: 11px; }
@@ -781,38 +786,61 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .sg-saved-panel { width: 280px; }
 }
 
-/* Mobile (under 640px) */
+/* ─── Mobile (under 640px) ─── */
 @media (max-width: 640px) {
-  .topbar { height: 40px; padding: 0 8px; }
-  .topbar-logo { font-size: 13px; }
-  .topbar-badge { font-size: 9px; padding: 1px 6px; }
+  /* --- Topbar: compact but breathable --- */
+  .topbar {
+    height: 48px; padding: 0 12px;
+    gap: 8px;
+  }
+  .topbar-left { gap: 8px; }
+  .topbar-right { gap: 8px; }
+  .topbar-logo { font-size: 14px; }
+  .topbar-badge { font-size: 9px; padding: 2px 7px; }
   .topbar-contact { display: none; }
-  .topbar-right { gap: 4px; }
-  .topbar-btn { padding: 4px; }
+  .topbar-btn { padding: 6px; }
 
-  .sg-user-badge { padding: 2px 6px; gap: 4px; }
-  .sg-user-avatar { width: 20px; height: 20px; }
+  /* --- User badge: clean pill --- */
+  .sg-user-badge { padding: 4px 10px; gap: 6px; border-radius: 20px; }
+  .sg-user-avatar { width: 24px; height: 24px; }
   .sg-user-info { display: none; }
-  .sg-user-logout { font-size: 9px; padding: 2px 4px; }
-  .sg-admin-trigger { font-size: 9px; padding: 2px 5px; }
+  .sg-user-logout { font-size: 10px; padding: 4px 8px; border-radius: 4px; }
+  .sg-admin-trigger { font-size: 10px; padding: 4px 8px; border-radius: 4px; }
 
-  .assistant { max-width: 98%; bottom: 6px; }
-  .assistant-expanded { max-height: 60vh; }
-  .assistant-header { padding: 8px 10px; }
-  .assistant-body { padding: 8px 10px; }
-  .assistant-input-row { padding: 6px 8px; gap: 4px; }
-  .assistant-textarea { font-size: 13px; }
+  /* --- Assistant panel: constrained height, uniform spacing --- */
+  .assistant {
+    max-width: 94%; bottom: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    border-radius: 14px;
+  }
+  .assistant-expanded { max-height: 48vh; }
+  .assistant-header { padding: 10px 12px; }
+  .assistant-body { padding: 8px 12px; }
+  .assistant-welcome h3 { font-size: 15px; margin-bottom: 4px; }
+  .assistant-welcome-text { font-size: 12px; line-height: 1.45; margin-bottom: 8px; }
+  .assistant-chips { gap: 6px; margin-bottom: 4px; }
+  .assistant-chip { font-size: 11px; padding: 6px 12px; border-radius: 16px; }
   .assistant-sector-grid { grid-template-columns: repeat(3, 1fr); }
-  .assistant-chip { font-size: 11px; padding: 4px 10px; }
-  .assistant-welcome h3 { font-size: 14px; }
-  .assistant-welcome-text { font-size: 12px; }
 
+  /* --- Input bar: compact, not oversized --- */
+  .assistant-input { padding: 8px 12px; gap: 6px; }
+  .assistant-text-input { font-size: 14px; padding: 8px 10px; border-radius: 8px; }
+  .assistant-input-field { font-size: 14px; padding: 8px 10px; }
+  .assistant-send { padding: 8px 12px; font-size: 12px; border-radius: 8px; }
+  .assistant-controls { padding: 4px 12px 0; }
+  .assistant-mode-btn { padding: 4px; }
+  .csv-upload-btn { padding: 4px; }
+
+  /* --- Results drawer: full-width sheet --- */
   .drawer { width: 100%; border-radius: 12px 12px 0 0; }
   .drawer-header { padding: 10px 12px; }
-  .drawer-content { padding: 8px 10px; }
+  .drawer-content { padding: 8px 12px; }
 
-  .sg-map-legend { bottom: 70px; left: 8px; }
+  /* --- Map & overlays --- */
+  .sg-map-legend { bottom: 80px; left: 8px; }
+  .leaflet-top.leaflet-right { top: 54px !important; right: 8px !important; }
 
+  /* --- Panels --- */
   .sg-admin-panel { max-width: 100%; max-height: 95vh; border-radius: 12px; margin: 8px; }
   .sg-admin-cards { grid-template-columns: 1fr 1fr; gap: 8px; }
   .sg-admin-card { padding: 12px; }
@@ -820,54 +848,76 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .sg-admin-header { padding: 14px 16px 0; }
   .sg-admin-content { padding: 14px 16px; }
   .sg-admin-table { font-size: 10px; }
-  .sg-admin-table th, .sg-admin-table td { padding: 6px 6px; }
+  .sg-admin-table th, .sg-admin-table td { padding: 6px; }
   .sg-admin-cell-email { max-width: 100px; }
   .sg-admin-cell-prompt { max-width: 120px; }
-
   .sg-limit-modal { padding: 24px; margin: 12px; border-radius: 12px; }
   .sg-login-card { padding: 24px; margin: 12px; }
-
   .sg-saved-panel { width: 100%; }
-
   .methodology-dialog { max-width: 95vw; margin: 8px; }
+
+  /* Hide diagnostics on mobile */
+  .sg-diag-wrap { display: none !important; }
 }
 
-/* Small mobile (under 480px) */
-@media (max-width: 480px) {
-  .assistant-sector-grid { grid-template-columns: repeat(2, 1fr); }
-  .assistant { max-width: 100%; left: 0; transform: none; margin: 0 4px; bottom: 4px; }
-  .assistant-expanded { max-height: 65vh; }
+/* Hide verbose examples on mobile — chips are enough */
+@media (max-width: 640px) {
+  .assistant-welcome-examples { display: none; }
+  .assistant-prompt-reminder { font-size: 10px; padding: 6px 8px; }
+  .assistant-prompt-guide { font-size: 10px; }
+}
 
+/* ─── Small mobile (under 480px) ─── */
+@media (max-width: 480px) {
+  .topbar { height: 48px; padding: 0 10px; }
   .topbar-left { gap: 6px; }
   .topbar-badge { display: none; }
   .session-dropdown-wrap { display: none; }
 
+  .assistant {
+    max-width: 100%; left: 0; transform: none;
+    margin: 0 8px; bottom: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  .assistant-expanded { max-height: 50vh; }
+  .assistant-sector-grid { grid-template-columns: repeat(2, 1fr); }
+  /* 16px font-size prevents iOS auto-zoom on input focus */
+  .assistant-text-input { font-size: 16px; padding: 9px 10px; }
+  .assistant-input-field { font-size: 16px; padding: 9px 10px; }
+
   .sg-admin-cards { grid-template-columns: 1fr; }
   .sg-admin-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
   .drawer-chart { overflow-x: auto; }
+  .sg-map-legend { bottom: 90px; }
 }
 
-/* Very small (under 360px) */
+/* ─── Very small (under 360px) ─── */
 @media (max-width: 360px) {
-  .assistant { margin: 0 2px; }
-  .assistant-chip { font-size: 10px; padding: 3px 8px; }
-  .topbar { padding: 0 6px; }
+  .topbar { padding: 0 8px; height: 44px; }
+  .topbar-logo { font-size: 13px; }
   .sg-user-badge { display: none; }
+
+  .assistant { margin: 0 6px; }
+  .assistant-expanded { max-height: 48vh; }
+  .assistant-chip { font-size: 10px; padding: 5px 10px; }
+  .assistant-welcome-text { font-size: 11px; }
 }
 
-/* ─── Touch-friendly adjustments ─── */
+/* ─── Touch devices ─── */
 @media (hover: none) and (pointer: coarse) {
   .topbar-btn { min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }
   .assistant-chip { min-height: 36px; display: flex; align-items: center; }
-  .sg-user-logout { min-height: 32px; }
-  .sg-admin-trigger { min-height: 32px; }
+  .assistant-send { min-height: 40px; min-width: 40px; }
+  .assistant-mode-btn { min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }
+  .csv-upload-btn { min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }
+  .sg-user-logout { min-height: 32px; display: flex; align-items: center; }
+  .sg-admin-trigger { min-height: 32px; display: flex; align-items: center; }
   .drawer-location-card { padding: 10px 12px; }
 }
 
 /* ─── Landscape phone ─── */
 @media (max-height: 500px) and (orientation: landscape) {
-  .assistant-expanded { max-height: 45vh; }
+  .assistant-expanded { max-height: 40vh; }
   .topbar { height: 36px; }
   .sg-map-legend { display: none; }
 }
