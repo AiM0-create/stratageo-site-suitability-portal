@@ -777,7 +777,7 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .sg-admin-trigger { font-size: 9px; padding: 2px 6px; }
   .sg-user-logout { font-size: 9px; }
   .assistant { max-width: 96%; }
-  .assistant-expanded { max-height: 50vh; }
+  .assistant-expanded { max-height: 45vh; max-height: 45dvh; }
   .drawer { width: 320px; }
   .sg-admin-cards { grid-template-columns: repeat(2, 1fr); }
   .sg-admin-table { font-size: 11px; }
@@ -809,25 +809,28 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
 
   /* --- Assistant panel: constrained height, uniform spacing --- */
   .assistant {
-    max-width: 94%; bottom: 12px;
+    max-width: 94%; border-radius: 14px;
+    bottom: 12px;
     bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-    border-radius: 14px;
   }
-  .assistant-expanded { max-height: 48vh; }
-  .assistant-header { padding: 10px 12px; }
-  .assistant-body { padding: 8px 12px; }
-  .assistant-welcome h3 { font-size: 15px; margin-bottom: 4px; }
-  .assistant-welcome-text { font-size: 12px; line-height: 1.45; margin-bottom: 8px; }
-  .assistant-chips { gap: 6px; margin-bottom: 4px; }
-  .assistant-chip { font-size: 11px; padding: 6px 12px; border-radius: 16px; }
+  .assistant-expanded {
+    max-height: 42vh;  /* fallback */
+    max-height: 42dvh; /* dynamic viewport — excludes browser chrome */
+  }
+  .assistant-header { padding: 8px 12px; }
+  .assistant-body { padding: 6px 12px; }
+  .assistant-welcome h3 { font-size: 14px; margin-bottom: 2px; }
+  .assistant-welcome-text { font-size: 11px; line-height: 1.4; margin-bottom: 6px; }
+  .assistant-chips { gap: 5px; margin-bottom: 2px; }
+  .assistant-chip { font-size: 11px; padding: 5px 11px; border-radius: 16px; }
   .assistant-sector-grid { grid-template-columns: repeat(3, 1fr); }
 
-  /* --- Input bar: compact, not oversized --- */
-  .assistant-input { padding: 8px 12px; gap: 6px; }
-  .assistant-text-input { font-size: 14px; padding: 8px 10px; border-radius: 8px; }
-  .assistant-input-field { font-size: 14px; padding: 8px 10px; }
-  .assistant-send { padding: 8px 12px; font-size: 12px; border-radius: 8px; }
-  .assistant-controls { padding: 4px 12px 0; }
+  /* --- Input bar: compact --- */
+  .assistant-input { padding: 6px 10px; gap: 6px; }
+  .assistant-text-input { font-size: 14px; padding: 7px 10px; border-radius: 8px; }
+  .assistant-input-field { font-size: 14px; padding: 7px 10px; }
+  .assistant-send { padding: 7px 12px; font-size: 12px; border-radius: 8px; }
+  .assistant-controls { padding: 2px 12px 0; }
   .assistant-mode-btn { padding: 4px; }
   .csv-upload-btn { padding: 4px; }
 
@@ -860,11 +863,15 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .sg-diag-wrap { display: none !important; }
 }
 
-/* Hide verbose examples on mobile — chips are enough */
+/* Mobile content trimming — keep assistant compact */
 @media (max-width: 640px) {
   .assistant-welcome-examples { display: none; }
-  .assistant-prompt-reminder { font-size: 10px; padding: 6px 8px; }
-  .assistant-prompt-guide { font-size: 10px; }
+  .assistant-welcome-desc {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; font-size: 11px !important; margin-bottom: 6px !important;
+  }
+  .assistant-prompt-reminder { font-size: 10px; padding: 5px 8px; margin-bottom: 4px; }
+  .assistant-prompt-guide { display: none; } /* Guide is too tall for mobile — accessible via desktop */
 }
 
 /* ─── Small mobile (under 480px) ─── */
@@ -879,11 +886,11 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
     margin: 0 8px; bottom: 10px;
     bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
-  .assistant-expanded { max-height: 50vh; }
+  .assistant-expanded { max-height: 40vh; max-height: 40dvh; }
   .assistant-sector-grid { grid-template-columns: repeat(2, 1fr); }
   /* 16px font-size prevents iOS auto-zoom on input focus */
-  .assistant-text-input { font-size: 16px; padding: 9px 10px; }
-  .assistant-input-field { font-size: 16px; padding: 9px 10px; }
+  .assistant-text-input { font-size: 16px; padding: 8px 10px; }
+  .assistant-input-field { font-size: 16px; padding: 8px 10px; }
 
   .sg-admin-cards { grid-template-columns: 1fr; }
   .sg-admin-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -898,7 +905,7 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   .sg-user-badge { display: none; }
 
   .assistant { margin: 0 6px; }
-  .assistant-expanded { max-height: 48vh; }
+  .assistant-expanded { max-height: 38vh; max-height: 38dvh; }
   .assistant-chip { font-size: 10px; padding: 5px 10px; }
   .assistant-welcome-text { font-size: 11px; }
 }

@@ -142,7 +142,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 <p className="assistant-welcome-text" style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>
                   AI-Powered Site Suitability Analysis
                 </p>
-                <p className="assistant-welcome-text" style={{ fontSize: '12px', marginBottom: '8px' }}>
+                <p className="assistant-welcome-desc" style={{ fontSize: '12px', marginBottom: '8px', color: '#64748b', lineHeight: '1.5' }}>
                   Describe your business, location, and constraints in natural language. We score real locations using Google Places and OpenStreetMap data with multi-criteria decision analysis.
                 </p>
 
