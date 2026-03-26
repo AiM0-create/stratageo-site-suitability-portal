@@ -561,24 +561,10 @@ const App: React.FC = () => {
         sessions={sessionIndex.sessions}
         currentSessionId={currentSession.id}
         onSwitchSession={handleSwitchSession}
+        user={user}
+        onLogout={logout}
+        onAdminOpen={() => setAdminOpen(true)}
       />
-
-      {/* User badge + admin controls */}
-      <div className="sg-user-badge" style={{ position: 'fixed', top: 10, right: 16, zIndex: 1001 }}>
-        {user.photoURL && <img src={user.photoURL} alt="" className="sg-user-avatar" />}
-        <div className="sg-user-info">
-          <span className="sg-user-name">{user.displayName || user.email}</span>
-          <span className={`sg-user-prompts ${!user.isAdmin && user.promptsRemaining <= 1 ? 'sg-user-prompts-warn' : ''}`}>
-            {user.isAdmin ? 'Unlimited' : `${user.promptsRemaining} prompts left`}
-          </span>
-        </div>
-        {user.isAdmin && (
-          <button className="sg-admin-trigger" onClick={() => setAdminOpen(true)}>
-            Admin
-          </button>
-        )}
-        <button className="sg-user-logout" onClick={logout}>Sign out</button>
-      </div>
 
       <FloatingAssistant
         messages={messages}

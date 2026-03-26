@@ -1,6 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { SessionIndexEntry } from '../types/session';
 
+interface UserInfo {
+  displayName: string;
+  email: string;
+  photoURL: string | null;
+  isAdmin: boolean;
+  promptsRemaining: number;
+}
+
 interface TopBarProps {
   mode: 'demo' | 'live';
   hasResults: boolean;
@@ -10,9 +18,12 @@ interface TopBarProps {
   sessions: SessionIndexEntry[];
   currentSessionId: string | null;
   onSwitchSession: (id: string) => void;
+  user?: UserInfo | null;
+  onLogout?: () => void;
+  onAdminOpen?: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, onMethodology, onNewAnalysis, sessions, currentSessionId, onSwitchSession }) => {
+export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, onMethodology, onNewAnalysis, sessions, currentSessionId, onSwitchSession, user, onLogout, onAdminOpen }) => {
   const [historyOpen, setHistoryOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -87,6 +98,23 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, o
               </svg>
             </button>
           </>
+        )}
+        {user && (
+          <div className="sg-user-badge">
+            {user.photoURL && <img src={user.photoURL} alt="" className="sg-user-avatar" referrerPolicy="no-referrer" />}
+            <div className="sg-user-info">
+              <span className="sg-user-name">{user.displayName || user.email.split('@')[0]}</span>
+              <span className={`sg-user-prompts ${!user.isAdmin && user.promptsRemaining <= 1 ? 'sg-user-prompts-warn' : ''}`}>
+                {user.isAdmin ? 'Unlimited' : `${user.promptsRemaining} prompts left`}
+              </span>
+            </div>
+            {user.isAdmin && onAdminOpen && (
+              <button className="sg-admin-trigger" onClick={onAdminOpen}>Admin</button>
+            )}
+            {onLogout && (
+              <button className="sg-user-logout" onClick={onLogout}>Sign out</button>
+            )}
+          </div>
         )}
         <a href="https://stratageo.in/contact.php" target="_blank" rel="noopener noreferrer" className="topbar-contact">
           Contact
