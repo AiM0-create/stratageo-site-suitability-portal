@@ -847,6 +847,7 @@ body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing:
   /* --- Map & overlays --- */
   .sg-map-legend { bottom: 80px; left: 8px; }
   .leaflet-top.leaflet-right { top: 54px !important; right: 8px !important; }
+  .leaflet-bottom.leaflet-right { display: none !important; } /* Hide attribution on mobile — it overlaps assistant */
 
   /* --- Panels --- */
   .sg-admin-panel { max-width: 100%; max-height: 95vh; border-radius: 12px; margin: 8px; }
