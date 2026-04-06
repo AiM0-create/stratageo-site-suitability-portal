@@ -174,6 +174,31 @@ const FRESH_PROMPT_PATTERNS = [
   /\bwhere\s+(should|can)\s+i\b/i,
 ];
 
+// Business-type signal words that indicate a prompt has its own use-case context.
+const BUSINESS_SIGNALS =
+  /\b(cafe|coffee\s*shop|qsr|fast.?food|bakery|gym|fitness|yoga|pilates|retail|store|shop|boutique|showroom|outlet|supermarket|grocery|kirana|restaurant|office|coworking|warehouse|clinic|pharmacy|hospital|school|tutoring|hotel|studio|salon|spa|bar|pub)\b/i;
+
+/**
+ * Returns true if the prompt supplies its own business type AND location context,
+ * making it analysable independently of any prior session.
+ *
+ * Both conditions must be met:
+ *   1. A recognisable business / use-case keyword is present.
+ *   2. An "in <place>" pattern with a substantive place name (3+ chars) is present.
+ *
+ * Examples that pass:  "For a gym in South Mumbai, now penalize Colaba"
+ *                      "Budget coffee shop in Pune, I now care more about affluence"
+ * Examples that fail:  "Actually, I now care more about affluence"  (no business, no city)
+ *                      "Now make the radius tighter."               (no business, no city)
+ */
+function isSelfSufficientPrompt(prompt) {
+  const hasBusiness = BUSINESS_SIGNALS.test(prompt);
+  // "in <word(s)>" where the place name is at least 3 characters — broad enough to
+  // catch "in Pune", "in South Mumbai", "in HSR Layout", "in the Thar Desert", etc.
+  const hasLocation = /\bin\s+(?:the\s+)?[a-zA-Z]{3}/i.test(prompt);
+  return hasBusiness && hasLocation;
+}
+
 /**
  * Detect whether a prompt looks like a follow-up modification of a prior result.
  * Returns { followupMode, requiresPriorContext }.
@@ -187,6 +212,11 @@ export function detectFollowupMode(prompt) {
   // If it also matches a fresh prompt pattern (e.g. "Actually, find me a cafe..."),
   // treat as fresh — the fresh pattern takes precedence.
   if (looksLikeFresh) return { followupMode: 'none', requiresPriorContext: false };
+
+  // Self-sufficiency check: if the prompt provides its own business + location context
+  // it can run independently even when follow-up language is present.
+  // e.g. "For a gym in South Mumbai, now penalize Colaba" is fully self-contained.
+  if (isSelfSufficientPrompt(prompt)) return { followupMode: 'none', requiresPriorContext: false };
 
   // Classify the type of modification
   if (/weight|priority|care\s+more|care\s+less|focus\s+more|prioritize|importance/i.test(prompt)) {
