@@ -83,6 +83,13 @@ function normalizeCity(city) {
   if (lower === 'calcutta') return 'Kolkata';
   if (/delhi\s*ncr/i.test(city)) return 'Delhi NCR';
   if (/\bncr\b/i.test(city)) return 'Delhi NCR';
+  // Regional sub-area names that Nominatim geocodes unreliably or to wrong countries.
+  // Map to the canonical parent city so neighborhood geocoding ("Bandra, Mumbai")
+  // resolves correctly; extractRequestedLocality will still preserve the sub-area
+  // as requestedMicroLocality from the rawCity / prompt text.
+  if (/^(south|navi|greater)\s+mumbai$/i.test(lower)) return 'Mumbai';
+  if (/^(south|north|east|west|new)\s+delhi$/i.test(lower)) return 'Delhi';
+  if (/^(greater\s+)?noida$/i.test(lower)) return 'Noida';
   return city;
 }
 
