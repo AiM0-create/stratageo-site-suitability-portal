@@ -32,3 +32,6 @@ test-prompts.js
 audit-results.json
 audit-test.js
 test-suite.js
+
+# Local test artifacts — generated during local dev/testing, never commit
+local_test/

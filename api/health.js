@@ -12,6 +12,7 @@ const CORS_HEADERS = {
 };
 
 export default function handler(req, res) {
+  console.log('[health] handler entered, method:', req.method);
   if (req.method === 'OPTIONS') {
     res.writeHead(200, CORS_HEADERS);
     return res.end();
