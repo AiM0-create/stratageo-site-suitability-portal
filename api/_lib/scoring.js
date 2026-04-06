@@ -198,8 +198,14 @@ export function scoreProfileAlignment(osmSignals, profile) {
   // estates purely on road-proximity when they have zero industrial land use.
   if (profile.marketPositioning === 'industrial') {
     // Sum all signal keys that relate to industrial land use
+    // Match signal keys that indicate actual industrial land use.
+    // Intentionally excludes "freight_roads" / "freight_access" — those are
+    // road-proximity signals, not evidence of industrial land-use zoning.
     const industrialSignalCount = Object.entries(osmSignals)
-      .filter(([key]) => /industrial|warehouse|freight|logistics/i.test(key))
+      .filter(([key]) =>
+        /\bindustrial\b|\bwarehouse\b|\bgodown\b/i.test(key) ||
+        (/\blogistics\b/i.test(key) && !/road|access/i.test(key)),
+      )
       .reduce((sum, [, val]) => sum + val, 0);
 
     // Thresholds tuned for industrial OSM sparseness in India:

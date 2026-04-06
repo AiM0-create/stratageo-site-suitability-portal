@@ -399,8 +399,13 @@ function extractRequestedLocality(rawLocationName, city, promptText) {
 
   const cityEsc = city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const patterns = [
+    // "X in CityName" — locality precedes the city with "in" before the city
     new RegExp(`([\\w''-]+(?:\\s+[\\w''-]+){0,5})\\s+in\\s+${cityEsc}\\b`, 'i'),
+    // "X, CityName" — locality comma-separated from city
     new RegExp(`([\\w''-]+(?:\\s+[\\w''-]+){0,5}),\\s*${cityEsc}\\b`, 'i'),
+    // "in X CityName" — locality follows "in" and is directly adjacent to city (no comma)
+    // e.g. "in JP Nagar 2nd Phase Bengaluru" → "JP Nagar 2nd Phase"
+    new RegExp(`\\bin\\s+([\\w''-]+(?:\\s+[\\w''-]+){0,5})\\s+${cityEsc}\\b`, 'i'),
   ];
 
   for (const pattern of patterns) {
