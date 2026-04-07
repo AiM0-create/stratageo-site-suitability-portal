@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, HeatmapType, UserPoint } from './types';
 import { config } from './config';
-import { runDemoAnalysis, runLiveAnalysis } from './services/analysisService';
+import { runDemoAnalysis, runServerAnalysis } from './services/analysisService';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
@@ -204,7 +204,7 @@ const App: React.FC = () => {
       const promptToSend = resolved.effectivePrompt;
       const analysisResult = config.isDemoMode
         ? await runDemoAnalysis(rawPrompt, setAnalysisStatus)
-        : await runLiveAnalysis(promptToSend, resultCount, setAnalysisStatus, userPoints.length > 0 ? userPoints : undefined);
+        : await runServerAnalysis(promptToSend, resultCount, setAnalysisStatus);
 
       const parsedSpec = analysisResult.spec;
       const csvNote = userPoints.length > 0 ? ` with ${userPoints.length} CSV point(s)` : '';

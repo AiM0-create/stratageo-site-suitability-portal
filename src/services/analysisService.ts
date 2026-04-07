@@ -749,3 +749,155 @@ export async function runLiveAnalysis(
     spec,
   };
 }
+
+// ─── Server-side analysis via /api/analyze ───────────────────────────────────
+//
+// Routes the full analysis through the Vercel serverless pipeline, which uses:
+//   Google geocoding (first) → Nominatim fallback
+//   normalizeCity (South Mumbai → Mumbai, etc.)
+//   intent contract + follow-up detection
+//   server-side OSM/MCDA scoring
+//
+// This replaces the client-side runLiveAnalysis path so that the UI reflects
+// the same geocoding, scoring, and intent-contract behavior as the backend.
+
+export async function runServerAnalysis(
+  rawPrompt: string,
+  resultCount: number,
+  onStatus: (status: AnalysisStatus) => void,
+): Promise<{ result: AnalysisResult; spec: AnalysisSpec }> {
+  const backendUrl = config.aiBackendUrl;
+  if (!backendUrl) throw new Error('No backend URL configured.');
+
+  onStatus({ message: 'Running server-side analysis...', progress: 15 });
+
+  let res: Response;
+  try {
+    res = await fetch(`${backendUrl}/api/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: rawPrompt, count: resultCount }),
+    });
+  } catch (err: any) {
+    throw new Error(`Could not reach analysis backend: ${err?.message || 'network error'}`);
+  }
+
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`Analysis backend returned an unreadable response (HTTP ${res.status}).`);
+  }
+
+  // Follow-up without context — surface the suggestion message directly
+  if (!data.ok && data.followupWithoutContext) {
+    throw new Error(
+      data.suggestion ||
+      'This prompt looks like a modification of a prior analysis. Please provide a complete new prompt instead.',
+    );
+  }
+
+  if (!data.ok) {
+    throw new Error(data.error || `Analysis failed (HTTP ${res.status}).`);
+  }
+
+  onStatus({ message: 'Processing results...', progress: 85 });
+
+  // ── Map confidenceBand → frontend confidence ──────────────────────────────
+  const confBand: string = data.confidenceBand || 'moderate';
+  const confidence: 'high' | 'medium' | 'low' =
+    confBand === 'high' ? 'high' : confBand === 'moderate' ? 'medium' : 'low';
+
+  // ── Map rankedLocations → LocationData[] ─────────────────────────────────
+  const rawLocations: any[] = data.rankedLocations || [];
+  const locations: LocationData[] = rawLocations.map((loc: any) => ({
+    name: loc.name,
+    lat: loc.lat,
+    lng: loc.lng,
+    mcda_score: loc.mcdaScore,
+    criteria_breakdown: (loc.criteriaBreakdown || []).map((c: any) => ({
+      name: c.name,
+      weight: c.weight,
+      score: c.score,
+      rawValue: c.rawValue,
+      direction: c.direction,
+      justification: c.justification,
+      evidenceBasis: c.evidenceBasis,
+    })),
+    exclusions: (loc.exclusions || []).map((e: any) => ({
+      rule: e.rule || '',
+      passed: typeof e.passed === 'boolean' ? e.passed : true,
+      detail: e.detail || '',
+      evidenceBasis: 'constraint-rule' as const,
+    })),
+    excluded: !!loc.excluded,
+    reasoning: loc.reasoning || '',
+    osmSignals: loc.osmSignals || {},
+    pois: loc.pois || [],
+    searchRadiusM: 1500, // effectiveRadiusM not in non-verbose debug; use backend default
+  }));
+
+  // ── Build AnalysisSpec from backend response fields ───────────────────────
+  const spec: AnalysisSpec = {
+    businessType: data.parsedBusinessType || '',
+    sectorId: '',
+    geography: {
+      city: data.parsedCity || '',
+    },
+    constraints: (data.parsedExclusions || []).map((e: any) => ({
+      type: 'exclusion' as const,
+      target: e.name,
+      osmTags: e.osmTags || [],
+      distanceM: e.distanceM ?? undefined,
+      direction: 'away' as const,
+      hardRule: true,
+      label: e.name,
+    })),
+    userPointConstraints: [],
+    hasUserPointReference: false,
+    positiveCriteria: [],
+    negativeCriteria: [],
+    inferredWeights: {},
+    resultCount: rawLocations.length || resultCount,
+    parsingNotes: [
+      ...(data.debug?.parsingNotes || []),
+      ...(data.debug?.geocodingNotes || []),
+      ...(data.warnings || []),
+    ],
+    confidence,
+    classificationMeta: {
+      confidence,
+      matchedKeywords: [],
+      reasoning: 'Server-side LLM pipeline',
+      score: data.confidenceScore ?? 70,
+      source: 'llm',
+    },
+  };
+
+  // ── Build AnalysisResult ──────────────────────────────────────────────────
+  const explainSummary: string | undefined = data.explanation?.summary;
+  const topLoc = locations.find(l => !l.excluded);
+  const fallbackSummary = topLoc
+    ? `${topLoc.name} ranks highest (${topLoc.mcda_score}/10) for ${data.parsedBusinessType || 'this use case'} in ${data.parsedCity || 'the target area'}.`
+    : `No ranked locations found for ${data.parsedBusinessType || 'this use case'} in ${data.parsedCity || 'the target area'}.`;
+
+  const result: AnalysisResult = {
+    summary: explainSummary || fallbackSummary,
+    business_type: data.parsedBusinessType || '',
+    target_location: data.parsedCity || '',
+    methodology: `Server pipeline: Google geocoding → OSM/MCDA scoring (${locations[0]?.criteria_breakdown.length || 0} criteria, ${confBand} confidence). All scores deterministic and evidence-backed.`,
+    spec,
+    locations,
+    grounding_sources: [
+      {
+        title: 'Google Geocoding API + OpenStreetMap',
+        uri: 'https://developers.google.com/maps/documentation/geocoding',
+        retrievedAt: new Date().toISOString(),
+        reliability: 'Google-first geocoding with Nominatim fallback',
+      },
+    ],
+  };
+
+  onStatus({ message: 'Analysis complete', progress: 100 });
+  return { result, spec };
+}
