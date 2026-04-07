@@ -10,7 +10,21 @@ export interface ResolvedContext {
   effectivePrompt: string;
   contextSummary: string;
   changes: string[];
+  resetDetected: boolean;
 }
+
+// Phrases that explicitly request a fresh start — discard prior context entirely
+const RESET_PATTERNS = [
+  /\bignore\s+(everything|all|that|the\s+(above|previous|last|prior))\b/i,
+  /\bstart\s+(fresh|from\s+scratch|over|a\s+new)\b/i,
+  /\bforget\s+(everything|all|that|the\s+(above|previous|last|prior)|previous\s+analysis)\b/i,
+  /\bnew\s+(analysis|query|request|search|case)\b/i,
+  /\bseparate\s+(analysis|case|query)\b/i,
+  /\bdifferent\s+(business|case|query|analysis)\b/i,
+  /\bfresh\s+(analysis|start|query)\b/i,
+  /\bfrom\s+scratch\b/i,
+  /\bdiscard\s+(prior|previous|the)\b/i,
+];
 
 // Words/phrases that signal a follow-up rather than a new query
 const FOLLOW_UP_STARTERS = [
@@ -31,6 +45,17 @@ export function resolveContext(
   memory: WorkingMemory,
   recentMessages: SessionMessage[],
 ): ResolvedContext {
+  // Explicit reset request — always discard prior context, even if memory exists
+  if (RESET_PATTERNS.some(p => p.test(rawPrompt))) {
+    return {
+      isFollowUp: false,
+      effectivePrompt: rawPrompt,
+      contextSummary: '',
+      changes: [],
+      resetDetected: true,
+    };
+  }
+
   // No memory = nothing to follow up on
   if (!memory.lastAnalysisTimestamp) {
     return {
@@ -38,6 +63,7 @@ export function resolveContext(
       effectivePrompt: rawPrompt,
       contextSummary: '',
       changes: [],
+      resetDetected: false,
     };
   }
 
@@ -50,6 +76,7 @@ export function resolveContext(
       effectivePrompt: rawPrompt,
       contextSummary: '',
       changes: [],
+      resetDetected: false,
     };
   }
 
@@ -93,6 +120,7 @@ export function resolveContext(
     effectivePrompt,
     contextSummary: `Carrying forward: ${contextSummary}`,
     changes,
+    resetDetected: false,
   };
 }
 

@@ -109,6 +109,19 @@ NEIGHBORHOOD EXTRACTION (CRITICAL):
 - The neighborhoods array drives WHERE the analysis searches. If the user says "near Huda City Centre" but you return generic neighborhoods, the analysis will search in wrong areas.
 - For named exclusions like "not in Koramangala" or "away from Chandni Chowk", put the excluded area in exclusionCriteria AND still include alternative neighborhoods.
 
+POSITIONING ENFORCEMENT (CRITICAL):
+Words like "premium", "luxury", "high-end", "budget", "affordable", "low-cost" are HARD constraints, not stylistic hints.
+- premium / luxury / high-end → siteProfile.marketPositioning = "premium". osmCriteria MUST weight: commercial office density, business district co-location, transit connectivity to CBD. Weights for residential density should be LOW.
+- budget / affordable / low-cost / economy → siteProfile.marketPositioning = "mass_market". osmCriteria MUST weight: residential density (building=residential, landuse=residential), public transit access (railway=station, highway=bus_stop), and low-competition signals. Do NOT weight affluent commercial zones.
+- Do NOT generate the same criteria profile for a "budget diagnostic lab" as for a "premium diagnostic centre". They have different site requirements.
+
+SUBREGION GEOGRAPHY ENFORCEMENT:
+If the user specifies a subregion like "East Delhi", "South Mumbai", "Bandra West", the locationName MUST capture the full subregion name (e.g., "East Delhi", not just "Delhi"). The neighborhoods array MUST contain areas from that specific subregion ONLY — do not mix neighborhoods from other parts of the city.
+- "East Delhi" → neighborhoods: Preet Vihar, Laxmi Nagar, Patparganj, Shahdara, Vivek Vihar
+- "South Delhi" → neighborhoods: Hauz Khas, Saket, Nehru Place, Greater Kailash, Malviya Nagar
+- "West Delhi" → neighborhoods: Rajouri Garden, Janakpuri, Tilak Nagar, Paschim Vihar
+- "North Delhi" → neighborhoods: Rohini, Pitampura, Shalimar Bagh, Mukherjee Nagar
+
 HINDI/HINGLISH/DEVANAGARI:
 - You MUST handle queries in Hindi (Devanagari script), Hinglish (Hindi-English mix), and regional terms.
 - Common Indian terms: "godown"=warehouse, "tapri/tapdi"=tea stall, "kirana"=grocery store, "kendra"=center, "jagaha"=place, "dukaan"=shop, "mohalla"=neighborhood.

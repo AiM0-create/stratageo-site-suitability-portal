@@ -83,14 +83,52 @@ function normalizeCity(city) {
   if (lower === 'calcutta') return 'Kolkata';
   if (/delhi\s*ncr/i.test(city)) return 'Delhi NCR';
   if (/\bncr\b/i.test(city)) return 'Delhi NCR';
-  // Regional sub-area names that Nominatim geocodes unreliably or to wrong countries.
-  // Map to the canonical parent city so neighborhood geocoding ("Bandra, Mumbai")
-  // resolves correctly; extractRequestedLocality will still preserve the sub-area
-  // as requestedMicroLocality from the rawCity / prompt text.
+  // Mumbai sub-regions: Nominatim mis-geocodes these to wrong countries.
+  // Map to parent city; micro-locality is preserved in extractRequestedLocality.
   if (/^(south|navi|greater)\s+mumbai$/i.test(lower)) return 'Mumbai';
-  if (/^(south|north|east|west|new)\s+delhi$/i.test(lower)) return 'Delhi';
+  // Delhi subregions (east/west/north/south/central) are valid distinct areas
+  // that Google geocodes correctly and have their own neighborhood lists in geo.js.
+  // We intentionally do NOT collapse them to "Delhi" — leave as-is.
+  // "New Delhi" is an alias for the full city, so we normalize it.
+  if (/^new\s+delhi$/i.test(lower)) return 'Delhi';
   if (/^(greater\s+)?noida$/i.test(lower)) return 'Noida';
   return city;
+}
+
+// ─── Reset intent detection ───────────────────────────────────────────────────
+const RESET_PATTERNS = [
+  /\bignore\s+(everything|all|that|the\s+(above|previous|last|prior))\b/i,
+  /\bstart\s+(fresh|from\s+scratch|over|a\s+new)\b/i,
+  /\bforget\s+(everything|all|that|the\s+(above|previous|last|prior)|previous\s+analysis)\b/i,
+  /\bnew\s+(analysis|query|request|search|case)\b/i,
+  /\bseparate\s+(analysis|case|query)\b/i,
+  /\bdifferent\s+(business|case|query|analysis)\b/i,
+  /\bfresh\s+(analysis|start|query)\b/i,
+  /\bfrom\s+scratch\b/i,
+  /\bdiscard\s+(prior|previous|the)\b/i,
+];
+
+function detectResetIntent(prompt) {
+  return RESET_PATTERNS.some(p => p.test(prompt));
+}
+
+// ─── Positioning tier extraction ─────────────────────────────────────────────
+/**
+ * Extracts business positioning tier directly from the prompt (fast, deterministic).
+ * Complements the LLM-extracted siteProfile.marketPositioning.
+ */
+function extractPositioningTier(prompt, intent) {
+  const lower = prompt.toLowerCase();
+  // Prompt-level signals (higher priority — user's exact words)
+  if (/\b(premium|luxury|high.?end|upscale|flagship|5.?star|boutique|elite)\b/.test(lower)) return 'premium';
+  if (/\b(budget|affordable|low.?cost|economy|cheap|value|economical|frugal)\b/.test(lower)) return 'budget';
+  if (/\b(mid.?market|mid.?range|standard|moderate)\b/.test(lower)) return 'mid_market';
+  // Fall back to LLM-extracted siteProfile
+  const mp = (intent?.siteProfile?.marketPositioning || '').toLowerCase();
+  if (mp === 'premium') return 'premium';
+  if (mp === 'mass_market') return 'budget';
+  if (mp === 'mid_market') return 'mid_market';
+  return 'unspecified';
 }
 
 // ─── Confidence model ────────────────────────────────────────────────────────
@@ -625,6 +663,18 @@ export default async function handler(req, res) {
     const anchor = intent.coordinates || null;
     const isCoordAnchored = intent.anchorType === 'coordinate' && anchor?.lat != null;
     const anchorTextRaw = isCoordAnchored ? `${anchor.lat}, ${anchor.lng}` : (rawCity || '');
+
+    // Detect whether the user specified a hard subregion (East Delhi, South Mumbai, etc.)
+    // so we can surface geographyConstraintMode and geographyConstraintSatisfied later.
+    const SUBREGION_PATTERN = /\b(east|west|north|south|central|old|new)\s+(delhi|mumbai|kolkata|chennai|pune|hyderabad|bengaluru|bangalore|ahmedabad|jaipur|lucknow|kanpur|surat)\b/i;
+    const geographySubregionMatch = (rawCity || prompt).match(SUBREGION_PATTERN);
+    const geographyConstraintMode = geographySubregionMatch ? 'hard_subregion' : (city ? 'city' : 'coordinate');
+
+    // Detect reset intent (safety net on backend, independent of frontend)
+    const resetDetected = detectResetIntent(prompt);
+
+    // Extract positioning tier from prompt + LLM intent
+    const positioningTier = extractPositioningTier(prompt, intent);
 
     let anchorTextNormalized = city || anchorTextRaw;
 
@@ -1489,7 +1539,16 @@ export default async function handler(req, res) {
         osmTags: e.osmTags,
       })),
 
+      // ─── Intent / session metadata ───
+      resetDetected,
+      positioningTier,
+      positioningModifierApplied: positioningTier !== 'unspecified',
+
       // ─── Geography ───
+      geographyConstraintMode,
+      geographyConstraintSatisfied: geographyConstraintMode === 'hard_subregion'
+        ? (candidateLocationsAfterFiltering ?? candidateLocationsBeforeFiltering).length > 0
+        : true,
       anchorTextRaw,
       anchorTextNormalized,
       requestedMicroLocality,

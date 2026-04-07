@@ -190,8 +190,24 @@ const App: React.FC = () => {
     setHeatmapType(null);
     setAnalysisStatus({ message: 'Starting analysis...', progress: 5 });
 
-    // Resolve context for follow-ups
+    // Resolve context for follow-ups / reset detection
     const resolved = resolveContext(rawPrompt, currentSession.memory, currentSession.messages);
+
+    // Explicit reset: wipe working memory so subsequent prompts start fresh
+    if (resolved.resetDetected) {
+      updateMemory({
+        businessType: null,
+        city: null,
+        coordinates: null,
+        sectorId: null,
+        constraints: [],
+        lastResultCount: 0,
+        lastSearchRadiusM: null,
+        lastAnalysisTimestamp: null,
+        customContext: {},
+      });
+      addMessage('assistant', 'Starting fresh — prior analysis context has been cleared.');
+    }
 
     setLastPrompt(rawPrompt);
     addMessage('user', rawPrompt, { intent: resolved.isFollowUp ? 'followup' : 'query' });

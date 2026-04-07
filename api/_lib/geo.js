@@ -460,6 +460,12 @@ const DEFAULT_NEIGHBORHOODS = {
   bengaluru: ['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield', 'Jayanagar', 'Malleswaram', 'Hebbal', 'Electronic City'],
   bangalore: ['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield', 'Jayanagar', 'Malleswaram', 'Hebbal', 'Electronic City'],
   mumbai: ['Andheri West', 'Bandra', 'Borivali', 'Kurla', 'Lower Parel', 'Malad West', 'Powai', 'Thane'],
+  // ── Delhi (pan-city fallback + subregion lists, subregions must come BEFORE 'delhi') ──
+  'east delhi':    ['Preet Vihar', 'Laxmi Nagar', 'Patparganj', 'Shahdara', 'Vivek Vihar', 'Krishna Nagar', 'Anand Vihar', 'Geeta Colony'],
+  'west delhi':    ['Rajouri Garden', 'Janakpuri', 'Tilak Nagar', 'Paschim Vihar', 'Punjabi Bagh', 'Uttam Nagar', 'Patel Nagar', 'Hari Nagar'],
+  'north delhi':   ['Rohini', 'Pitampura', 'Shalimar Bagh', 'Mukherjee Nagar', 'Kamla Nagar', 'Model Town', 'Shakti Nagar', 'Ashok Vihar'],
+  'south delhi':   ['Hauz Khas', 'Saket', 'Nehru Place', 'Greater Kailash', 'Malviya Nagar', 'Vasant Kunj', 'Lajpat Nagar', 'Kalkaji'],
+  'central delhi': ['Connaught Place', 'Karol Bagh', 'Paharganj', 'Daryaganj', 'Chandni Chowk', 'Jhandewalan', 'Ajmeri Gate'],
   delhi: ['Connaught Place', 'Dwarka', 'Hauz Khas', 'Lajpat Nagar', 'Pitampura', 'Rohini', 'Saket', 'Vasant Kunj'],
   hyderabad: ['Banjara Hills', 'Gachibowli', 'Jubilee Hills', 'Kondapur', 'Kukatpally', 'Madhapur', 'Secunderabad', 'Uppal'],
   chennai: ['Adyar', 'Anna Nagar', 'Chromepet', 'Nungambakkam', 'OMR Chennai', 'Porur', 'T. Nagar', 'Velachery'],
@@ -500,6 +506,9 @@ const DEFAULT_NEIGHBORHOODS = {
  */
 export function getNeighborhoodsForCity(city, count) {
   const key = city.toLowerCase().trim();
+  // Exact match first — prevents "east delhi" from falling through to the generic "delhi" entry
+  if (DEFAULT_NEIGHBORHOODS[key]) return DEFAULT_NEIGHBORHOODS[key].slice(0, count);
+  // Substring fallback (handles aliases like "bangalore" → matches "bengaluru"-adjacent, etc.)
   for (const [k, v] of Object.entries(DEFAULT_NEIGHBORHOODS)) {
     if (key.includes(k) || k.includes(key)) return v.slice(0, count);
   }
@@ -520,6 +529,9 @@ export function getNeighborhoodsForCity(city, count) {
 export function hasCityInDefaultList(city) {
   if (!city) return false;
   const key = city.toLowerCase().trim();
+  // Exact match first
+  if (key in DEFAULT_NEIGHBORHOODS) return true;
+  // Substring fallback
   for (const k of Object.keys(DEFAULT_NEIGHBORHOODS)) {
     if (key.includes(k) || k.includes(key)) return true;
   }
