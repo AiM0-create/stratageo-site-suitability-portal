@@ -342,3 +342,87 @@ export function isSparseData(criteria) {
   const zeroCount = criteria.filter(c => c.rawValue === 0).length;
   return zeroCount > criteria.length * 0.5;
 }
+
+// ─── Google density boost ───
+
+/**
+ * Apply a profile-aware score floor when OSM is sparse but Google Places
+ * corroborates real-world activity at the candidate location.
+ *
+ * This prevents established commercial districts (e.g. Cyber City Gurugram)
+ * from receiving absurdly low MCDA scores purely because OSM tagging is
+ * incomplete, while still requiring OSM evidence for high (>5.5) scores.
+ *
+ * Invariants:
+ *   - Only boosts POSITIVE criteria (direction='positive')
+ *   - Only raises scores below the BOOST_THRESHOLD (never lowers)
+ *   - Hard ceiling: boosted score never exceeds BOOST_CEILING (5.5)
+ *   - Profile-aware: eligible criteria depend on positioningTier
+ *   - Skips meta-criteria (Land availability, Location-type fit, Industrial zone compatibility)
+ *   - Returns a new array; does NOT mutate input
+ *
+ * @param {Array} criteriaBreakdown - scored criteria array
+ * @param {number} googleDensityTotal - total place count from Google density probe
+ * @param {string} positioningTier - 'premium' | 'budget' | 'mid_market' | 'unspecified'
+ * @returns {Array} new criteria array with boosted scores where applicable
+ */
+export function applyGoogleDensityBoost(criteriaBreakdown, googleDensityTotal, positioningTier) {
+  // Minimum Google density to trigger any boost — 5 places corroborates minimal activity
+  if (googleDensityTotal < 5) return criteriaBreakdown;
+
+  // Score floor scales with Google signal strength:
+  //   5–14 places: mild floor 2.5 — some activity but uncertain
+  //   15–29 places: floor 3.5 — real district-level activity
+  //   30+ places: floor 4.5 — clear established urban/commercial area
+  let boostFloor;
+  if (googleDensityTotal >= 30) boostFloor = 4.5;
+  else if (googleDensityTotal >= 15) boostFloor = 3.5;
+  else boostFloor = 2.5;
+
+  // Only boost criteria below this threshold; already-scoring criteria are untouched
+  const BOOST_THRESHOLD = 3.0;
+  // Hard ceiling — Google can suggest activity, but cannot make a location look excellent
+  const BOOST_CEILING = 5.5;
+
+  // Keywords classifying criteria as relevant to each positioning tier
+  const COMMERCIAL_KW = ['office', 'commercial', 'business', 'cowork', 'corporate', 'it ', 'tech', 'cbd', 'enterprise', 'financial', 'bank'];
+  const RESIDENTIAL_KW = ['residential', 'housing', 'colony', 'population', 'apartment', 'building', 'family', 'catchment', 'market', 'footfall'];
+  const HEALTHCARE_KW = ['clinic', 'hospital', 'pharmacy', 'health', 'medical', 'diagnostic', 'lab'];
+  const TRANSIT_KW = ['transit', 'metro', 'bus', 'railway', 'station', 'transport', 'commuter'];
+  // Profile-alignment meta-criteria — never boost, they're OSM density proxies
+  const META_CRITERIA = ['land availability', 'location-type fit', 'industrial zone compatibility'];
+
+  function isEligible(criterionName) {
+    const lower = criterionName.toLowerCase();
+    if (META_CRITERIA.includes(lower)) return false;
+
+    if (positioningTier === 'premium') {
+      return COMMERCIAL_KW.some(k => lower.includes(k)) || TRANSIT_KW.some(k => lower.includes(k));
+    }
+    if (positioningTier === 'budget') {
+      return RESIDENTIAL_KW.some(k => lower.includes(k))
+        || HEALTHCARE_KW.some(k => lower.includes(k))
+        || TRANSIT_KW.some(k => lower.includes(k));
+    }
+    // mid_market / unspecified: boost any positive non-meta criterion
+    return true;
+  }
+
+  return criteriaBreakdown.map(c => {
+    if (c.direction !== 'positive') return c;       // positive criteria only
+    if (c.score >= BOOST_THRESHOLD) return c;       // already scoring reasonably
+    if (!isEligible(c.name)) return c;              // profile filter
+
+    const newScore = Math.min(BOOST_CEILING, Math.max(c.score, boostFloor));
+    if (newScore <= c.score) return c;              // no effective change
+
+    return {
+      ...c,
+      score: Math.round(newScore * 10) / 10,
+      evidenceBasis: 'google-corroborated',
+      justification:
+        `${c.justification} [Google Places corroborates ${googleDensityTotal} nearby places — ` +
+        `score floor lifted from ${c.score}/10 to ${Math.round(newScore * 10) / 10}/10]`,
+    };
+  });
+}

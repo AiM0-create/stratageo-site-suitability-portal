@@ -41,6 +41,7 @@ import {
   checkExclusions,
   generateReasoning,
   isSparseData,
+  applyGoogleDensityBoost,
 } from './_lib/scoring.js';
 import {
   buildIntentContract,
@@ -571,6 +572,14 @@ export default async function handler(req, res) {
 
     const count = Math.min(5, Math.max(1, Number(resultCount) || 3));
 
+    // Fallback and geography constraint state — updated throughout the pipeline
+    let fallbackUsed = false;
+    let fallbackReason = null;
+    let fallbackFrom = null;
+    let fallbackTo = null;
+    const hardConstraintViolations = [];
+    let geographyConstraintSatisfied = true;
+
     // ═══════════════════════════════════════════════════════
     // Step 1 — Intent extraction via OpenAI
     // ═══════════════════════════════════════════════════════
@@ -669,6 +678,9 @@ export default async function handler(req, res) {
     const SUBREGION_PATTERN = /\b(east|west|north|south|central|old|new)\s+(delhi|mumbai|kolkata|chennai|pune|hyderabad|bengaluru|bangalore|ahmedabad|jaipur|lucknow|kanpur|surat)\b/i;
     const geographySubregionMatch = (rawCity || prompt).match(SUBREGION_PATTERN);
     const geographyConstraintMode = geographySubregionMatch ? 'hard_subregion' : (city ? 'city' : 'coordinate');
+    // candidateScopeMode tracks whether results honour the constraint ('strict'),
+    // used a fallback due to insufficient valid candidates, or are city-level only.
+    let candidateScopeMode = geographyConstraintMode === 'hard_subregion' ? 'strict' : 'city';
 
     // Detect reset intent (safety net on backend, independent of frontend)
     const resetDetected = detectResetIntent(prompt);
@@ -984,6 +996,11 @@ export default async function handler(req, res) {
       if (candidateLocationsBeforeFiltering.length === 0) {
         warnings.push(`No neighborhoods could be geocoded for "${city}" — using city-center directional offsets.`);
         parsingNotes.push('Neighborhood geocoding failed; falling back to city-center offsets.');
+        fallbackUsed = true;
+        fallbackReason = 'neighborhood_geocoding_failed';
+        fallbackFrom = `${city} neighborhoods`;
+        fallbackTo = 'city-center directional offsets';
+        candidateScopeMode = 'fallback_neighborhood';
         const offsetKm = Math.min(searchRadiusM / 1000, 5);
         const offsets = [
           { name: city, dlat: 0, dlng: 0 },
@@ -1140,6 +1157,79 @@ export default async function handler(req, res) {
         'All candidates were filtered by named-area exclusions — restoring full candidate set as fallback.',
       );
       candidateLocationsAfterFiltering = [...candidateLocationsBeforeFiltering];
+      fallbackUsed = true;
+      fallbackReason = 'all_candidates_excluded_by_named_area_rules';
+      fallbackFrom = namedAreaExclusions.map(e => e.name).join(', ') || 'named-area exclusions';
+      fallbackTo = 'full candidate set';
+      candidateScopeMode = 'fallback_exclusion';
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Step 5b — Hard subregion geography enforcement
+    // ═══════════════════════════════════════════════════════
+
+    // When the user specifies a hard subregion (e.g. "East Delhi", "South Mumbai"),
+    // verify all remaining candidates are within a reasonable haversine radius of
+    // the subregion centre. Candidates outside are logged in hardConstraintViolations
+    // and removed; if that leaves zero valid candidates, fall back to the full set.
+
+    if (geographyConstraintMode === 'hard_subregion' && geographySubregionMatch) {
+      const subregionName = geographySubregionMatch[0]; // e.g. "East Delhi"
+      const subregionAnchor =
+        await cachedGeocode(`${subregionName}, India`) ||
+        await cachedGeocode(subregionName);
+
+      if (subregionAnchor) {
+        geocodingNotes.push(
+          `Subregion anchor: "${subregionName}" → ${subregionAnchor.lat.toFixed(4)}, ${subregionAnchor.lng.toFixed(4)}`,
+        );
+
+        const SUBREGION_MAX_RADIUS_M = 30_000; // 30 km from subregion centre
+        const validSubregionCandidates = [];
+
+        for (const cand of candidateLocationsAfterFiltering) {
+          const distM = haversineM(subregionAnchor.lat, subregionAnchor.lng, cand.lat, cand.lng);
+          if (distM > SUBREGION_MAX_RADIUS_M) {
+            hardConstraintViolations.push({
+              candidateName: cand.name,
+              reason: 'outside_subregion',
+              distanceKm: Math.round(distM / 100) / 10,
+              subregionName,
+              maxAllowedKm: SUBREGION_MAX_RADIUS_M / 1000,
+            });
+          } else {
+            validSubregionCandidates.push(cand);
+          }
+        }
+
+        if (hardConstraintViolations.length > 0) {
+          geographyConstraintSatisfied = false;
+          if (validSubregionCandidates.length >= 1) {
+            // Enough valid candidates — enforce the constraint
+            candidateLocationsAfterFiltering = validSubregionCandidates;
+            parsingNotes.push(
+              `Subregion "${subregionName}": ${hardConstraintViolations.length} candidate(s) removed as geography violations (>${SUBREGION_MAX_RADIUS_M / 1000}km from subregion centre).`,
+            );
+            warnings.push(
+              `Hard geography constraint: ${hardConstraintViolations.map(v => `"${v.candidateName}" (${v.distanceKm}km from "${v.subregionName}")`).join(', ')} removed.`,
+            );
+          } else {
+            // All candidates violated — cannot enforce, use full set
+            fallbackUsed = true;
+            fallbackReason = 'hard_subregion_no_valid_candidates';
+            fallbackFrom = `${subregionName} boundary (${SUBREGION_MAX_RADIUS_M / 1000}km radius)`;
+            fallbackTo = 'full candidate set (constraint not enforced)';
+            candidateScopeMode = 'fallback_subregion';
+            warnings.push(
+              `Hard geography constraint "${subregionName}" could not be enforced — all candidates fell outside the ${SUBREGION_MAX_RADIUS_M / 1000}km radius. Using full candidate set.`,
+            );
+          }
+        } else {
+          geographyConstraintSatisfied = true;
+        }
+      } else {
+        geocodingNotes.push(`Subregion "${subregionName}" could not be geocoded — hard constraint not enforced.`);
+      }
     }
 
     // ═══════════════════════════════════════════════════════
@@ -1231,15 +1321,31 @@ export default async function handler(req, res) {
       const googleDensityTotal = googleDensity?.totalCount ?? 0;
       googleEvidenceCount += googleDensityTotal;
 
-      // Score dynamic criteria (OSM-based — scoring logic unchanged)
-      const criteriaBreakdown = dynamicCriteria.length > 0
+      // Score dynamic criteria (OSM-based)
+      let criteriaBreakdown = dynamicCriteria.length > 0
         ? scoreWithDynamicCriteria(osmResult.signals, dynamicCriteria, effectiveRadius)
         : [];
 
       // Append profile-alignment criteria (land availability, urban-rural fit)
       criteriaBreakdown.push(...scoreProfileAlignment(osmResult.signals, profile));
 
+      // Compute evidence quality based on raw OSM data — must come before the boost
+      const osmSparseData = isSparseData(criteriaBreakdown);
+      const googleCorroborates = googleDensityTotal >= 5;
+      const sparseData = osmSparseData && !googleCorroborates;
+      const evidenceQuality = osmSparseData
+        ? (googleCorroborates ? 'osm_gap_google_corroborated' : 'sparse')
+        : 'sufficient';
+
+      // Apply Google density boost when OSM is sparse but Google corroborates activity.
+      // This prevents established commercial/residential areas from scoring near 1/10
+      // purely due to incomplete OSM tagging (e.g. Cyber City Gurugram → 3.8 → ~5.5).
+      const mcdaScoreOsm = computeMCDAScore(criteriaBreakdown);
+      if (evidenceQuality === 'osm_gap_google_corroborated') {
+        criteriaBreakdown = applyGoogleDensityBoost(criteriaBreakdown, googleDensityTotal, positioningTier);
+      }
       const mcdaScore = computeMCDAScore(criteriaBreakdown);
+      const googleBoostApplied = mcdaScore > mcdaScoreOsm;
 
       // Check hard OSM exclusions
       const exclusionChecks = checkExclusions(
@@ -1260,12 +1366,10 @@ export default async function handler(req, res) {
       // For each dynamic criterion, determine source-of-evidence and blend status.
       // Google density is a general signal (not criterion-specific), so we use it
       // to corroborate or dispute OSM sparseness at the candidate level.
+      // googleCorroborates and evidenceQuality already computed above (before boost).
+      // rawValue is unchanged by the boost, so evidence meta is accurate from either array.
       const candidateEvidenceMeta = criteriaBreakdown.map(c => {
         const osmObserved = (c.rawValue ?? 0) > 0;
-        // Google density corroborates: if the candidate area has >5 places of any
-        // common type, it's likely an active locality — OSM zero may be a coverage
-        // gap, not true absence. We mark this criterion as "google_corroborated".
-        const googleCorroborates = googleDensityTotal >= 5;
         let sourceUsed;
         if (osmObserved) {
           sourceUsed = googleCorroborates ? 'blended' : 'osm';
@@ -1288,15 +1392,6 @@ export default async function handler(req, res) {
         };
       });
 
-      // A candidate is sparse if >50% of criteria have no OSM evidence.
-      // But if Google corroborates activity, demote to "osm_gap" rather than "sparse".
-      const osmSparseData = isSparseData(criteriaBreakdown);
-      const googleCorroborates = googleDensityTotal >= 5;
-      const sparseData = osmSparseData && !googleCorroborates;
-      const evidenceQuality = osmSparseData
-        ? (googleCorroborates ? 'osm_gap_google_corroborated' : 'sparse')
-        : 'sufficient';
-
       if (osmSparseData && !googleCorroborates) {
         warnings.push(`"${candidate.name}": sparse OSM data and no Google corroboration — evidence quality is weak.`);
       } else if (osmSparseData && googleCorroborates) {
@@ -1310,6 +1405,8 @@ export default async function handler(req, res) {
         lat: candidate.lat,
         lng: candidate.lng,
         mcdaScore,
+        mcdaScoreOsm: googleBoostApplied ? mcdaScoreOsm : undefined,
+        googleBoostApplied,
         excluded,
         criteriaBreakdown,
         exclusions: exclusionChecks,
@@ -1546,9 +1643,16 @@ export default async function handler(req, res) {
 
       // ─── Geography ───
       geographyConstraintMode,
-      geographyConstraintSatisfied: geographyConstraintMode === 'hard_subregion'
-        ? (candidateLocationsAfterFiltering ?? candidateLocationsBeforeFiltering).length > 0
-        : true,
+      geographyConstraintSatisfied,
+      hardConstraintViolations,
+
+      // ─── Fallback transparency ───
+      fallbackUsed,
+      fallbackReason,
+      fallbackFrom,
+      fallbackTo,
+      candidateScopeMode,
+
       anchorTextRaw,
       anchorTextNormalized,
       requestedMicroLocality,
