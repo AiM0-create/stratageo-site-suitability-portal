@@ -24,6 +24,49 @@ export const config = {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
   },
 
+  basemaps: [
+    {
+      id: 'light',
+      label: 'Light',
+      icon: '☀️',
+      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+    },
+    {
+      id: 'dark',
+      label: 'Dark',
+      icon: '🌙',
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+    },
+    {
+      id: 'voyager',
+      label: 'Voyager',
+      icon: '🗺️',
+      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+    },
+    {
+      id: 'satellite',
+      label: 'Satellite',
+      icon: '🛰️',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      attribution: '&copy; <a href="https://www.esri.com/">Esri</a>',
+      subdomains: '',
+    },
+    {
+      id: 'osm',
+      label: 'Street',
+      icon: '🛣️',
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      subdomains: '',
+    },
+  ] as const,
+
   sectors: [
     { id: 'cafe', label: 'Cafe / Restaurant', icon: '☕', osmTags: ['amenity=cafe', 'amenity=restaurant'] },
     { id: 'preschool', label: 'Preschool / School', icon: '🎓', osmTags: ['amenity=school', 'amenity=kindergarten'] },

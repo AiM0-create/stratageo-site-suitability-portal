@@ -1,8 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { LocationData, HeatmapType, UserPoint } from '../types';
 import { config } from '../config';
 
 declare const L: any;
+
+export type BasemapId = typeof config.basemaps[number]['id'];
 
 interface MapViewProps {
   locations: LocationData[];
@@ -13,6 +15,8 @@ interface MapViewProps {
   userPoints?: UserPoint[];
   showBuffers?: boolean;
   bufferRadiusM?: number;
+  basemapId?: BasemapId;
+  onBasemapChange?: (id: BasemapId) => void;
 }
 
 const getMarkerIcon = (rank: number, isSelected: boolean, excluded: boolean) => {
@@ -39,16 +43,22 @@ export const MapView: React.FC<MapViewProps> = ({
   userPoints = [],
   showBuffers = true,
   bufferRadiusM,
+  basemapId = 'light',
+  onBasemapChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any>(null);
   const heatRef = useRef<any>(null);
   const userLayerRef = useRef<any>(null);
+  const tileLayerRef = useRef<any>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Initialize map
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+
+    const initialBasemap = config.basemaps.find(b => b.id === basemapId) ?? config.basemaps[0];
 
     const map = L.map(containerRef.current, {
       center: config.map.defaultCenter,
@@ -56,11 +66,13 @@ export const MapView: React.FC<MapViewProps> = ({
       zoomControl: false,
     });
 
-    L.tileLayer(config.map.tileUrl, {
-      attribution: config.map.attribution,
-      subdomains: 'abcd',
+    const tl = L.tileLayer(initialBasemap.url, {
+      attribution: initialBasemap.attribution,
+      subdomains: initialBasemap.subdomains || 'abc',
       maxZoom: 19,
-    }).addTo(map);
+    });
+    tl.addTo(map);
+    tileLayerRef.current = tl;
 
     L.control.zoom({ position: 'topright' }).addTo(map);
     map.on('click', onDeselectAll);
@@ -75,9 +87,28 @@ export const MapView: React.FC<MapViewProps> = ({
         mapRef.current.stop();
         mapRef.current.remove();
         mapRef.current = null;
+        tileLayerRef.current = null;
       }
     };
   }, []);
+
+  // Swap tile layer when basemap changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const bm = config.basemaps.find(b => b.id === basemapId) ?? config.basemaps[0];
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    const tl = L.tileLayer(bm.url, {
+      attribution: bm.attribution,
+      subdomains: bm.subdomains || 'abc',
+      maxZoom: 19,
+    });
+    tl.addTo(map);
+    tl.bringToBack();
+    tileLayerRef.current = tl;
+  }, [basemapId]);
 
   // Update markers
   useEffect(() => {
@@ -250,6 +281,41 @@ export const MapView: React.FC<MapViewProps> = ({
   return (
     <div className="sg-map-wrapper">
       <div ref={containerRef} className="sg-map" id="map-container" />
+
+      {/* ── Basemap picker ── */}
+      <div className="sg-basemap-control">
+        <button
+          className="sg-basemap-trigger"
+          title="Change basemap"
+          onClick={() => setPickerOpen(p => !p)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+            <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
+            <line x1="9" y1="3" x2="9" y2="18"/>
+            <line x1="15" y1="6" x2="15" y2="21"/>
+          </svg>
+          <span>Map</span>
+        </button>
+        {pickerOpen && (
+          <div className="sg-basemap-picker">
+            {config.basemaps.map(bm => (
+              <button
+                key={bm.id}
+                className={`sg-basemap-option${basemapId === bm.id ? ' active' : ''}`}
+                onClick={() => { onBasemapChange?.(bm.id); setPickerOpen(false); }}
+              >
+                <span className="sg-basemap-icon">{bm.icon}</span>
+                <span className="sg-basemap-label">{bm.label}</span>
+                {basemapId === bm.id && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="12" height="12" className="sg-basemap-check">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       {(locations.length > 0 || userPoints.length > 0) && (
         <div className="sg-map-legend">
           <div className="sg-legend-title">Map Legend</div>
