@@ -1304,13 +1304,18 @@ export default async function handler(req, res) {
       const candidate = targetCandidates[i];
       const settled = osmSettled[i];
 
+      // OSM fetch result — on failure, fall through with empty signals so Google Places
+      // density can still provide scoring evidence. Better to return Google-only results
+      // than to return nothing (which happens when all Overpass endpoints are blocked,
+      // e.g. from cloud provider IPs like Vercel's).
+      let osmFailed = false;
       if (settled.status === 'rejected') {
         osmFetchFailureCount++;
-        warnings.push(`OSM fetch failed for "${candidate.name}": ${settled.reason?.message || 'unknown error'}`);
-        continue;
+        osmFailed = true;
+        warnings.push(`OSM fetch failed for "${candidate.name}": ${settled.reason?.message || 'unknown error'} — falling back to Google Places scoring.`);
       }
 
-      const osmResult = settled.value;
+      const osmResult = osmFailed ? { signals: {}, pois: [] } : settled.value;
 
       // Google Places density result for this candidate
       const googleDensityResult = googleDensitySettled[i];
@@ -1503,37 +1508,82 @@ export default async function handler(req, res) {
     let explainError = null;
 
     try {
+      // Build rich context for explanation — include raw evidence, profile, exclusions, confidence
       const locationSummary = rankedLocations
-        .map(loc =>
-          `${loc.name} (score: ${loc.mcdaScore}/10): ` +
-          loc.criteriaBreakdown.map(c => `${c.name}: ${c.score}/10`).join(', '),
-        )
-        .join('\n');
+        .map(loc => {
+          const criteriaLines = loc.criteriaBreakdown.map(c =>
+            `  • ${c.name}: ${c.score}/10 (observed: ${c.rawValue ?? 0} features, ${c.direction === 'negative' ? 'lower=better' : 'higher=better'}, weight ${Math.round((c.weight || 0) * 100)}%)`,
+          ).join('\n');
+          const excluded = loc.excluded ? ' [EXCLUDED by constraint]' : '';
+          const evidenceNote = loc.sparseData
+            ? ' [⚠ sparse OSM data — treat as directional]'
+            : loc.evidenceQuality === 'osm_gap_google_corroborated'
+              ? ' [OSM sparse but Google confirms urban activity]'
+              : '';
+          return `${loc.name}${excluded}${evidenceNote} — MCDA score: ${loc.mcdaScore}/10\n${criteriaLines}`;
+        })
+        .join('\n\n');
 
       const profileLine = profile.profileSummary
-        ? `Business profile: ${profile.profileSummary}. Land intensity: ${profile.landIntensity}. Urban preference: ${profile.urbanPreference}.`
+        ? `Site profile: ${profile.profileSummary} | Land intensity: ${profile.landIntensity} | Urban preference: ${profile.urbanPreference} | Foot traffic dependency: ${profile.footTrafficDependency} | Market positioning: ${intent.siteProfile?.marketPositioning || 'unspecified'}`
         : '';
 
-      const warningLine = warnings.length > 0
-        ? `Identified concerns: ${warnings.slice(0, 3).join('; ')}`
+      const exclusionNote = (resolvedExclusions.length > 0 || unresolvedExclusions.length > 0)
+        ? `Exclusion zones applied: ${resolvedExclusions.map(e => `"${e.name}" (${(e.exclusionRadiusM / 1000).toFixed(1)}km buffer)`).join(', ')}${unresolvedExclusions.length > 0 ? `. Unresolved (not enforced): ${unresolvedExclusions.map(e => e.name).join(', ')}` : ''}`
         : '';
 
-      const explainPrompt =
-        `You are a senior GIS analyst for Stratageo. Given MCDA-scored locations for "${intent.businessType}" in ${anchorTextNormalized}:\n\n` +
-        `${locationSummary}\n` +
-        (profileLine ? `\n${profileLine}` : '') +
-        (warningLine ? `\n${warningLine}` : '') +
-        `\n\nProvide:\n` +
-        `1. A 2-3 sentence executive summary. Be honest about low scores and sparse data.\n` +
-        `2. For each location: 1-2 sentence reasoning and 1 sentence strategic recommendation.\n\n` +
-        `Respond in JSON:\n{"summary":"...","locationInsights":[{"name":"...","reasoning":"...","strategy":"..."}]}`;
+      const confidenceNote = `Pipeline confidence: ${confidence.band} (${confidence.score}/100). ${confidence.factors.length > 0 ? 'Key factors: ' + confidence.factors.slice(0, 2).map(f => f.detail).join(' | ') : ''}`;
+
+      const dataNote = dataSufficiencySummary.status !== 'sufficient'
+        ? `Data quality: ${dataSufficiencySummary.detail}`
+        : `Data quality: ${dataSufficiencySummary.blendedObservedCriteriaPercent}% of criteria have real observed evidence.`;
+
+      const userConstraintNote = intent.exclusionCriteria?.length > 0
+        ? `User-specified hard constraints: ${intent.exclusionCriteria.map(e => `"${e.name}"`).join(', ')}`
+        : '';
+
+      const explainPrompt = `You are a senior GIS consultant writing a site suitability briefing for a client. You have just run an MCDA analysis for a "${intent.businessType}" in ${anchorTextNormalized}.
+
+SCORED LOCATIONS:
+${locationSummary}
+
+CONTEXT:
+${profileLine}
+${exclusionNote}
+${userConstraintNote}
+${confidenceNote}
+${dataNote}
+
+YOUR TASK — write a JSON response with the following structure:
+{
+  "summary": "3-4 sentence executive summary. Must: (1) state the top-ranked location and WHY it ranked highest based on actual criteria scores, (2) compare it meaningfully to the runner-up, (3) be honest about any low scores, sparse data, or exclusions, (4) end with ONE concrete strategic insight specific to this sector and city — not generic advice.",
+  "locationInsights": [
+    {
+      "name": "exact location name",
+      "reasoning": "2-3 sentences: what evidence drove this score, which criteria were strong vs weak, any notable trade-offs. Reference actual observed feature counts where available.",
+      "strategy": "1 sentence: the single most important thing this client should verify or act on for this specific location."
+    }
+  ]
+}
+
+TONE & QUALITY RULES:
+- Write like a GIS professional briefing a real client — confident, specific, evidence-based.
+- Reference actual numbers from the criteria (e.g. "47 road segments observed", "0 existing chargers within 1.5km").
+- If a location was EXCLUDED, explain clearly why and what constraint it failed.
+- If data is sparse, say so explicitly and qualify the finding ("directional signal only — field validation needed").
+- DO NOT use filler phrases like "it's worth noting", "it's important to consider", or "overall".
+- DO NOT give generic business advice unrelated to spatial siting.
+- DO reference the city/neighbourhood context where relevant (e.g. "Koramangala's dense startup ecosystem makes it a natural fit", "Jaisalmer's desert topology limits OSM feature tagging").
+- If confidence is low or very_low, the summary MUST acknowledge this limitation.
+- Scores below 5/10 should be flagged as challenges, not spun positively.
+- The strategy line should be actionable and specific — not "conduct market research".`;
 
       const explainRes = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: explainPrompt }],
         response_format: { type: 'json_object' },
-        temperature: 0.3,
-        max_tokens: 700,
+        temperature: 0.2,
+        max_tokens: 900,
       });
 
       const explainText = explainRes.choices?.[0]?.message?.content;
