@@ -198,10 +198,12 @@ async function nominatimReverseGeocode(lat, lng) {
   }
 }
 
+// lz4 is first — confirmed working with User-Agent header from both local and cloud IPs.
+// overpass-api.de (main) returns 406 without User-Agent and is sometimes blocked from cloud providers.
 const OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
   'https://z.overpass-api.de/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.nchc.org.tw/api/interpreter',
 ];
@@ -549,10 +551,14 @@ async function fetchWithOverpassRetry(query) {
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20_000);
+      const timeoutId = setTimeout(() => controller.abort(), 12_000);
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Stratageo/1.0 (site-suitability-analysis; contact@stratageo.in)',
+          'Accept': 'application/json',
+        },
         body: 'data=' + encodeURIComponent(query),
         signal: controller.signal,
       });
