@@ -765,6 +765,7 @@ export async function runServerAnalysis(
   rawPrompt: string,
   resultCount: number,
   onStatus: (status: AnalysisStatus) => void,
+  sessionContext?: string,
 ): Promise<{ result: AnalysisResult; spec: AnalysisSpec }> {
   const backendUrl = config.aiBackendUrl;
   if (!backendUrl) throw new Error('No backend URL configured.');
@@ -776,7 +777,7 @@ export async function runServerAnalysis(
     res = await fetch(`${backendUrl}/api/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: rawPrompt, count: resultCount }),
+      body: JSON.stringify({ prompt: rawPrompt, count: resultCount, sessionContext }),
     });
   } catch (err: any) {
     throw new Error(`Could not reach analysis backend: ${err?.message || 'network error'}`);
