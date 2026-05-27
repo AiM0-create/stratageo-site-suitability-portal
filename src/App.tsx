@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, HeatmapType, UserPoint } from './types';
+import type { BasemapId } from './components/MapView';
 import { config } from './config';
 import { runDemoAnalysis, runServerAnalysis } from './services/analysisService';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
@@ -52,6 +53,25 @@ const App: React.FC = () => {
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [isSharedView, setIsSharedView] = useState(false);
   const [lastPrompt, setLastPrompt] = useState('');
+
+  // ─── Dark mode ───
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('sg-dark') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    try { localStorage.setItem('sg-dark', darkMode ? '1' : '0'); } catch { /* ignore */ }
+  }, [darkMode]);
+  const handleToggleDark = useCallback(() => setDarkMode(d => !d), []);
+
+  // ─── Basemap ───
+  const [basemapId, setBasemapId] = useState<BasemapId>(() => {
+    try { return (localStorage.getItem('sg-basemap') as BasemapId) || 'light'; } catch { return 'light'; }
+  });
+  const handleBasemapChange = useCallback((id: BasemapId) => {
+    setBasemapId(id);
+    try { localStorage.setItem('sg-basemap', id); } catch { /* ignore */ }
+  }, []);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -948,6 +968,8 @@ const App: React.FC = () => {
         locations={locations}
         selectedLocations={selectedRecalculated}
         onSelectLocation={handleSelectLocation}
+        basemapId={basemapId}
+        onBasemapChange={handleBasemapChange}
         onDeselectAll={handleDeselectAll}
         heatmapType={heatmapType}
         userPoints={userPoints}
@@ -968,6 +990,8 @@ const App: React.FC = () => {
         onLogout={logout}
         onAdminOpen={() => setAdminOpen(true)}
         onSavedOpen={() => setSavedOpen(true)}
+        darkMode={darkMode}
+        onToggleDark={handleToggleDark}
         onShareAnalysis={result ? () => {
           if (user && result && spec) {
             saveAnalysis(user.uid, user.email, lastPrompt, result, spec).then(shareId => {

@@ -1,10 +1,13 @@
+@import './_dark-basemap.css';
+
 /* =============================================
    Stratageo — Map-First Portal Design System
    ============================================= */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
+/* ── Light theme (default) ─────────────────────────────────────────────── */
+:root, [data-theme="light"] {
   --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af;
   --green-50: #ecfdf5; --green-100: #d1fae5; --green-600: #059669; --green-700: #047857;
   --gray-50: #f8fafc; --gray-100: #f1f5f9; --gray-200: #e2e8f0; --gray-300: #cbd5e1;
@@ -18,10 +21,73 @@
   --glass: rgba(255,255,255,0.88);
   --glass-border: rgba(255,255,255,0.35);
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* Semantic tokens */
+  --bg-base:        #ffffff;
+  --bg-surface:     #f8fafc;
+  --bg-elevated:    #ffffff;
+  --bg-overlay:     rgba(255,255,255,0.92);
+  --border-color:   #e2e8f0;
+  --border-subtle:  #f1f5f9;
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #94a3b8;
+  --topbar-bg:      #ffffff;
+  --topbar-border:  #e2e8f0;
+  --topbar-text:    #1e293b;
+  --drawer-bg:      #ffffff;
+  --input-bg:       #f8fafc;
+  --input-border:   #e2e8f0;
+  --card-bg:        #f8fafc;
+  --badge-bg:       #f1f5f9;
+  --scrollbar-track:#f1f5f9;
+  --scrollbar-thumb:#cbd5e1;
+}
+
+/* ── Dark theme ────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --blue-50: #1e3a5f; --blue-100: #1e3a5f; --blue-600: #3b82f6; --blue-700: #2563eb; --blue-800: #1d4ed8;
+  --green-50: #052e16; --green-100: #052e16; --green-600: #22c55e; --green-700: #16a34a;
+  --gray-50: #0f172a; --gray-100: #1e293b; --gray-200: #334155; --gray-300: #475569;
+  --gray-400: #64748b; --gray-500: #94a3b8; --gray-600: #cbd5e1; --gray-700: #e2e8f0;
+  --gray-800: #f1f5f9; --gray-900: #f8fafc;
+  --red-100: #450a0a; --red-600: #f87171; --red-700: #fca5a5;
+  --amber-100: #451a03; --amber-600: #fbbf24;
+  --shadow: 0 4px 16px rgba(0,0,0,0.40);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.55);
+  --glass: rgba(15,23,42,0.88);
+  --glass-border: rgba(255,255,255,0.10);
+
+  /* Semantic tokens */
+  --bg-base:        #0f172a;
+  --bg-surface:     #1e293b;
+  --bg-elevated:    #1e293b;
+  --bg-overlay:     rgba(15,23,42,0.92);
+  --border-color:   #334155;
+  --border-subtle:  #1e293b;
+  --text-primary:   #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted:     #64748b;
+  --topbar-bg:      #1e293b;
+  --topbar-border:  #334155;
+  --topbar-text:    #f1f5f9;
+  --drawer-bg:      #1e293b;
+  --input-bg:       #0f172a;
+  --input-border:   #334155;
+  --card-bg:        #0f172a;
+  --badge-bg:       #334155;
+  --scrollbar-track:#1e293b;
+  --scrollbar-thumb:#475569;
 }
 
 html, body, #root { height: 100%; overflow: hidden; }
-body { font-family: var(--font); color: var(--gray-800); -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--font);
+  color: var(--text-primary);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.2s, color 0.2s;
+}
 
 .icon-sm { width: 18px; height: 18px; flex-shrink: 0; }
 .icon-xs { width: 14px; height: 14px; flex-shrink: 0; }
