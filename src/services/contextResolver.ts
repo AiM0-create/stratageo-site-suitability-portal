@@ -107,7 +107,17 @@ export function resolveContext(
   }
 
   const contextSummary = contextParts.join('. ');
-  const effectivePrompt = `[Context: Previously analyzed ${memory.businessType || 'unknown'} in ${memory.city || 'unknown location'}. ${contextSummary}.]\nUser's follow-up: ${rawPrompt}`;
+
+  // Build a self-sufficient effective prompt so GPT can always extract businessType + locationName.
+  // The follow-up text alone (e.g. "recalculate penalizing proximity more") doesn't contain
+  // these fields — we need to inject them explicitly.
+  const bizPart = memory.businessType ? `${memory.businessType}` : 'the business';
+  const cityPart = memory.city ? ` in ${memory.city}` : '';
+  const constraintPart = memory.constraints.length > 0
+    ? ` Existing constraints: ${memory.constraints.join(', ')}.` : '';
+  const effectivePrompt =
+    `Continuing site suitability analysis for a ${bizPart}${cityPart}.${constraintPart} ` +
+    `User modification: ${rawPrompt}`;
 
   // Detect what's changing
   if (detectCityChange(lower)) changes.push('city');

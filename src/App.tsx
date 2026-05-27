@@ -218,9 +218,35 @@ const App: React.FC = () => {
 
     try {
       const promptToSend = resolved.effectivePrompt;
+
+      // Build session context for follow-ups in live mode.
+      // The backend passes this to GPT as a system message so it can interpret
+      // "one of those locations" / "recalculate with stronger penalty" etc.
+      let sessionContext: string | undefined;
+      if (resolved.isFollowUp && !config.isDemoMode) {
+        const mem = currentSession.memory;
+        const parts: string[] = [];
+        if (mem.businessType) parts.push(`Business type: ${mem.businessType}`);
+        if (mem.city) parts.push(`City/location: ${mem.city}`);
+        if (mem.constraints.length > 0) parts.push(`Excluded areas / constraints: ${mem.constraints.join(', ')}`);
+        if (mem.lastSearchRadiusM) parts.push(`Search radius: ${(mem.lastSearchRadiusM / 1000).toFixed(1)}km`);
+        // Include top-ranked locations from current results so GPT knows which places were suggested
+        if (result && result.locations.length > 0) {
+          const topLocs = result.locations
+            .filter(l => !l.excluded)
+            .slice(0, 5)
+            .map(l => `${l.name} (${l.mcda_score}/10)`)
+            .join(', ');
+          if (topLocs) parts.push(`Previously ranked locations: ${topLocs}`);
+          const excluded = result.locations.filter(l => l.excluded).map(l => l.name).join(', ');
+          if (excluded) parts.push(`Locations excluded by constraints: ${excluded}`);
+        }
+        if (parts.length > 0) sessionContext = parts.join('. ') + '.';
+      }
+
       const analysisResult = config.isDemoMode
         ? await runDemoAnalysis(rawPrompt, setAnalysisStatus)
-        : await runServerAnalysis(promptToSend, resultCount, setAnalysisStatus);
+        : await runServerAnalysis(promptToSend, resultCount, setAnalysisStatus, sessionContext);
 
       const parsedSpec = analysisResult.spec;
       const csvNote = userPoints.length > 0 ? ` with ${userPoints.length} CSV point(s)` : '';
