@@ -165,11 +165,11 @@
 
 .sg-basemap-control {
   position: absolute;
-  top: 90px;      /* below Leaflet zoom buttons (~80px) */
+  top: 130px;      /* below Leaflet zoom bottom (~124px) + 6px gap */
   right: 10px;
-  z-index: 500;   /* above Leaflet controls (z-index 400-1000) */
+  z-index: 500;
   display: flex;
-  flex-direction: column; /* picker drops DOWN below the trigger */
+  flex-direction: column;
   align-items: flex-end;
   gap: 4px;
 }
