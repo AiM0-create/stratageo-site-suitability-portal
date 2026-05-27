@@ -421,229 +421,492 @@ const App: React.FC = () => {
     try {
       const { jsPDF } = jspdf;
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const pw = pdf.internal.pageSize.getWidth();
-      const ph = pdf.internal.pageSize.getHeight();
-      const m = 15; // margin
-      const cw = pw - m * 2; // content width
-      let y = m;
+      const pw = pdf.internal.pageSize.getWidth();   // 210mm
+      const ph = pdf.internal.pageSize.getHeight();  // 297mm
+      const ml = 14; const mr = 14; const cw = pw - ml - mr;
+      let y = 0;
 
-      // ─── Helper: page header ───
-      const hdr = () => {
-        y = m;
-        pdf.setFontSize(16); pdf.setFont('helvetica', 'bold');
-        pdf.setTextColor(29, 78, 216); pdf.text('STRATA', m, y);
-        pdf.setTextColor(5, 150, 105); pdf.text('GEO', m + pdf.getTextWidth('STRATA') + 1, y);
-        pdf.setFontSize(8); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(100, 116, 139);
-        const tag = 'Site Suitability Report';
-        pdf.text(tag, pw - m - pdf.getTextWidth(tag), y);
-        y += 6; pdf.setDrawColor(226, 232, 240); pdf.line(m, y, pw - m, y); y += 6;
+      // ─── Brand colours ───────────────────────────────────────────────────────
+      const C = {
+        navy:   [29,  78,  216] as [number,number,number],
+        teal:   [5,  150,  105] as [number,number,number],
+        green:  [22, 163,   74] as [number,number,number],
+        amber:  [217,119,    6] as [number,number,number],
+        red:    [220,  38,   38] as [number,number,number],
+        slate9: [15,  23,   42] as [number,number,number],
+        slate7: [51,  65,   85] as [number,number,number],
+        slate5: [100,116,  139] as [number,number,number],
+        slate2: [226,232,  240] as [number,number,number],
+        slate1: [248,250,  252] as [number,number,number],
+        white:  [255,255,  255] as [number,number,number],
+        orange: [249,115,   22] as [number,number,number],
+        blue:   [59, 130,  246] as [number,number,number],
       };
 
-      // ─── Helper: check page break ───
+      const setFill  = (c: [number,number,number]) => pdf.setFillColor(c[0],c[1],c[2]);
+      const setStroke= (c: [number,number,number]) => pdf.setDrawColor(c[0],c[1],c[2]);
+      const setTxt   = (c: [number,number,number]) => pdf.setTextColor(c[0],c[1],c[2]);
+
+      // ─── Score → colour ───────────────────────────────────────────────────────
+      const scoreColor = (s: number, excl = false): [number,number,number] =>
+        excl ? C.slate5 : s >= 7.5 ? C.green : s >= 5 ? C.amber : C.red;
+
+      // ─── Helpers ──────────────────────────────────────────────────────────────
       const ensureSpace = (need: number) => {
-        if (y + need > ph - 12) { pdf.addPage(); hdr(); }
+        if (y + need > ph - 16) { pdf.addPage(); drawPageHeader(); }
       };
 
-      // ═══════════════════════════════════════
-      // PAGE 1 — Cover: title, summary, map
-      // ═══════════════════════════════════════
-      hdr();
+      const sectionLabel = (text: string) => {
+        pdf.setFontSize(6.5); pdf.setFont('helvetica', 'bold');
+        setTxt(C.slate5);
+        pdf.text(text.toUpperCase(), ml, y); y += 4;
+      };
 
-      // Title
-      pdf.setFontSize(14); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(30, 41, 59);
-      pdf.text(`${result.business_type} — ${result.target_location}`, m, y); y += 5;
+      // ─── PAGE HEADER (appears on every page) ─────────────────────────────────
+      const drawPageHeader = () => {
+        // Navy top band
+        setFill(C.navy); pdf.rect(0, 0, pw, 10, 'F');
+        pdf.setFontSize(13); pdf.setFont('helvetica', 'bold');
+        setTxt(C.white); pdf.text('STRATA', ml, 7);
+        setTxt(C.teal);  pdf.text('GEO', ml + pdf.getTextWidth('STRATA') + 1, 7);
+        pdf.setFontSize(7); pdf.setFont('helvetica', 'normal');
+        setTxt([180,200,230] as [number,number,number]);
+        const tag = 'Site Suitability Report  ·  stratageo.in';
+        pdf.text(tag, pw - mr - pdf.getTextWidth(tag), 7);
+        y = 16;
+      };
 
-      // Timestamp + config line
-      pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(100, 116, 139);
-      const configParts = [new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })];
-      if (locations[0]) configParts.push(`Radius: ${(locations[0].searchRadiusM / 1000).toFixed(1)}km`);
-      if (spec) configParts.push(`Confidence: ${spec.confidence}`);
-      pdf.text(configParts.join('   ·   '), m, y); y += 6;
+      // ─── PAGE FOOTER ──────────────────────────────────────────────────────────
+      const drawAllFooters = () => {
+        const pc = pdf.internal.getNumberOfPages();
+        for (let i = 1; i <= pc; i++) {
+          pdf.setPage(i);
+          setStroke(C.slate2); pdf.setLineWidth(0.3);
+          pdf.line(ml, ph - 10, pw - mr, ph - 10);
+          pdf.setFontSize(6.5); pdf.setFont('helvetica', 'normal');
+          setTxt(C.slate5);
+          pdf.text('Screening-level assessment · Field validation recommended · © Stratageo', ml, ph - 6);
+          const pg = `${i} of ${pc}`;
+          pdf.text(pg, pw - mr - pdf.getTextWidth(pg), ph - 6);
+        }
+      };
 
-      // Summary (capped to 3 lines)
-      pdf.setFontSize(9); pdf.setTextColor(55, 65, 81);
-      const summaryLines = pdf.splitTextToSize(result.summary, cw).slice(0, 3);
-      pdf.text(summaryLines, m, y); y += summaryLines.length * 4 + 4;
+      // ─── Horizontal divider ───────────────────────────────────────────────────
+      const divider = (gap = 4) => {
+        setStroke(C.slate2); pdf.setLineWidth(0.25);
+        pdf.line(ml, y, pw - mr, y); y += gap;
+      };
 
-      // Constraints (if any, one-liner)
+      // ─── Filled section card ──────────────────────────────────────────────────
+      const card = (h: number) => {
+        setFill(C.slate1); pdf.rect(ml, y, cw, h, 'F');
+      };
+
+      // ─── Score pill (small coloured rectangle + number) ───────────────────────
+      const scorePill = (score: number, excl: boolean, px: number, py: number) => {
+        const col = scoreColor(score, excl);
+        setFill(col);
+        pdf.roundedRect(px, py - 3.5, 14, 5, 1, 1, 'F');
+        pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); setTxt(C.white);
+        const lbl = excl ? 'EXC' : `${score.toFixed(1)}`;
+        pdf.text(lbl, px + 7 - pdf.getTextWidth(lbl) / 2, py);
+      };
+
+      // ─── Horizontal score bar ─────────────────────────────────────────────────
+      const scoreBar = (score: number, maxW: number, barY: number, barH: number, excl = false) => {
+        setFill(C.slate2); pdf.rect(0, barY, maxW, barH, 'F'); // track
+        const fillW = Math.max(1, (score / 10) * maxW);
+        setFill(scoreColor(score, excl));
+        pdf.rect(0, barY, fillW, barH, 'F'); // fill
+      };
+
+      // ─── Criterion row ────────────────────────────────────────────────────────
+      const criterionRow = (name: string, score: number, rawVal: number, weight: number, dir: string, rowY: number) => {
+        const nameW = 62; const barX = ml + nameW + 2; const barW = cw - nameW - 22; const scoreX = ml + cw - 18; const wtX = ml + cw;
+        // row background (alt)
+        const col = dir === 'negative'
+          ? (score <= 3 ? C.red : score <= 6 ? C.orange : C.green)
+          : (score >= 7 ? C.green : score >= 4 ? C.blue : C.red);
+        // Name
+        pdf.setFontSize(7); pdf.setFont('helvetica', 'normal'); setTxt(C.slate7);
+        const arrow = dir === 'negative' ? '▼' : '▲';
+        pdf.text(`${arrow} ${name}`.substring(0, 32), ml, rowY + 2.5);
+        // Bar
+        setFill(C.slate2); pdf.rect(barX, rowY, barW, 3.5, 'F');
+        setFill(col); pdf.rect(barX, rowY, Math.max(0.5, (score / 10) * barW), 3.5, 'F');
+        // Score
+        pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); setTxt(C.slate9);
+        pdf.text(`${score.toFixed(1)}`, scoreX, rowY + 2.8);
+        // Weight
+        pdf.setFontSize(6.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+        pdf.text(`${Math.round(weight * 100)}%`, wtX - pdf.getTextWidth(`${Math.round(weight * 100)}%`), rowY + 2.8);
+      };
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // PAGE 1 — COVER
+      // ══════════════════════════════════════════════════════════════════════════
+      drawPageHeader();
+
+      // ── Title block ──
+      setFill(C.slate1); pdf.rect(ml, y, cw, 18, 'F');
+      setFill(C.navy); pdf.rect(ml, y, 2, 18, 'F'); // left accent
+      pdf.setFontSize(14); pdf.setFont('helvetica', 'bold'); setTxt(C.slate9);
+      pdf.text(result.business_type, ml + 5, y + 7);
+      pdf.setFontSize(9); pdf.setFont('helvetica', 'normal'); setTxt(C.navy);
+      pdf.text(result.target_location, ml + 5, y + 13);
+
+      // Top location score badge (top-right of title block)
+      const top = [...locations].sort((a, b) => a.excluded === b.excluded ? b.mcda_score - a.mcda_score : (a.excluded ? 1 : -1))[0];
+      if (top) {
+        const bx = pw - mr - 28; const by = y + 2;
+        scorePill(top.mcda_score, top.excluded, bx, by + 5);
+        pdf.setFontSize(6); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+        pdf.text('top score', bx, by + 10);
+      }
+      y += 22;
+
+      // ── Meta line ──
+      const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      const radiusStr = locations[0] ? `${(locations[0].searchRadiusM / 1000).toFixed(1)}km radius` : '';
+      const confStr = spec ? `Confidence: ${spec.confidence}` : '';
+      const constraintStr = spec && spec.constraints.length > 0 ? `${spec.constraints.length} constraint(s)` : '';
+      const metaParts = [dateStr, radiusStr, confStr, constraintStr].filter(Boolean);
+      pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+      pdf.text(metaParts.join('   ·   '), ml, y); y += 5;
+
+      // ── Constraints tags ──
       if (spec && spec.constraints.length > 0) {
-        pdf.setFontSize(7.5); pdf.setTextColor(100, 116, 139);
-        const cStr = spec.constraints.map(c => `${c.direction === 'away' ? '✕' : '✓'} ${c.label}`).join('   ');
-        pdf.text(pdf.splitTextToSize(cStr, cw).slice(0, 1), m, y); y += 5;
+        let cx = ml;
+        spec.constraints.forEach(c => {
+          const lbl = `${c.direction === 'away' ? '✕ ' : '✓ '}${c.label}`;
+          const tw = pdf.getTextWidth(lbl) + 4;
+          setFill(c.direction === 'away' ? [254,226,226] as [number,number,number] : [220,252,231] as [number,number,number]);
+          pdf.roundedRect(cx, y, tw, 4.5, 1, 1, 'F');
+          pdf.setFontSize(6.5); pdf.setFont('helvetica', 'bold');
+          setTxt(c.direction === 'away' ? C.red : C.green);
+          pdf.text(lbl, cx + 2, y + 3.2);
+          cx += tw + 2;
+          if (cx > pw - mr - 20) { y += 6; cx = ml; }
+        });
+        y += 7;
       }
 
-      // Map screenshot (compact — max 70mm height)
-      const mapEl = document.getElementById('map-container');
-      if (mapEl) {
-        try {
-          const canvas = await html2canvas(mapEl, { useCORS: true, logging: false, scale: 2 });
-          const img = canvas.toDataURL('image/jpeg', 0.85);
-          const ip = pdf.getImageProperties(img);
-          const imgW = cw;
-          const imgH = Math.min((ip.height * imgW) / ip.width, 70);
-          ensureSpace(imgH + 4);
-          pdf.addImage(img, 'JPEG', m, y, imgW, imgH);
-          y += imgH + 4;
-        } catch { /* skip map */ }
-      }
+      divider(3);
 
-      // Score overview table (compact summary of all locations)
-      ensureSpace(8 + locations.length * 5);
-      pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(30, 41, 59);
-      pdf.text('Location Scores', m, y); y += 5;
-      const ranked = [...locations].sort((a, b) => {
-        if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;
-        return b.mcda_score - a.mcda_score;
+      // ── Executive summary ──
+      sectionLabel('Executive Summary');
+      const summaryLines = pdf.splitTextToSize(result.summary, cw);
+      const summaryH = Math.min(summaryLines.length, 6) * 4 + 4;
+      card(summaryH);
+      pdf.setFontSize(8.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate7);
+      pdf.text(summaryLines.slice(0, 6), ml + 3, y + 4);
+      y += summaryH + 4;
+
+      // ── Ranked locations overview — visual score matrix ──
+      const ranked = [...locations].sort((a, b) => a.excluded === b.excluded ? b.mcda_score - a.mcda_score : (a.excluded ? 1 : -1));
+      sectionLabel('Ranked Locations Overview');
+
+      // Table header
+      setFill(C.navy); pdf.rect(ml, y, cw, 6, 'F');
+      pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); setTxt(C.white);
+      pdf.text('LOCATION', ml + 2, y + 4.2);
+      pdf.text('SCORE', ml + 55, y + 4.2);
+      pdf.text('SUITABILITY INDEX', ml + 80, y + 4.2);
+      pdf.text('STATUS', pw - mr - 15, y + 4.2);
+      y += 6;
+
+      ranked.forEach((loc, idx) => {
+        ensureSpace(10);
+        const rowH = 9;
+        const bg: [number,number,number] = idx % 2 === 0 ? C.white : C.slate1;
+        setFill(bg); pdf.rect(ml, y, cw, rowH, 'F');
+
+        // Rank + Name
+        setFill(scoreColor(loc.mcda_score, loc.excluded));
+        pdf.rect(ml, y, 5, rowH, 'F');
+        pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); setTxt(C.white);
+        pdf.text(`${idx + 1}`, ml + 1.5, y + 5.5);
+        pdf.setFont('helvetica', loc.excluded ? 'italic' : 'bold'); setTxt(loc.excluded ? C.slate5 : C.slate9);
+        pdf.setFontSize(8);
+        pdf.text(loc.name, ml + 7, y + 4);
+        pdf.setFontSize(6.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+        pdf.text(`${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`, ml + 7, y + 7.5);
+
+        // Score number
+        pdf.setFontSize(9); pdf.setFont('helvetica', 'bold');
+        setTxt(scoreColor(loc.mcda_score, loc.excluded));
+        pdf.text(`${loc.mcda_score.toFixed(1)}`, ml + 55, y + 5.5);
+        pdf.setFontSize(6.5); setTxt(C.slate5);
+        pdf.text('/10', ml + 55 + pdf.getTextWidth(`${loc.mcda_score.toFixed(1)}`) + 0.5, y + 5.5);
+
+        // Score bar (suitability index)
+        const barX = ml + 80; const barW = cw - 80 - 20; const barY = y + 3; const barH = 3;
+        setFill(C.slate2); pdf.rect(barX, barY, barW, barH, 'F');
+        setFill(scoreColor(loc.mcda_score, loc.excluded));
+        pdf.rect(barX, barY, Math.max(1, (loc.mcda_score / 10) * barW), barH, 'F');
+
+        // Status badge
+        const status = loc.excluded ? 'EXCLUDED' : loc.mcda_score >= 7.5 ? 'STRONG' : loc.mcda_score >= 5 ? 'VIABLE' : 'WEAK';
+        const statusCol = loc.excluded ? C.slate5 : loc.mcda_score >= 7.5 ? C.green : loc.mcda_score >= 5 ? C.amber : C.red;
+        setFill(statusCol); pdf.roundedRect(pw - mr - 18, y + 2, 16, 5, 1, 1, 'F');
+        pdf.setFontSize(6.5); pdf.setFont('helvetica', 'bold'); setTxt(C.white);
+        pdf.text(status, pw - mr - 10 - pdf.getTextWidth(status) / 2, y + 5.3);
+
+        // Bottom border
+        setStroke(C.slate2); pdf.setLineWidth(0.2);
+        pdf.line(ml, y + rowH, pw - mr, y + rowH);
+        y += rowH;
       });
-      for (const loc of ranked) {
-        // Score bar
-        const barH = 4;
-        pdf.setFillColor(241, 245, 249); pdf.rect(m, y, cw, barH, 'F');
-        const fillW = (loc.mcda_score / 10) * cw;
-        if (loc.excluded) { pdf.setFillColor(200, 200, 200); }
-        else if (loc.mcda_score >= 7.5) { pdf.setFillColor(22, 163, 74); }
-        else if (loc.mcda_score >= 5) { pdf.setFillColor(234, 179, 8); }
-        else { pdf.setFillColor(220, 38, 38); }
-        pdf.rect(m, y, fillW, barH, 'F');
-        // Label on bar
-        pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
-        pdf.text(`${loc.name}${loc.excluded ? ' [EXCLUDED]' : ''}`, m + 1, y + 3);
-        pdf.setTextColor(30, 41, 59);
-        const sLbl = `${loc.mcda_score.toFixed(1)}`;
-        pdf.text(sLbl, pw - m - pdf.getTextWidth(sLbl) - 1, y + 3);
-        y += barH + 1.5;
-      }
-      y += 3;
+      y += 4;
 
-      // ═══════════════════════════════════════
-      // DETAIL PAGES — One section per location
-      // ═══════════════════════════════════════
+      // ── Criteria comparison (what was measured) ──
+      if (ranked[0] && ranked[0].criteria_breakdown.length > 0) {
+        divider(4);
+        sectionLabel('Scoring Criteria Applied');
+        setFill(C.slate1); pdf.rect(ml, y, cw, 6, 'F');
+        pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); setTxt(C.slate5);
+        pdf.text('CRITERION', ml + 2, y + 4.2);
+        pdf.text('TYPE', ml + 68, y + 4.2);
+        pdf.text('WEIGHT', ml + 85, y + 4.2);
+        y += 6;
+        ranked[0].criteria_breakdown.forEach((cr, idx) => {
+          const rowH = 5.5;
+          setFill(idx % 2 === 0 ? C.white : C.slate1); pdf.rect(ml, y, cw, rowH, 'F');
+          pdf.setFontSize(7); pdf.setFont('helvetica', 'normal'); setTxt(C.slate7);
+          pdf.text(`${cr.direction === 'negative' ? '▼' : '▲'}  ${cr.name}`, ml + 2, y + 3.8);
+          setTxt(cr.direction === 'negative' ? C.orange : C.teal);
+          pdf.setFontSize(6.5);
+          pdf.text(cr.direction === 'negative' ? 'Negative (less=better)' : 'Positive (more=better)', ml + 68, y + 3.8);
+          setTxt(C.slate5);
+          pdf.text(`${Math.round(cr.weight * 100)}%`, ml + 85, y + 3.8);
+          y += rowH;
+        });
+        y += 4;
+      }
+
+      // ══════════════════════════════════════════════════════════════════════════
+      // DETAIL PAGES — one per location
+      // ══════════════════════════════════════════════════════════════════════════
       for (let li = 0; li < ranked.length; li++) {
         const loc = ranked[li];
-        // Start each location on fresh space (but don't force new page if room)
-        ensureSpace(40);
+        pdf.addPage(); drawPageHeader();
 
-        // Location header
-        pdf.setDrawColor(29, 78, 216); pdf.setLineWidth(0.5);
-        pdf.line(m, y, pw - m, y); y += 4;
-        pdf.setFontSize(11); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(29, 78, 216);
-        pdf.text(`#${li + 1}  ${loc.name}`, m, y);
-        const scoreTxt = `${loc.mcda_score.toFixed(1)}/10`;
-        if (loc.excluded) pdf.setTextColor(156, 163, 175);
-        else if (loc.mcda_score >= 7.5) pdf.setTextColor(22, 163, 74);
-        else if (loc.mcda_score >= 5) pdf.setTextColor(180, 120, 0);
-        else pdf.setTextColor(220, 38, 38);
-        pdf.text(scoreTxt, pw - m - pdf.getTextWidth(scoreTxt), y);
-        y += 4;
-        pdf.setFontSize(7); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(100, 116, 139);
-        pdf.text(`${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}   ·   Radius: ${(loc.searchRadiusM / 1000).toFixed(1)}km`, m, y);
-        y += 5;
+        // ── Location header card ──
+        const headerH = 20;
+        setFill(loc.excluded ? C.slate1 : C.slate1);
+        pdf.rect(ml, y, cw, headerH, 'F');
+        const accentCol = scoreColor(loc.mcda_score, loc.excluded);
+        setFill(accentCol); pdf.rect(ml, y, 3, headerH, 'F');
 
-        // Reasoning (max 2 lines)
-        pdf.setFontSize(8); pdf.setTextColor(55, 65, 81);
-        const rLines = pdf.splitTextToSize(loc.reasoning, cw).slice(0, 2);
-        pdf.text(rLines, m, y); y += rLines.length * 3.5 + 3;
+        // Rank badge
+        setFill(accentCol); pdf.rect(ml + 5, y + 3, 8, 8, 'F');
+        pdf.setFontSize(11); pdf.setFont('helvetica', 'bold'); setTxt(C.white);
+        pdf.text(`${li + 1}`, ml + 7, y + 9.5);
 
-        // Criteria — compact table with inline bars
-        const colName = m;
-        const colBar = m + 52;
-        const colScore = pw - m - 28;
-        const colWeight = pw - m - 12;
-        const barWidth = colScore - colBar - 2;
+        // Name + coordinates
+        pdf.setFontSize(14); pdf.setFont('helvetica', 'bold');
+        setTxt(loc.excluded ? C.slate5 : C.slate9);
+        pdf.text(loc.name + (loc.excluded ? '  [EXCLUDED]' : ''), ml + 16, y + 8);
+        pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+        pdf.text(`${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}   ·   Search radius: ${(loc.searchRadiusM / 1000).toFixed(1)}km`, ml + 16, y + 14);
 
-        // Table header
-        pdf.setFontSize(6.5); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(100, 116, 139);
-        pdf.text('CRITERION', colName, y);
-        pdf.text('SCORE', colBar, y);
-        pdf.text('VALUE', colScore, y);
-        pdf.text('WT', colWeight, y);
-        y += 3;
-        pdf.setDrawColor(226, 232, 240); pdf.line(m, y, pw - m, y); y += 2;
+        // Score pill (large)
+        const pillX = pw - mr - 22; const pillY = y + 3;
+        setFill(accentCol); pdf.roundedRect(pillX, pillY, 20, 12, 2, 2, 'F');
+        pdf.setFontSize(16); pdf.setFont('helvetica', 'bold'); setTxt(C.white);
+        const scoreStr = loc.mcda_score.toFixed(1);
+        pdf.text(scoreStr, pillX + 10 - pdf.getTextWidth(scoreStr) / 2, pillY + 9);
+        pdf.setFontSize(6.5); pdf.setFont('helvetica', 'normal');
+        pdf.text('/ 10', pillX + 10 - pdf.getTextWidth('/ 10') / 2, pillY + 13.5);
+        y += headerH + 4;
 
-        for (const cr of loc.criteria_breakdown) {
-          ensureSpace(5);
-          const rowH = 3.5;
-          // Name with direction arrow
-          pdf.setFontSize(7); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(30, 41, 59);
-          const arrow = cr.direction === 'negative' ? '▼ ' : '▲ ';
-          const nameStr = `${arrow}${cr.name}`.substring(0, 28);
-          pdf.text(nameStr, colName, y + 2);
-
-          // Inline score bar
-          pdf.setFillColor(241, 245, 249); pdf.rect(colBar, y, barWidth, rowH, 'F');
-          const crFillW = Math.max(0.5, (cr.score / 10) * barWidth);
-          if (cr.direction === 'negative') { pdf.setFillColor(249, 115, 22); }
-          else if (cr.score >= 7) { pdf.setFillColor(22, 163, 74); }
-          else if (cr.score >= 4) { pdf.setFillColor(59, 130, 246); }
-          else { pdf.setFillColor(220, 38, 38); }
-          pdf.rect(colBar, y, crFillW, rowH, 'F');
-          // Score number on bar
-          pdf.setFontSize(6); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(255, 255, 255);
-          if (crFillW > 8) pdf.text(cr.score.toFixed(1), colBar + 1, y + 2.5);
-
-          // Raw value + weight columns
-          pdf.setFontSize(6.5); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(100, 116, 139);
-          pdf.text(String(cr.rawValue), colScore, y + 2);
-          pdf.text(`${Math.round(cr.weight * 100)}%`, colWeight, y + 2);
-
-          y += rowH + 1;
-        }
-
-        // Exclusion flags (compact, if any)
+        // ── Exclusion reason ──
         const failedExcl = loc.exclusions.filter(e => !e.passed);
         if (failedExcl.length > 0) {
-          y += 1;
-          pdf.setFontSize(6.5); pdf.setTextColor(220, 38, 38);
-          for (const ex of failedExcl) {
-            ensureSpace(4);
-            pdf.text(`✕ ${ex.rule}`, m, y); y += 3;
-          }
+          setFill([254,226,226] as [number,number,number]); pdf.rect(ml, y, cw, 7 * failedExcl.length + 2, 'F');
+          setFill(C.red); pdf.rect(ml, y, 2, 7 * failedExcl.length + 2, 'F');
+          failedExcl.forEach((ex, ei) => {
+            pdf.setFontSize(7.5); pdf.setFont('helvetica', 'bold'); setTxt(C.red);
+            pdf.text(`Exclusion constraint failed: ${ex.rule}`, ml + 4, y + 5 + ei * 7);
+          });
+          y += 7 * failedExcl.length + 6;
         }
-        y += 4;
+
+        // ── GIS Analyst Reasoning ──
+        sectionLabel('GIS Analyst Assessment');
+        const rLines = pdf.splitTextToSize(loc.reasoning, cw);
+        const reasonH = Math.min(rLines.length, 8) * 4 + 6;
+        card(reasonH);
+        setFill(accentCol); pdf.rect(ml, y, 2, reasonH, 'F');
+        pdf.setFontSize(8.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate7);
+        pdf.text(rLines.slice(0, 8), ml + 5, y + 4.5);
+        y += reasonH + 5;
+
+        // ── Criteria breakdown table ──
+        sectionLabel('Scoring Criteria Breakdown');
+
+        // Table header
+        setFill(C.slate9); pdf.rect(ml, y, cw, 6.5, 'F');
+        pdf.setFontSize(6.5); pdf.setFont('helvetica', 'bold'); setTxt(C.white);
+        pdf.text('CRITERION', ml + 2, y + 4.5);
+        pdf.text('SCORE INDEX', ml + 66, y + 4.5);
+        pdf.text('RAW EVIDENCE', ml + 112, y + 4.5);
+        pdf.text('WEIGHT', pw - mr - 11, y + 4.5);
+        y += 6.5;
+
+        loc.criteria_breakdown.forEach((cr, idx) => {
+          ensureSpace(9);
+          const rowH = 9;
+          setFill(idx % 2 === 0 ? C.white : C.slate1); pdf.rect(ml, y, cw, rowH, 'F');
+
+          // Criterion name + justification
+          const arrow = cr.direction === 'negative' ? '▼' : '▲';
+          pdf.setFontSize(8); pdf.setFont('helvetica', 'bold');
+          setTxt(cr.direction === 'negative' ? C.orange : C.navy);
+          pdf.text(`${arrow}  ${cr.name}`, ml + 2, y + 4);
+          pdf.setFontSize(6); pdf.setFont('helvetica', 'italic'); setTxt(C.slate5);
+          const justLines = pdf.splitTextToSize(cr.justification || '', 60);
+          pdf.text(justLines.slice(0, 1), ml + 2, y + 7.5);
+
+          // Score bar + number (0–10 scale)
+          const barX = ml + 66; const barW = 44; const barY2 = y + 3.5; const barH2 = 3;
+          setFill(C.slate2); pdf.rect(barX, barY2, barW, barH2, 'F');
+          const crColor = cr.direction === 'negative'
+            ? (cr.score <= 3 ? C.red : cr.score <= 6 ? C.orange : C.green)
+            : (cr.score >= 7 ? C.green : cr.score >= 4 ? C.blue : C.red);
+          setFill(crColor); pdf.rect(barX, barY2, Math.max(0.5, (cr.score / 10) * barW), barH2, 'F');
+          pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); setTxt(crColor);
+          pdf.text(`${cr.score.toFixed(1)}/10`, barX + barW + 1, y + 5.5);
+
+          // Raw evidence
+          pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); setTxt(C.slate9);
+          pdf.text(`${cr.rawValue ?? 0} observed`, ml + 112, y + 4);
+          pdf.setFontSize(6.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+          pdf.text('within search radius', ml + 112, y + 7.5);
+
+          // Weight badge
+          setFill(C.slate2); pdf.roundedRect(pw - mr - 13, y + 2, 11, 5, 1, 1, 'F');
+          pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); setTxt(C.slate7);
+          const wtLbl = `${Math.round(cr.weight * 100)}%`;
+          pdf.text(wtLbl, pw - mr - 7.5 - pdf.getTextWidth(wtLbl) / 2, y + 5.5);
+
+          // Row border
+          setStroke(C.slate2); pdf.setLineWidth(0.2);
+          pdf.line(ml, y + rowH, pw - mr, y + rowH);
+          y += rowH;
+        });
+        y += 6;
+
+        // ── OSM signal summary ──
+        if (loc.osmSignals && Object.keys(loc.osmSignals).length > 0) {
+          ensureSpace(16);
+          sectionLabel('Raw Spatial Evidence (OSM Signal Counts)');
+          setFill(C.slate1); pdf.rect(ml, y, cw, 5, 'F');
+          const signals = Object.entries(loc.osmSignals);
+          const colW = cw / Math.min(signals.length, 5);
+          signals.slice(0, 5).forEach(([key, val], si) => {
+            const sx = ml + si * colW;
+            pdf.setFontSize(9); pdf.setFont('helvetica', 'bold'); setTxt(C.navy);
+            pdf.text(String(val), sx + 2, y + 3.5);
+          });
+          y += 5;
+          signals.slice(0, 5).forEach(([key], si) => {
+            const sx = ml + si * colW;
+            pdf.setFontSize(5.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+            pdf.text(key.replace(/_/g,' '), sx + 2, y + 3);
+          });
+          y += 6;
+        }
       }
 
-      // ═══════════════════════════════════════
-      // BENCHMARK COMPARISON
-      // ═══════════════════════════════════════
-      if (spec && spec.sectorId) {
-        const topNonExcluded = ranked.find(l => !l.excluded);
-        if (topNonExcluded) {
-          const bench = compareToBenchmark(topNonExcluded.mcda_score, spec.sectorId, spec.geography?.city);
+      // ══════════════════════════════════════════════════════════════════════════
+      // FINAL PAGE — Benchmark + Methodology
+      // ══════════════════════════════════════════════════════════════════════════
+      pdf.addPage(); drawPageHeader();
+
+      // ── Benchmark ──
+      if (spec?.sectorId) {
+        const topNE = ranked.find(l => !l.excluded);
+        if (topNE) {
+          const bench = compareToBenchmark(topNE.mcda_score, spec.sectorId, spec.geography?.city);
           if (bench) {
-            ensureSpace(22);
-            pdf.setDrawColor(226, 232, 240); pdf.line(m, y, pw - m, y); y += 4;
-            pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(30, 41, 59);
-            pdf.text('Industry Benchmark', m, y); y += 4;
-            pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(55, 65, 81);
-            pdf.text(`Sector average: ${bench.sectorAvg.toFixed(1)}/10${bench.cityAvg ? `  |  City average (${spec.geography.city}): ${bench.cityAvg.toFixed(1)}/10` : ''}`, m, y); y += 3.5;
-            pdf.text(`Top location score: ${topNonExcluded.mcda_score.toFixed(1)}/10 — ${bench.ratingLabel}`, m, y); y += 3.5;
-            pdf.setTextColor(100, 116, 139);
-            const insightLines = pdf.splitTextToSize(bench.insight, cw);
-            pdf.text(insightLines.slice(0, 1), m, y); y += 4;
+            sectionLabel('Industry Benchmark Comparison');
+            card(30);
+            setFill(C.navy); pdf.rect(ml, y, 2, 30, 'F');
+
+            // Score vs benchmark visual
+            const bBarX = ml + 5; const bBarW = 80;
+            pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); setTxt(C.slate9);
+            pdf.text('This Analysis', bBarX, y + 6);
+            setFill(scoreColor(topNE.mcda_score, false));
+            pdf.rect(bBarX, y + 7, (topNE.mcda_score / 10) * bBarW, 4, 'F');
+            pdf.setFontSize(8); pdf.setFont('helvetica', 'bold'); setTxt(C.slate9);
+            pdf.text(`${topNE.mcda_score.toFixed(1)}/10`, bBarX + (topNE.mcda_score / 10) * bBarW + 1, y + 10.5);
+
+            pdf.setFontSize(8); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+            pdf.text('Sector Average', bBarX, y + 18);
+            setFill(C.slate5);
+            pdf.rect(bBarX, y + 19, (bench.sectorAvg / 10) * bBarW, 4, 'F');
+            pdf.text(`${bench.sectorAvg.toFixed(1)}/10`, bBarX + (bench.sectorAvg / 10) * bBarW + 1, y + 22.5);
+
+            // Rating label
+            const ratingX = ml + 100;
+            pdf.setFontSize(18); pdf.setFont('helvetica', 'bold');
+            setTxt(scoreColor(topNE.mcda_score, false));
+            pdf.text(bench.ratingLabel, ratingX, y + 14);
+            pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate5);
+            const insightLines = pdf.splitTextToSize(bench.insight, cw - 100 - 5);
+            pdf.text(insightLines.slice(0, 2), ratingX, y + 20);
+            y += 36;
           }
         }
       }
 
-      // ═══════════════════════════════════════
-      // METHODOLOGY FOOTER
-      // ═══════════════════════════════════════
-      ensureSpace(20);
-      pdf.setDrawColor(226, 232, 240); pdf.line(m, y, pw - m, y); y += 4;
-      pdf.setFontSize(7); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(100, 116, 139);
-      pdf.text('Methodology', m, y); y += 3;
-      pdf.setFont('helvetica', 'normal');
-      const methLines = pdf.splitTextToSize('Scored using Multi-Criteria Decision Analysis (MCDA) with continuous linear interpolation. Spatial data sourced from Google Places API and OpenStreetMap. Criteria weights dynamically generated per business profile. Screening-level assessment — field validation recommended.', cw);
-      pdf.text(methLines, m, y);
+      // ── Methodology ──
+      divider(4);
+      sectionLabel('Methodology & Data Sources');
+      const methBlocks = [
+        {
+          title: '1. Intent Extraction',
+          body: 'The user query is parsed by GPT-4o-mini using a sector-specific GIS handbook prompt to extract business type, location, constraints, and scoring criteria. The system generates MCDA criteria dynamically per business profile.',
+        },
+        {
+          title: '2. Spatial Data Collection',
+          body: 'Candidate neighborhoods are geocoded via Google Geocoding API (Nominatim fallback). For each candidate, OpenStreetMap Overpass API and Google Places API are queried to count relevant features (transit, commercial, competitors, etc.) within the search radius.',
+        },
+        {
+          title: '3. MCDA Scoring',
+          body: 'Raw feature counts are mapped to 0–10 scores using continuous linear interpolation against sector-calibrated thresholds. Positive criteria reward higher counts; negative criteria penalize them. A weighted composite score is computed per location.',
+        },
+        {
+          title: '4. Exclusion & Feasibility',
+          body: 'Named-area exclusions are geocoded and applied as hard filters. Feasibility is checked against site profile (land intensity, urban preference, market positioning). Confidence is scored from 0–100 based on geocoding quality, data sufficiency, and candidate pool.',
+        },
+        {
+          title: 'Important Limitations',
+          body: 'This is a screening-level assessment only. OSM coverage varies by region; less-mapped areas produce sparser evidence. Scores reflect relative suitability from available data — they are not investment recommendations. Field validation and site-level due diligence are required before any real estate or investment decision.',
+        },
+      ];
+      methBlocks.forEach((blk, bi) => {
+        ensureSpace(18);
+        setFill(bi === methBlocks.length - 1 ? [255,251,235] as [number,number,number] : C.slate1);
+        pdf.rect(ml, y, cw, 16, 'F');
+        setFill(bi === methBlocks.length - 1 ? C.amber : C.navy);
+        pdf.rect(ml, y, 2, 16, 'F');
+        pdf.setFontSize(8); pdf.setFont('helvetica', 'bold');
+        setTxt(bi === methBlocks.length - 1 ? C.amber : C.navy);
+        pdf.text(blk.title, ml + 4, y + 5);
+        pdf.setFontSize(7.5); pdf.setFont('helvetica', 'normal'); setTxt(C.slate7);
+        const bodyLines = pdf.splitTextToSize(blk.body, cw - 6);
+        pdf.text(bodyLines.slice(0, 2), ml + 4, y + 10);
+        y += 18;
+      });
 
-      // Page footers
-      const pc = pdf.internal.getNumberOfPages();
-      for (let i = 1; i <= pc; i++) {
-        pdf.setPage(i); pdf.setFontSize(6.5); pdf.setTextColor(156, 163, 175);
-        pdf.text(`${i} / ${pc}`, pw - m - 8, ph - 7);
-        pdf.text('stratageo.in  ·  Screening-level assessment', m, ph - 7);
-      }
-      pdf.save(`Stratageo-${result.business_type.replace(/\s+/g, '-')}-${result.target_location.replace(/\s+/g, '-')}.pdf`);
-    } catch { setError('PDF export failed.'); }
+      // All page footers
+      drawAllFooters();
+
+      pdf.save(`Stratageo-SiteSuitability-${result.business_type.replace(/\s+/g, '-')}-${result.target_location.replace(/\s+/g, '-')}-${new Date().toISOString().slice(0,10)}.pdf`);
+    } catch (e: any) { setError(`PDF export failed: ${e?.message || 'unknown error'}`); }
     finally { setIsLoading(false); }
   }, [result, locations, spec]);
 
