@@ -462,6 +462,10 @@ const DEFAULT_NEIGHBORHOODS = {
   bengaluru: ['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield', 'Jayanagar', 'Malleswaram', 'Hebbal', 'Electronic City'],
   bangalore: ['Koramangala', 'Indiranagar', 'HSR Layout', 'Whitefield', 'Jayanagar', 'Malleswaram', 'Hebbal', 'Electronic City'],
   mumbai: ['Andheri West', 'Bandra', 'Borivali', 'Kurla', 'Lower Parel', 'Malad West', 'Powai', 'Thane'],
+  // Navi Mumbai: distinct from Mumbai — industrial/logistics corridor near JNPT port
+  'navi mumbai': ['Vashi', 'Kharghar', 'Belapur', 'Airoli', 'Panvel', 'Taloja MIDC', 'Turbhe MIDC', 'Ghansoli'],
+  // Bhiwandi: key logistics hub near Mumbai, separate from Mumbai city
+  bhiwandi: ['Bhiwandi', 'Kalher', 'Mankoli', 'Nimbavali', 'Purna Bhiwandi', 'Sonale'],
   // ── Delhi (pan-city fallback + subregion lists, subregions must come BEFORE 'delhi') ──
   'east delhi':    ['Preet Vihar', 'Laxmi Nagar', 'Patparganj', 'Shahdara', 'Vivek Vihar', 'Krishna Nagar', 'Anand Vihar', 'Geeta Colony'],
   'west delhi':    ['Rajouri Garden', 'Janakpuri', 'Tilak Nagar', 'Paschim Vihar', 'Punjabi Bagh', 'Uttam Nagar', 'Patel Nagar', 'Hari Nagar'],

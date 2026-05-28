@@ -54,6 +54,16 @@ const RESULT_REFERENCES = [
   'one of your', 'lower parel', 'the locations you', 'ranked location',
   'existing sites', 'existing branch', 'my branch', 'our branch',
   'my existing', 'our existing',
+  // Hindi/Hinglish industrial vocabulary that commonly appears in follow-ups
+  // (RIICO, MIDC, GIDC = Indian industrial development authority names)
+  'riico', 'midc', 'gidc', 'kiadb', 'sidco', 'apiic',
+  'industrial area', 'industrial zone', 'industrial estate',
+  'theek hai', 'theek he', 'sahi hai',   // "that's okay/fine"
+  'lekin ', 'par ', 'magar ',            // "but" — follows a reference to prior result
+  'wahan ', 'wahan ke',                  // "there" — refers to previously mentioned area
+  'include kar', 'shamil kar', 'add kar', // "include" — wants to add to prior results
+  'dekhna chahte', 'dekhna chahiye',     // "want to see" — refers to prior analysis
+  'dobaara', 'dobara', 'phir se',        // "again/redo" — re-run prior analysis
 ];
 
 export function resolveContext(
@@ -178,7 +188,8 @@ function detectFollowUp(lower: string, memory: WorkingMemory): boolean {
     const hasNewCity = /\b(in|at|near|for)\s+(mumbai|delhi|bengaluru|bangalore|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|lucknow|surat|nagpur|indore|bhopal|chandigarh|kochi|coimbatore|nashik|vadodara|gurgaon|gurugram|noida|faridabad|meerut)\b/i.test(lower);
     const hasNewBizType = detectBusinessType(lower) && !lower.includes(memory.businessType.toLowerCase().split(' ')[0]);
     const looksLikeNewQuery = hasNewCity && hasNewBizType;
-    if (!looksLikeNewQuery && lower.length < 200) return true;
+    // Increased from 200 → 300 chars to catch longer Hinglish follow-ups
+    if (!looksLikeNewQuery && lower.length < 300) return true;
   }
 
   return false;
