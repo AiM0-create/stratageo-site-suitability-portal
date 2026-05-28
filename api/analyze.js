@@ -817,7 +817,18 @@ export default async function handler(req, res) {
       searchRadiusM: 1500,
     };
 
-    const searchRadiusM = Math.min(20_000, Math.max(500, Number(profile.searchRadiusM) || 1500));
+    const searchRadiusM = Math.min(25_000, Math.max(500, Number(profile.searchRadiusM) || 1500));
+
+    // Enforce radius floors based on landIntensity — prevents GPT from defaulting
+    // to 1500m for warehouses, data centres, solar farms, etc.
+    const RADIUS_FLOORS = { high: 4000, medium: 1500, low: 500 };
+    const radiusFloor = RADIUS_FLOORS[profile.landIntensity] ?? 500;
+    if (searchRadiusM < radiusFloor) {
+      parsingNotes.push(
+        `searchRadiusM raised from ${searchRadiusM}m → ${radiusFloor}m (landIntensity=${profile.landIntensity} floor).`,
+      );
+    }
+    const effectiveSearchRadiusM = Math.max(searchRadiusM, radiusFloor);
 
     // ═══════════════════════════════════════════════════════
     // Step 4 — Geocode candidate locations
@@ -828,7 +839,7 @@ export default async function handler(req, res) {
 
     if (isCoordAnchored) {
       // Coordinate anchor: generate directional offsets
-      const pts = generateCandidatePoints(anchor.lat, anchor.lng, searchRadiusM, count + 2);
+      const pts = generateCandidatePoints(anchor.lat, anchor.lng, effectiveSearchRadiusM, count + 2);
       for (const pt of pts) {
         let displayName = pt.label;
         const rev = await reverseGeocode(pt.lat, pt.lng);
@@ -914,7 +925,7 @@ export default async function handler(req, res) {
       //     LLM variation can only add — it never reorders the base set.
       //   - Unknown cities: LLM list sorted alphabetically, fallback to generic
       //     directional offsets if LLM returned nothing.
-      const defaultNeighborhoods = getNeighborhoodsForCity(city, count + 3);
+      const defaultNeighborhoods = getNeighborhoodsForCity(city, count + 3, profile.landIntensity);
       const isKnownCity = hasCityInDefaultList(city);
 
       // ── User-specified preferred areas ──────────────────────────────────────
@@ -1026,7 +1037,7 @@ export default async function handler(req, res) {
         fallbackFrom = `${city} neighborhoods`;
         fallbackTo = 'city-center directional offsets';
         candidateScopeMode = 'fallback_neighborhood';
-        const offsetKm = Math.min(searchRadiusM / 1000, 5);
+        const offsetKm = Math.min(effectiveSearchRadiusM / 1000, 5);
         const offsets = [
           { name: city, dlat: 0, dlng: 0 },
           { name: `${city} North`, dlat: offsetKm / 111, dlng: 0 },
@@ -1261,19 +1272,21 @@ export default async function handler(req, res) {
     // Step 6 — Cap search radius
     // ═══════════════════════════════════════════════════════
 
-    let effectiveRadius = searchRadiusM;
+    let effectiveRadius = effectiveSearchRadiusM;
     if (candidateLocationsAfterFiltering.length >= 2) {
       effectiveRadius = capSearchRadius(
         candidateLocationsAfterFiltering.map(c => ({ lat: c.lat, lng: c.lng })),
-        searchRadiusM,
+        effectiveSearchRadiusM,
+        500,
+        profile.landIntensity,
       );
-      if (effectiveRadius < searchRadiusM) {
+      if (effectiveRadius < effectiveSearchRadiusM) {
         parsingNotes.push(
-          `Radius capped from ${(searchRadiusM / 1000).toFixed(1)}km → ${(effectiveRadius / 1000).toFixed(1)}km (inter-neighborhood overlap prevention).`,
+          `Radius capped from ${(effectiveSearchRadiusM / 1000).toFixed(1)}km → ${(effectiveRadius / 1000).toFixed(1)}km (inter-neighborhood overlap prevention${profile.landIntensity === 'high' ? ', high-intensity 80% factor' : ''}).`,
         );
         penaltiesApplied.push({
           type: 'radius_cap',
-          rule: `Search radius reduced from ${(searchRadiusM / 1000).toFixed(1)}km to ${(effectiveRadius / 1000).toFixed(1)}km`,
+          rule: `Search radius reduced from ${(effectiveSearchRadiusM / 1000).toFixed(1)}km to ${(effectiveRadius / 1000).toFixed(1)}km`,
         });
       }
     }
@@ -1680,7 +1693,9 @@ TONE & QUALITY RULES:
       osmLatencyMs,
       explainLatencyMs,
       criteriaType: hasDynamicCriteria ? 'llm-generated' : 'none',
-      searchRadiusM,
+      searchRadiusM: effectiveSearchRadiusM,
+      requestedSearchRadiusM: searchRadiusM,
+      landIntensity: profile.landIntensity,
       effectiveRadiusM: effectiveRadius,
       tokenUsage: {
         intent: intentTokenUsage,
