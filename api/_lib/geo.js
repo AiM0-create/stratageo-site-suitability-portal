@@ -410,10 +410,17 @@ export function haversineM(lat1, lng1, lat2, lng2) {
 }
 
 /**
- * Cap search radius to 60% of the minimum inter-candidate distance.
+ * Cap search radius to a fraction of the minimum inter-candidate distance.
  * Prevents overlapping Overpass queries that produce identical signals.
+ *
+ * landIntensity handling:
+ *   'high'   → 80% overlap factor + 2 km floor.  Industrial / logistics / energy
+ *              sectors need 5–15 km radii; the wider industrial neighborhood lists
+ *              (spaced 15–40 km apart) make this safe.
+ *   default  → 60% overlap factor + 500 m floor.  Keeps urban-retail neighborhoods
+ *              (spaced ~2.5 km apart in Indian metros) from bleeding into each other.
  */
-export function capSearchRadius(coords, requestedRadius, minRadius = 500) {
+export function capSearchRadius(coords, requestedRadius, minRadius = 500, landIntensity = 'low') {
   if (coords.length < 2) return requestedRadius;
   let minDist = Infinity;
   for (let i = 0; i < coords.length; i++) {
@@ -422,7 +429,10 @@ export function capSearchRadius(coords, requestedRadius, minRadius = 500) {
       if (d < minDist) minDist = d;
     }
   }
-  const maxSafe = Math.max(minRadius, Math.floor(minDist * 0.6));
+  const isHighIntensity = landIntensity === 'high';
+  const overlapFactor   = isHighIntensity ? 0.80 : 0.60;
+  const effectiveMin    = isHighIntensity ? Math.max(minRadius, 2000) : minRadius;
+  const maxSafe = Math.max(effectiveMin, Math.floor(minDist * overlapFactor));
   return Math.min(requestedRadius, maxSafe);
 }
 
@@ -504,18 +514,71 @@ const DEFAULT_NEIGHBORHOODS = {
   chandigarh: ['Manimajra', 'Mohali Phase 7', 'Sector 17 Chandigarh', 'Sector 22 Chandigarh', 'Sector 35 Chandigarh', 'Sector 43 Chandigarh'],
   'delhi ncr': ['Connaught Place', 'Cyber City Gurgaon', 'Dwarka', 'Greater Noida West', 'Saket', 'Sector 18 Noida'],
   ncr: ['Connaught Place', 'Cyber City Gurgaon', 'Dwarka', 'Greater Noida West', 'Saket', 'Sector 18 Noida'],
+
+  // ── Industrial / logistics spread lists (landIntensity=high) ─────────────
+  // Points are spaced 15–40 km apart so capSearchRadius(80%) → 12–32 km effective radius.
+  // Keyed as "<city>-industrial" — selected automatically when landIntensity=high.
+  'mumbai-industrial':     ['Bhiwandi', 'Taloja MIDC', 'Khopoli', 'Wada', 'Palghar', 'Panvel', 'Turbhe MIDC'],
+  'navi mumbai-industrial':['Taloja MIDC', 'Turbhe MIDC', 'Bhiwandi', 'Khopoli', 'Panvel', 'Pen'],
+  'bhiwandi-industrial':   ['Bhiwandi', 'Kalher', 'Mankoli', 'Wada', 'Shahapur', 'Khardi'],
+  'delhi-industrial':      ['Manesar', 'Bahadurgarh', 'Kundli Sonipat', 'Noida Phase 2', 'Faridabad Industrial', 'Ghaziabad Industrial'],
+  'delhi ncr-industrial':  ['Manesar', 'Kundli Sonipat', 'Bahadurgarh', 'Pilkhuwa', 'Greater Noida Industrial', 'Faridabad Industrial', 'Bhiwadi Rajasthan'],
+  'ncr-industrial':        ['Manesar', 'Kundli Sonipat', 'Bahadurgarh', 'Pilkhuwa', 'Greater Noida Industrial', 'Faridabad Industrial', 'Bhiwadi Rajasthan'],
+  'gurgaon-industrial':    ['Manesar', 'IMT Manesar', 'Dharuhera', 'Bhiwadi Rajasthan', 'Rewari Industrial', 'Binola'],
+  'gurugram-industrial':   ['Manesar', 'IMT Manesar', 'Dharuhera', 'Bhiwadi Rajasthan', 'Rewari Industrial', 'Binola'],
+  'noida-industrial':      ['Noida Phase 2', 'Greater Noida Industrial', 'Dadri', 'Surajpur', 'Kasna', 'Ecotech Zone Greater Noida'],
+  'faridabad-industrial':  ['Faridabad Industrial', 'Ballabhgarh', 'Palwal', 'Manesar', 'IMT Manesar', 'Hodal'],
+  'bengaluru-industrial':  ['Bommasandra', 'Peenya', 'Dobbaspet', 'Hoskote', 'Bidadi', 'Malur'],
+  'bangalore-industrial':  ['Bommasandra', 'Peenya', 'Dobbaspet', 'Hoskote', 'Bidadi', 'Malur'],
+  'pune-industrial':       ['Chakan', 'Talegaon', 'Ranjangaon MIDC', 'Sanaswadi', 'Pirangut', 'Shirur'],
+  'hyderabad-industrial':  ['Patancheru', 'Bollaram', 'Pashamylaram', 'Cherlapally', 'Ghatkesar', 'Medak Road Hyderabad'],
+  'chennai-industrial':    ['Manali Chennai', 'Sriperumbudur', 'Irungattukottai', 'Oragadam', 'Ambattur Industrial', 'Gummidipoondi'],
+  'ahmedabad-industrial':  ['Changodar', 'Sanand', 'Vatva GIDC', 'Naroda GIDC', 'Bavla', 'Halol'],
+  'surat-industrial':      ['Sachin GIDC', 'Pandesara GIDC', 'Kim Surat', 'Hazira', 'Palsana', 'Ankleshwar'],
+  'nagpur-industrial':     ['MIDC Butibori', 'Hingna MIDC', 'Kalmeshwar', 'MIDC Nagpur', 'Amravati Road Nagpur', 'Wardha Road Nagpur'],
+  'jaipur-industrial':     ['Sitapura Industrial Area', 'Vishwakarma Industrial', 'Bagru', 'Boranada', 'Achrol', 'Neemrana'],
+  'kolkata-industrial':    ['Dankuni', 'Kalyani', 'Uluberia', 'Haldia', 'Baidyabati', 'Howrah Industrial'],
+  'visakhapatnam-industrial': ['Ukkunagaram', 'VSEZ Visakhapatnam', 'Atchutapuram', 'Parawada', 'Anakapalle', 'Bheemunipatnam'],
+  'coimbatore-industrial': ['Singanallur', 'Ganapathy Coimbatore', 'Sultanpet', 'Karumathampatti', 'Kalapatti', 'Annur'],
+  'indore-industrial':     ['Pithampur', 'Sanwer', 'Rau Industrial', 'Mandideep', 'Dewas', 'Hatod'],
+  'bhopal-industrial':     ['Mandideep', 'Obaidullaganj', 'Sehore Industrial', 'Govindpura Industrial', 'Misrod', 'Bagroda'],
+  'vadodara-industrial':   ['Halol GIDC', 'Savli GIDC', 'Waghodia GIDC', 'Padra', 'Karjan', 'Kayavarohan'],
+  'lucknow-industrial':    ['Amausi Industrial', 'Kanpur Road Lucknow', 'Sitapur Road Industrial', 'Deva Road Industrial', 'Barabanki', 'Unnao Industrial'],
 };
 
 /**
  * Returns the static neighborhood list for a city, or directional-offset
  * fallbacks for cities not yet in the list.
+ *
+ * When landIntensity='high' (industrial, logistics, energy), the "-industrial"
+ * variant of the list is returned first if available.  These lists use locations
+ * spaced 15–40 km apart (vs. ~2.5 km for urban retail), so capSearchRadius
+ * grants an effective radius of 12–32 km instead of the usual 1.5 km.
  */
-export function getNeighborhoodsForCity(city, count) {
+export function getNeighborhoodsForCity(city, count, landIntensity = 'low') {
   const key = city.toLowerCase().trim();
-  // Exact match first — prevents "east delhi" from falling through to the generic "delhi" entry
+
+  // ── High-intensity path: try city-industrial list first ──────────────────
+  if (landIntensity === 'high') {
+    const indKey = `${key}-industrial`;
+    if (DEFAULT_NEIGHBORHOODS[indKey]) return DEFAULT_NEIGHBORHOODS[indKey].slice(0, count);
+    // Substring match for industrial key (e.g. "navi mumbai" → "navi mumbai-industrial")
+    for (const [k, v] of Object.entries(DEFAULT_NEIGHBORHOODS)) {
+      if (!k.endsWith('-industrial')) continue;
+      const base = k.slice(0, -'-industrial'.length);
+      if (key.includes(base) || base.includes(key)) return v.slice(0, count);
+    }
+    // No dedicated industrial list — fall through to standard lookup,
+    // but capSearchRadius will still use the relaxed 80% factor.
+  }
+
+  // ── Standard path ─────────────────────────────────────────────────────────
+  // Exact match first — prevents "east delhi" from falling through to "delhi"
   if (DEFAULT_NEIGHBORHOODS[key]) return DEFAULT_NEIGHBORHOODS[key].slice(0, count);
-  // Substring fallback (handles aliases like "bangalore" → matches "bengaluru"-adjacent, etc.)
+  // Substring fallback (handles "bangalore" → matches "bengaluru"-adjacent, etc.)
+  // Skip industrial-suffix entries so they don't incorrectly match plain city names.
   for (const [k, v] of Object.entries(DEFAULT_NEIGHBORHOODS)) {
+    if (k.endsWith('-industrial')) continue;
     if (key.includes(k) || k.includes(key)) return v.slice(0, count);
   }
   // For unlisted cities, prefix with city name so geocoders find the right area
@@ -535,10 +598,11 @@ export function getNeighborhoodsForCity(city, count) {
 export function hasCityInDefaultList(city) {
   if (!city) return false;
   const key = city.toLowerCase().trim();
-  // Exact match first
-  if (key in DEFAULT_NEIGHBORHOODS) return true;
-  // Substring fallback
+  // Exact match first (skip industrial-suffix keys — they are not city entries)
+  if (key in DEFAULT_NEIGHBORHOODS && !key.endsWith('-industrial')) return true;
+  // Substring fallback — skip industrial-suffix entries
   for (const k of Object.keys(DEFAULT_NEIGHBORHOODS)) {
+    if (k.endsWith('-industrial')) continue;
     if (key.includes(k) || k.includes(key)) return true;
   }
   return false;

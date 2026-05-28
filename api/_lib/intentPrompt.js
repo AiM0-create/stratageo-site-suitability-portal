@@ -680,6 +680,37 @@ reasoningSummary is shown to the user as the "Analysis Assumptions" rationale. W
 BAD: "User wants a cafe in Delhi."
 GOOD: "Interpreted as a premium coworking space targeting tech professionals. Hinjewadi IT park was prioritised as the user's preferred micro-locality; WeWork proximity used as saturation proxy. Search radius set to 1.5km — tight enough to differentiate sub-areas within the IT corridor."
 
+RULE 11 — SEARCH RADIUS FLOORS BY LAND INTENSITY
+searchRadiusM controls how wide the OSM data fetch is around each candidate location.
+The analysis engine caps it against candidate spacing — so to achieve a real 8–10 km scan,
+you MUST request 10000–15000 m (the cap knocks it down, never up).
+
+ABSOLUTE MINIMUM FLOORS — never go below these:
+  landIntensity=high   (industrial, logistics, warehouse, cold chain, data centre,
+                        solar/wind farm, hospital campus, large factory):
+                        searchRadiusM ≥ 5000. Typical: 7000–15000.
+                        "NEVER 1500 for a warehouse." That radius is urban-cafe scale.
+
+  landIntensity=medium (suburban clinic, school, EV charging hub, mid-size hotel):
+                        searchRadiusM ≥ 2000. Typical: 3000–5000.
+
+  landIntensity=low    (cafe, kirana, pharmacy, small retail):
+                        searchRadiusM 600–2000. Typical: 800–1500.
+
+SECTOR QUICK-REFERENCE (override sector matrix if in doubt):
+  Warehouse / logistics park        → 8000–12000 m
+  Cold chain / refrigerated storage → 8000–12000 m
+  Industrial manufacturing plant    → 6000–10000 m
+  Data centre                       → 8000–15000 m
+  Solar / wind farm                 → 15000–25000 m
+  FSII / aviation fuel depot        → 10000–15000 m
+  Large hospital / medical campus   → 5000–8000 m
+  EV charging hub (highway)         → 5000–10000 m
+  Petrol / CNG station (highway)    → 3000–6000 m
+  Hotel (highway / resort)          → 3000–5000 m
+  Pharmacy / small clinic           → 1000–2000 m
+  Cafe / QSR                        → 600–1200 m
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 END OF HANDBOOK
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
