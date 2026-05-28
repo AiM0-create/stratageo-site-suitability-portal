@@ -84,9 +84,11 @@ function normalizeCity(city) {
   if (lower === 'calcutta') return 'Kolkata';
   if (/delhi\s*ncr/i.test(city)) return 'Delhi NCR';
   if (/\bncr\b/i.test(city)) return 'Delhi NCR';
-  // Mumbai sub-regions: Nominatim mis-geocodes these to wrong countries.
-  // Map to parent city; micro-locality is preserved in extractRequestedLocality.
-  if (/^(south|navi|greater)\s+mumbai$/i.test(lower)) return 'Mumbai';
+  // Mumbai sub-regions: KEEP Navi Mumbai and Greater Mumbai distinct — they have
+  // different neighborhood sets (Navi Mumbai = Vashi/Kharghar/Belapur, very different
+  // from Western/Central Mumbai). Only "South Mumbai" → Mumbai since Nominatim handles it.
+  if (/^south\s+mumbai$/i.test(lower)) return 'Mumbai';
+  // Navi Mumbai and Greater Mumbai have distinct geocoding — do NOT collapse to 'Mumbai'.
   // Delhi subregions (east/west/north/south/central) are valid distinct areas
   // that Google geocodes correctly and have their own neighborhood lists in geo.js.
   // We intentionally do NOT collapse them to "Delhi" — leave as-is.
@@ -914,16 +916,39 @@ export default async function handler(req, res) {
       //     directional offsets if LLM returned nothing.
       const defaultNeighborhoods = getNeighborhoodsForCity(city, count + 3);
       const isKnownCity = hasCityInDefaultList(city);
-      neighborhoodStrategy = isKnownCity ? 'default_only' : 'llm_only';
+
+      // ── User-specified preferred areas ──────────────────────────────────────
+      // If the LLM extracted specific neighborhoods (because the user mentioned
+      // them explicitly, e.g. "prefer Bannerghatta Road or Hinjewadi"), use those
+      // as PRIORITY CANDIDATES before/alongside the default list.
+      // This fixes the gap where user-specified areas (Sitapura, Chakan, etc.)
+      // were silently ignored for known cities.
+      const llmNeighborhoods = (intent.neighborhoods || []).filter(n =>
+        n && n.trim().length > 0 &&
+        !defaultNeighborhoods.map(d => d.toLowerCase()).includes(n.toLowerCase()),
+      );
+      const hasUserSpecifiedAreas = llmNeighborhoods.length > 0;
+
+      neighborhoodStrategy = isKnownCity
+        ? (hasUserSpecifiedAreas ? 'user_specified_first' : 'default_only')
+        : 'llm_only';
+
       let neighborhoodNames;
-      if (isKnownCity) {
-        // Known city: use ONLY the static default list — fully deterministic.
-        // LLM suggestions are intentionally ignored to eliminate run-to-run
-        // variation from LLM neighborhood drift.
+      if (hasUserSpecifiedAreas) {
+        // User explicitly named specific areas — honour them first, then fill with defaults
+        neighborhoodNames = [
+          ...llmNeighborhoods,
+          ...defaultNeighborhoods,
+        ].slice(0, count + 4);
+        parsingNotes.push(
+          `User-specified areas prioritised: ${llmNeighborhoods.join(', ')}. ` +
+          `Supplemented with ${defaultNeighborhoods.length} default neighborhoods.`,
+        );
+      } else if (isKnownCity) {
+        // Known city, no user-specified areas: use static default list for determinism
         neighborhoodNames = defaultNeighborhoods;
       } else {
-        // Unknown city: use LLM list sorted alphabetically, fallback to generic
-        // directional offsets if the LLM returned nothing.
+        // Unknown city: use LLM list sorted alphabetically, fallback to generic offsets
         neighborhoodNames = intent.neighborhoods?.length
           ? [...intent.neighborhoods].sort((a, b) => a.localeCompare(b))
           : defaultNeighborhoods;

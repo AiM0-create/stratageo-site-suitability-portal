@@ -608,16 +608,29 @@ Examples:
 If user says "not in X" → X goes in exclusionCriteria AND you must suggest alternative neighborhoods in the same city.
 If no specific area mentioned → provide 3-5 representative neighborhoods for the city that fit the sector profile.
 
-RULE 5 — SUBREGION SPECIFICITY
-"East Delhi" ≠ "Delhi". locationName must capture the subregion.
+RULE 5 — SUBREGION AND DISTRICT SPECIFICITY (CRITICAL)
+Never broaden a specific district or region to its parent state or city.
+"East Delhi" ≠ "Delhi". "Navi Mumbai" ≠ "Mumbai". "Tirunelveli district" ≠ "Tamil Nadu". "Vidarbha" ≠ "Maharashtra".
+locationName MUST be the most specific geographic unit the user mentioned — district, sub-city, or region.
+
+Key subregion mappings:
 East Delhi neighborhoods: Preet Vihar, Laxmi Nagar, Patparganj, Shahdara, Vivek Vihar, Kaushambi
 South Delhi: Hauz Khas, Saket, Nehru Place, Greater Kailash, Malviya Nagar, Vasant Kunj
 West Delhi: Rajouri Garden, Janakpuri, Tilak Nagar, Paschim Vihar, Dwarka
 North Delhi: Rohini, Pitampura, Shalimar Bagh, Mukherjee Nagar, Netaji Subhas Place
 South Mumbai: Worli, Prabhadevi, Parel, Dadar, Matunga (NOT Andheri/Bandra — those are Central/Western)
-Navi Mumbai: Vashi, Belapur, Kharghar, Nerul, Airoli, Ghansoli
+Navi Mumbai: Vashi, Belapur, Kharghar, Nerul, Airoli, Ghansoli, Taloja, Turbhe
+  → "JNPT area" or "near JNPT port" → locationName="Navi Mumbai", neighborhoods=["Vashi","Panvel","Taloja MIDC","Kharghar","Belapur"]
 West Bengaluru: Rajajinagar, Vijayanagar, Magadi Road, Yeshwanthpur
-South Bengaluru: JP Nagar, Jayanagar, BTM Layout, Banashankari, Kanakapura Road
+South Bengaluru: JP Nagar, Jayanagar, BTM Layout, Banashankari, Kanakapura Road, Bannerghatta Road, Electronic City
+  → "Bannerghatta Road corridor" or "Kanakapura Road" → neighborhoods MUST include those areas
+Tirunelveli (TN wind corridor): Tirunelveli City, Palayamkottai, Nagercoil, Valliyur
+Thoothukudi (TN port/wind): Thoothukudi, Tuticorin, Kovilpatti
+  → "Tamil Nadu southern districts" or "Tirunelveli-Thoothukudi" → locationName="Tirunelveli"
+Vidarbha (Maharashtra): locationName="Nagpur" OR "Amravati" (whichever district mentioned), NOT "Maharashtra" or "Vidarbha"
+Bhiwandi (logistics hub near Mumbai): locationName="Bhiwandi", neighborhoods=["Bhiwandi","Kalher","Mankoli","Nimbavali"]
+
+CRITICAL: If user says "Tamil Nadu southern districts" or "southern Tamil Nadu", set locationName="Tirunelveli" (the specific southern district). NEVER use "Tamil Nadu" (a state) as locationName unless the user genuinely wants a state-wide search.
 
 RULE 6 — INDUSTRIAL HARD INCOMPATIBILITY
 Heavy industrial / warehousing / manufacturing → flag these as HARD incompatibility for dense urban cores.
