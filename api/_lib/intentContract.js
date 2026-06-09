@@ -246,7 +246,7 @@ const FRESH_PROMPT_PATTERNS = [
 
 // Business-type signal words that indicate a prompt has its own use-case context.
 const BUSINESS_SIGNALS =
-  /\b(cafe|coffee\s*shop|qsr|fast.?food|bakery|gym|fitness|yoga|pilates|retail|store|shop|boutique|showroom|outlet|supermarket|grocery|kirana|restaurant|office|coworking|warehouse|clinic|pharmacy|hospital|school|tutoring|hotel|studio|salon|spa|bar|pub)\b/i;
+  /\b(cafe|coffee\s*shop|qsr|fast.?food|bakery|gym|fitness|yoga|pilates|retail|store|shop|boutique|showroom|outlet|supermarket|grocery|kirana|restaurant|office|coworking|warehouse|clinic|pharmacy|hospital|school|tutoring|hotel|studio|salon|spa|bar|pub|solar|wind\s*farm|data\s*cent|cold\s*chain|cold\s*storage|ev\s*charg|charging\s*station|petrol\s*station|cng\s*station|fuel\s*station|logistics|godown|resort|dialysis|diagnostic|manufacturing|factory|industrial\s*park)\b/i;
 
 /**
  * Returns true if the prompt supplies its own business type AND location context,

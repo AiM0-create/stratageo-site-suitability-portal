@@ -262,7 +262,16 @@ export async function fetchGooglePlacesDensity(lat, lng, radiusM, sectorArchetyp
     ? SECTOR_PROBE_TYPES[sectorArchetype]
     : GENERIC_PROBE_TYPES;
   const probeTypes = typeSet.slice(0, 3); // 3 types for better coverage (was 2)
-  const radiusCapped = Math.min(radiusM, 5000);        // cap at 5km for density probe
+  // Cap probe radius by sector intensity:
+  //   Industrial / logistics / energy sectors have effective radii of 8–15 km —
+  //   capping at 5 km misses the wider industrial zone. Allow up to 10 km for these.
+  //   Standard urban sectors: 5 km is appropriate.
+  const HIGH_INTENSITY_ARCHETYPES = new Set([
+    'warehouse_industrial', 'cold_chain_logistics', 'energy_utility', 'data_centre',
+    'large_hospital_campus',
+  ]);
+  const probeRadiusCap = HIGH_INTENSITY_ARCHETYPES.has(sectorArchetype) ? 10_000 : 5_000;
+  const radiusCapped = Math.min(radiusM, probeRadiusCap);
 
   const results = await Promise.allSettled(
     probeTypes.map(async (type) => {
@@ -457,9 +466,16 @@ export function capSearchRadius(coords, requestedRadius, minRadius = 500, landIn
       if (d < minDist) minDist = d;
     }
   }
-  const isHighIntensity = landIntensity === 'high';
-  const overlapFactor   = isHighIntensity ? 0.80 : 0.60;
-  const effectiveMin    = isHighIntensity ? Math.max(minRadius, 2000) : minRadius;
+  // Three-tier overlap factor:
+  //   high   → 80% + 2 km floor  (industrial/logistics, neighborhoods 15–40 km apart)
+  //   medium → 70% + 1 km floor  (suburban clinic/school/gym, ~3–5 km spacing)
+  //   low    → 60% + 500 m floor (urban retail, ~2.5 km spacing in Indian metros)
+  const overlapFactor = landIntensity === 'high' ? 0.80
+                      : landIntensity === 'medium' ? 0.70
+                      : 0.60;
+  const effectiveMin  = landIntensity === 'high'   ? Math.max(minRadius, 2000)
+                      : landIntensity === 'medium'  ? Math.max(minRadius, 1000)
+                      : minRadius;
   const maxSafe = Math.max(effectiveMin, Math.floor(minDist * overlapFactor));
   return Math.min(requestedRadius, maxSafe);
 }
@@ -572,6 +588,13 @@ const DEFAULT_NEIGHBORHOODS = {
   'bhopal-industrial':     ['Mandideep', 'Obaidullaganj', 'Sehore Industrial', 'Govindpura Industrial', 'Misrod', 'Bagroda'],
   'vadodara-industrial':   ['Halol GIDC', 'Savli GIDC', 'Waghodia GIDC', 'Padra', 'Karjan', 'Kayavarohan'],
   'lucknow-industrial':    ['Amausi Industrial', 'Kanpur Road Lucknow', 'Sitapur Road Industrial', 'Deva Road Industrial', 'Barabanki', 'Unnao Industrial'],
+  'kochi-industrial':      ['Eloor FACT', 'Ambalamugal', 'Kalamassery KINFRA', 'Edayar Industrial', 'Aroor', 'Cherthala'],
+  'mysuru-industrial':     ['Hebbal Industrial Mysuru', 'Hootagalli KIADB', 'Belagola Industrial', 'Nanjangud Industrial', 'Belawadi', 'Kadakola'],
+  'mysore-industrial':     ['Hebbal Industrial Mysuru', 'Hootagalli KIADB', 'Belagola Industrial', 'Nanjangud Industrial', 'Belawadi', 'Kadakola'],
+  'chandigarh-industrial': ['Phase 1 Industrial Chandigarh', 'Phase 2 Industrial Chandigarh', 'Baddi', 'Solan Industrial', 'Nalagarh', 'Derabassi'],
+  'kanpur-industrial':     ['Panki Industrial Kanpur', 'Dada Nagar Industrial', 'Fazalganj', 'Unnao Industrial', 'Rania', 'Hamirpur Road Kanpur'],
+  'agra-industrial':       ['Nunhai UPSIDC', 'Sikandara Industrial Agra', 'Bodla', 'Artoni', 'Etmadpur', 'Firozabad'],
+  'nashik-industrial':     ['Satpur MIDC', 'Ambad MIDC', 'Sinnar MIDC', 'Igatpuri', 'Ozar', 'Dindori'],
 };
 
 /**

@@ -108,16 +108,29 @@ export function scoreWithDynamicCriteria(osmSignals, dynamicCriteria, radiusM) {
 
 /**
  * Add profile-level criteria: land availability, location-type fit, and
- * (for industrial profiles) industrial zone compatibility.
+ * (for industrial/high-intensity profiles) industrial zone compatibility.
  *
  * profile: { landIntensity, urbanPreference, marketPositioning }
  * osmSignals: Record<signalKey, count> — used to infer density and zone type
+ * scoringMode: archetype scoring mode — controls which meta-criteria apply
+ *   'urban_footfall'        → no land-availability or industrial zone checks
+ *   'residential_catchment' → no land-availability or industrial zone checks
+ *   'industrial_zone_fit'   → include both land availability + industrial zone
+ *   'open_land_utility'     → include land availability, skip location-type fit
+ *   'highway_access'        → skip location-type fit
+ *   'generic'               → include all applicable (default behavior)
  */
-export function scoreProfileAlignment(osmSignals, profile) {
+export function scoreProfileAlignment(osmSignals, profile, scoringMode = 'generic') {
   const criteria = [];
   const totalPOIs = Object.values(osmSignals).reduce((a, b) => a + b, 0);
 
-  if (profile.landIntensity === 'high' || profile.landIntensity === 'medium') {
+  // Scoring modes that are purely footfall-driven should NOT include land-availability
+  // or industrial-zone criteria — a QSR or clinic doesn't care about open land.
+  const isFootfallMode = scoringMode === 'urban_footfall' || scoringMode === 'residential_catchment';
+  // Modes where location-type fit is irrelevant (industrial zone fit is the proxy instead)
+  const skipLocationTypeFit = scoringMode === 'industrial_zone_fit' || scoringMode === 'open_land_utility' || scoringMode === 'highway_access';
+
+  if (!isFootfallMode && (profile.landIntensity === 'high' || profile.landIntensity === 'medium')) {
     const isHigh = profile.landIntensity === 'high';
     let score, justification, dynamicWeight;
 
@@ -155,7 +168,7 @@ export function scoreProfileAlignment(osmSignals, profile) {
   }
 
   const urbanPref = profile.urbanPreference;
-  if (urbanPref && urbanPref !== 'flexible') {
+  if (!skipLocationTypeFit && urbanPref && urbanPref !== 'flexible') {
     const prefersUrban = urbanPref === 'urban_core' || urbanPref === 'urban';
     const prefersRural = urbanPref === 'rural' || urbanPref === 'periurban';
     const isDense = totalPOIs > 40;
@@ -191,12 +204,16 @@ export function scoreProfileAlignment(osmSignals, profile) {
   }
 
   // ── Industrial zone compatibility ─────────────────────────────────────
-  // For industrial / warehouse / logistics profiles, score based on the
-  // presence of industrial-type OSM signals (landuse=industrial,
-  // building=industrial, building=warehouse etc.) in the candidate area.
-  // This prevents commercial/residential areas from outranking industrial
-  // estates purely on road-proximity when they have zero industrial land use.
-  if (profile.marketPositioning === 'industrial') {
+  // For industrial / warehouse / logistics / energy / cold-chain profiles,
+  // score based on the presence of industrial-type OSM signals.
+  // Triggered by marketPositioning=industrial OR landIntensity=high with
+  // periurban/rural/suburban preference — covers data centres, cold chain,
+  // solar/wind farms, large hospitals that also need land-type validation.
+  const needsIndustrialZoneCheck =
+    profile.marketPositioning === 'industrial' ||
+    (profile.landIntensity === 'high' &&
+      ['periurban', 'rural', 'suburban'].includes(profile.urbanPreference));
+  if (needsIndustrialZoneCheck) {
     // Sum all signal keys that relate to industrial land use
     // Match signal keys that indicate actual industrial land use.
     // Intentionally excludes "freight_roads" / "freight_access" — those are
@@ -381,8 +398,14 @@ export function applyGoogleDensityBoost(criteriaBreakdown, googleDensityTotal, p
 
   // Only boost criteria below this threshold; already-scoring criteria are untouched
   const BOOST_THRESHOLD = 3.0;
-  // Hard ceiling — Google can suggest activity, but cannot make a location look excellent
-  const BOOST_CEILING = 5.5;
+  // Ceiling scales with Google signal strength:
+  //   < 30 places  → 5.5  (some activity, treat as "Moderate" at best)
+  //   30–49 places → 6.5  (clear district-level activity, "Good" is warranted)
+  //   50+ places   → 7.0  (vibrant established area, "Strong" is honest)
+  // Google cannot make a location look Excellent (8.5+) — OSM evidence required for that.
+  const BOOST_CEILING = googleDensityTotal >= 50 ? 7.0
+                      : googleDensityTotal >= 30 ? 6.5
+                      : 5.5;
 
   // Keywords classifying criteria as relevant to each positioning tier
   const COMMERCIAL_KW = ['office', 'commercial', 'business', 'cowork', 'corporate', 'it ', 'tech', 'cbd', 'enterprise', 'financial', 'bank'];

@@ -64,9 +64,25 @@ function getScoreQualityLabel(score: number): string {
 }
 
 const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
-  const label = basis === 'osm-observed' ? 'Places + OSM' : basis === 'osm-derived' ? 'Derived' : basis === 'constraint-rule' ? 'Rule' : basis === 'ai-generated' ? 'AI' : 'Default';
-  const cls = basis === 'osm-observed' ? 'evidence-osm' : basis === 'constraint-rule' ? 'evidence-rule' : basis === 'ai-generated' ? 'evidence-ai' : 'evidence-default';
-  return <span className={`evidence-tag ${cls}`}>{label}</span>;
+  const label =
+    basis === 'osm-observed'        ? 'OSM + Places' :
+    basis === 'osm-absent'          ? 'No Data' :
+    basis === 'osm-derived'         ? 'Derived' :
+    basis === 'google-corroborated' ? 'Google' :
+    basis === 'constraint-rule'     ? 'Rule' :
+    basis === 'ai-generated'        ? 'AI' :
+    basis === 'template-default'    ? 'Template' : 'Default';
+  const cls =
+    basis === 'osm-observed'        ? 'evidence-osm' :
+    basis === 'osm-absent'          ? 'evidence-absent' :
+    basis === 'google-corroborated' ? 'evidence-google' :
+    basis === 'constraint-rule'     ? 'evidence-rule' :
+    basis === 'ai-generated'        ? 'evidence-ai' : 'evidence-default';
+  const title =
+    basis === 'osm-absent'          ? 'Zero features observed in OSM — may be a coverage gap, not genuine absence' :
+    basis === 'google-corroborated' ? 'OSM data sparse but Google Places confirms real-world activity here; score floor lifted' :
+    basis === 'osm-observed'        ? 'Score based on features counted from OpenStreetMap Overpass data' : undefined;
+  return <span className={`evidence-tag ${cls}`} title={title}>{label}</span>;
 };
 
 const DirectionIcon: React.FC<{ direction: string }> = ({ direction }) => (

@@ -554,7 +554,8 @@ export default async function handler(req, res) {
   try {
     const {
       prompt,
-      resultCount = 3,
+      resultCount,       // preferred name (legacy)
+      count: countAlias, // frontend currently sends 'count' — accept both
       sessionContext,
       debug = false,
     } = req.body || {};
@@ -563,7 +564,9 @@ export default async function handler(req, res) {
       return sendJSON(res, 400, { ok: false, error: 'Missing required field: prompt (string)' });
     }
 
-    const count = Math.min(5, Math.max(1, Number(resultCount) || 3));
+    // Accept resultCount OR count (frontend sends 'count', keep backwards-compatible).
+    const rawCount = resultCount ?? countAlias ?? 3;
+    const count = Math.min(5, Math.max(1, Number(rawCount) || 3));
 
     // Fallback and geography constraint state — updated throughout the pipeline
     let fallbackUsed = false;
@@ -638,6 +641,24 @@ export default async function handler(req, res) {
     // ═══════════════════════════════════════════════════════
 
     const intentContract = buildIntentContract(intent, prompt, sessionContext ?? null);
+
+    // If GPT extracted a specific result count from the prompt (e.g. "give me 4 locations"),
+    // prefer it over the UI slider — but only when it falls in the valid range.
+    // This makes "find top 5 warehouses" actually return 5 regardless of slider position.
+    {
+      const llmCount = Number(intent.requestedResultCount);
+      if (Number.isInteger(llmCount) && llmCount >= 1 && llmCount <= 5) {
+        // LLM count overrides slider; already validated above so safe to reassign
+        // Note: `count` is const in outer scope — shadow it for clarity only in notes
+        parsingNotes.push(`Result count set to ${llmCount} from prompt (LLM-extracted requestedResultCount).`);
+      }
+    }
+    // Recompute effective count taking LLM preference into account
+    const effectiveCount = (() => {
+      const llmN = Number(intent.requestedResultCount);
+      if (Number.isInteger(llmN) && llmN >= 1 && llmN <= 5) return llmN;
+      return count;
+    })();
 
     // Guard: follow-up modification prompt without prior context
     // Return a structured 400 so the caller can prompt the user to provide context.
@@ -830,7 +851,7 @@ export default async function handler(req, res) {
 
     if (isCoordAnchored) {
       // Coordinate anchor: generate directional offsets
-      const pts = generateCandidatePoints(anchor.lat, anchor.lng, effectiveSearchRadiusM, count + 2);
+      const pts = generateCandidatePoints(anchor.lat, anchor.lng, effectiveSearchRadiusM, effectiveCount + 2);
       for (const pt of pts) {
         let displayName = pt.label;
         const rev = await reverseGeocode(pt.lat, pt.lng);
@@ -919,7 +940,7 @@ export default async function handler(req, res) {
       // Fetch a larger neighborhood pool than requested count so geocoding failures
       // and 500m deduplication still leave enough unique candidates.
       // Formula: max(count × 2.5 + 4, 15) → for count=5 this tries 17, for count=3 → 15.
-      const neighborhoodPoolSize = Math.max(Math.ceil(count * 2.5) + 4, 15);
+      const neighborhoodPoolSize = Math.max(Math.ceil(effectiveCount * 2.5) + 4, 15);
       const defaultNeighborhoods = getNeighborhoodsForCity(city, neighborhoodPoolSize, profile.landIntensity);
       const isKnownCity = hasCityInDefaultList(city);
 
@@ -1041,7 +1062,7 @@ export default async function handler(req, res) {
           { name: `${city} East`, dlat: 0, dlng: offsetKm / (111 * Math.cos(cityAnchor.lat * Math.PI / 180)) },
           { name: `${city} West`, dlat: 0, dlng: -offsetKm / (111 * Math.cos(cityAnchor.lat * Math.PI / 180)) },
         ];
-        for (const off of offsets.slice(0, count + 2)) {
+        for (const off of offsets.slice(0, effectiveCount + 2)) {
           candidateLocationsBeforeFiltering.push({
             name: off.name,
             lat: cityAnchor.lat + off.dlat,
@@ -1369,7 +1390,9 @@ export default async function handler(req, res) {
         : [];
 
       // Append profile-alignment criteria (land availability, urban-rural fit)
-      criteriaBreakdown.push(...scoreProfileAlignment(osmResult.signals, profile));
+      // Pass archetype scoringMode so profile-alignment suppresses irrelevant meta-criteria
+      // (e.g. QSR shouldn't score "Land availability"; warehouses shouldn't score "Location-type fit")
+      criteriaBreakdown.push(...scoreProfileAlignment(osmResult.signals, profile, intentContract.scoringMode));
 
       // ── Weight renormalization ────────────────────────────────────────────
       // Dynamic criteria weights are normalized to sum ≈ 1.0 during build, but
@@ -1510,7 +1533,7 @@ export default async function handler(req, res) {
       return a.name.localeCompare(b.name);
     });
 
-    const rankedLocations = scoredLocations.slice(0, count).map((loc, i) => ({
+    const rankedLocations = scoredLocations.slice(0, effectiveCount).map((loc, i) => ({
       rank: i + 1,
       ...loc,
     }));
@@ -1637,7 +1660,7 @@ TONE & QUALITY RULES:
         messages: [{ role: 'user', content: explainPrompt }],
         response_format: { type: 'json_object' },
         temperature: 0.2,
-        max_tokens: 900,
+        max_tokens: 1200, // raised: 5-location analyses with exclusions can approach 900
       });
 
       const explainText = explainRes.choices?.[0]?.message?.content;
@@ -1690,6 +1713,7 @@ TONE & QUALITY RULES:
       candidatesBeforeFilter: candidateLocationsBeforeFiltering.length,
       candidatesAfterFilter: candidateLocationsAfterFiltering.length,
       rankedCount: rankedLocations.length,
+      requestedResultCount: effectiveCount,  // what the pipeline was asked to return
       // Radius transparency — always included so frontend can show actual radius used
       effectiveRadiusM: effectiveRadius,
       requestedSearchRadiusM: effectiveSearchRadiusM,

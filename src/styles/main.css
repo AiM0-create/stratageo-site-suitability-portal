@@ -628,9 +628,11 @@ body {
   font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
   letter-spacing: 0.03em; text-transform: uppercase; flex-shrink: 0;
 }
-.evidence-osm { background: #dbeafe; color: #1d4ed8; }
-.evidence-rule { background: #fef3c7; color: #92400e; }
-.evidence-ai { background: #ede9fe; color: #6d28d9; }
+.evidence-osm     { background: #dbeafe; color: #1d4ed8; }
+.evidence-absent  { background: #fee2e2; color: #991b1b; } /* red — zero OSM data */
+.evidence-google  { background: #dcfce7; color: #166534; } /* green — Google corroborated */
+.evidence-rule    { background: #fef3c7; color: #92400e; }
+.evidence-ai      { background: #ede9fe; color: #6d28d9; }
 .evidence-default { background: #f1f5f9; color: #64748b; }
 
 /* ========== DIRECTION ICONS ========== */
