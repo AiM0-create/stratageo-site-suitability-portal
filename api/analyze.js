@@ -540,6 +540,34 @@ export default async function handler(req, res) {
     return result;
   }
 
+  // Fuzzy fallback for area names that don't geocode directly — common in
+  // comparison-mode prompts where users describe corridors or compound names
+  // (e.g. "China Park to airport", "Newtown/Rajarhat", "Hinjewadi corridor").
+  // Splits on connector words/slashes and retries each part; if that fails,
+  // strips generic qualifier words and retries the core name once more.
+  async function fuzzyGeocodeArea(nbName, cityName) {
+    const parts = nbName
+      .split(/\s+(?:to|and|&)\s+|\s*\/\s*/i)
+      .map(p => p.trim())
+      .filter(p => p && p.toLowerCase() !== nbName.toLowerCase());
+    for (const part of parts) {
+      let coords = await cachedGeocode(`${part}, ${cityName}`);
+      if (!coords) coords = await cachedGeocode(`${part}, India`);
+      if (!coords) coords = await cachedGeocode(part);
+      if (coords) return { coords, resolvedName: part };
+    }
+    const stripped = nbName
+      .replace(/\b(corridor|area|zone|belt|region|side|stretch)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (stripped && stripped.toLowerCase() !== nbName.toLowerCase()) {
+      let coords = await cachedGeocode(`${stripped}, ${cityName}`);
+      if (!coords) coords = await cachedGeocode(`${stripped}, India`);
+      if (coords) return { coords, resolvedName: stripped };
+    }
+    return null;
+  }
+
   // Derive the canonical parent-city for exclusion geocoding.
   // "South Mumbai" → "Mumbai", "Greater Noida" → "Noida" etc.
   // Used so exclusions like "Colaba" geocode as "Colaba, Mumbai, India"
@@ -642,6 +670,17 @@ export default async function handler(req, res) {
 
     const intentContract = buildIntentContract(intent, prompt, sessionContext ?? null);
 
+    // ─── Comparison-mode detection ──────────────────────────────────────────
+    // If the user named multiple specific areas and asked to compare/analyse them
+    // (e.g. "analyse China Park, Sector V, Salt Lake and Newtown for a QSR"), the
+    // LLM sets isComparisonRequest=true and extracts every named area into
+    // `neighborhoods`. In this mode the pipeline scores ONLY those areas — it does
+    // not blend in city-default neighborhoods — and sizes the result count to match.
+    const rawLlmNeighborhoods = (intent.neighborhoods || [])
+      .map(n => (typeof n === 'string' ? n.trim() : ''))
+      .filter(Boolean);
+    const isComparisonRequest = !!intent.isComparisonRequest && rawLlmNeighborhoods.length >= 2;
+
     // If GPT extracted a specific result count from the prompt (e.g. "give me 4 locations"),
     // prefer it over the UI slider — but only when it falls in the valid range.
     // This makes "find top 5 warehouses" actually return 5 regardless of slider position.
@@ -653,8 +692,15 @@ export default async function handler(req, res) {
         parsingNotes.push(`Result count set to ${llmCount} from prompt (LLM-extracted requestedResultCount).`);
       }
     }
-    // Recompute effective count taking LLM preference into account
+    // Recompute effective count taking LLM preference (and comparison mode) into account
     const effectiveCount = (() => {
+      if (isComparisonRequest) {
+        const n = Math.min(5, rawLlmNeighborhoods.length);
+        parsingNotes.push(
+          `Comparison mode: result count set to ${n} to match the ${rawLlmNeighborhoods.length} named area(s).`,
+        );
+        return n;
+      }
       const llmN = Number(intent.requestedResultCount);
       if (Number.isInteger(llmN) && llmN >= 1 && llmN <= 5) return llmN;
       return count;
@@ -950,18 +996,27 @@ export default async function handler(req, res) {
       // as PRIORITY CANDIDATES before/alongside the default list.
       // This fixes the gap where user-specified areas (Sitapura, Chakan, etc.)
       // were silently ignored for known cities.
-      const llmNeighborhoods = (intent.neighborhoods || []).filter(n =>
-        n && n.trim().length > 0 &&
+      const llmNeighborhoods = rawLlmNeighborhoods.filter(n =>
         !defaultNeighborhoods.map(d => d.toLowerCase()).includes(n.toLowerCase()),
       );
       const hasUserSpecifiedAreas = llmNeighborhoods.length > 0;
 
-      neighborhoodStrategy = isKnownCity
-        ? (hasUserSpecifiedAreas ? 'user_specified_first' : 'default_only')
-        : 'llm_only';
+      neighborhoodStrategy = isComparisonRequest
+        ? 'comparison_set'
+        : isKnownCity
+          ? (hasUserSpecifiedAreas ? 'user_specified_first' : 'default_only')
+          : 'llm_only';
 
       let neighborhoodNames;
-      if (hasUserSpecifiedAreas) {
+      if (isComparisonRequest) {
+        // User named a closed set of areas to compare — score ONLY those, no
+        // city-default neighborhoods blended in (matches the user's actual ask).
+        neighborhoodNames = rawLlmNeighborhoods.slice(0, 5);
+        parsingNotes.push(
+          `Comparison mode: scoring only the named area(s) — ${neighborhoodNames.join(', ')}. ` +
+          `No additional neighborhoods added.`,
+        );
+      } else if (hasUserSpecifiedAreas) {
         // User explicitly named specific areas — honour them first, then fill with defaults
         neighborhoodNames = [
           ...llmNeighborhoods,
@@ -994,6 +1049,18 @@ export default async function handler(req, res) {
         if (!coords) coords = await cachedGeocode(`${nb}, India`);
         if (!coords) coords = await cachedGeocode(nb);
 
+        // Fuzzy fallback: handles corridor/compound names like "China Park to
+        // airport" or "Newtown/Rajarhat" that don't geocode as a single phrase.
+        let resolvedNb = nb;
+        if (!coords) {
+          const fuzzy = await fuzzyGeocodeArea(nb, city);
+          if (fuzzy) {
+            coords = fuzzy.coords;
+            resolvedNb = fuzzy.resolvedName;
+            geocodingNotes.push(`"${nb}" not directly geocodable — resolved via "${resolvedNb}".`);
+          }
+        }
+
         if (!coords) {
           geocodingNotes.push(`Could not geocode "${nb}" — skipped.`);
           continue;
@@ -1021,7 +1088,7 @@ export default async function handler(req, res) {
         }
 
         // Strip city prefix from display name for readability
-        const displayName = nb
+        const displayName = resolvedNb
           .replace(new RegExp(`^${city}\\s+`, 'i'), '')
           .replace(/, .*$/, '');
 
@@ -1029,7 +1096,7 @@ export default async function handler(req, res) {
           name: displayName,
           lat: coords.lat,
           lng: coords.lng,
-          geocodedQuery: `${nb}, ${city}`,
+          geocodedQuery: `${resolvedNb}, ${city}`,
           distFromCityKm: Math.round(distM / 100) / 10,
           source: 'neighborhood_geocode',
         });
@@ -1723,6 +1790,7 @@ TONE & QUALITY RULES:
         ? 'coordinate_offsets'
         : neighborhoodStrategy,
       neighborhoodStrategy: isCoordAnchored ? 'coordinate_offsets' : neighborhoodStrategy,
+      isComparisonRequest,
       criteriaGenerationSource: hasDynamicCriteria ? 'llm_dynamic' : 'profile_fallback',
       rankingTieBreakRule: RANKING_TIE_BREAK_RULE,
       intentTemperature: 0,

@@ -62,6 +62,7 @@ Return JSON with EXACTLY these fields:
   "locationName": "ONLY the city or geographic region — NEVER include locality modifiers, landmark names, or 'near X' qualifiers here. Those go in 'neighborhoods'. Examples: 'Pune' not 'Pune near Hinjewadi'. 'East Delhi' not 'East Delhi near Connaught Place'.",
   "anchorType": "coordinate | city | none",
   "neighborhoods": ["list of specific area names — see NEIGHBORHOOD RULES"],
+  "isComparisonRequest": false,
 
   "positiveCriteria": [{"name": "what user wants nearby", "priority": "high|medium|low"}],
   "negativeCriteria": [{"name": "what to minimize", "priority": "high|medium|low"}],
@@ -607,6 +608,21 @@ Examples:
   "hospital in South Delhi" → locationName="South Delhi", neighborhoods=["Hauz Khas", "Saket", "Greater Kailash"]
 If user says "not in X" → X goes in exclusionCriteria AND you must suggest alternative neighborhoods in the same city.
 If no specific area mentioned → provide 3-5 representative neighborhoods for the city that fit the sector profile.
+
+RULE 4b — COMPARISON REQUESTS (EXTRACT EVERY NAMED AREA, NO SUBSTITUTIONS)
+If the user names MULTIPLE specific areas/localities/corridors and asks to "analyse", "compare", "evaluate", "screen", "shortlist", or "check" them against each other — this is a COMPARISON REQUEST. Set "isComparisonRequest": true.
+In this mode:
+  - Extract EVERY named area into "neighborhoods", in the order mentioned. Do NOT drop any of them, even if the name is unfamiliar, a landmark, or colloquial (e.g. "China Park", "Tangra side", "near the airport").
+  - Split compound/slash/ampersand names into separate entries: "Newtown/Rajarhat" → "New Town", "Rajarhat" (two entries). "Salt Lake & Sector V" → "Salt Lake", "Sector V".
+  - For corridor phrasing ("China Park to airport"), extract the named anchor as its own entry ("China Park") — the pipeline resolves "to airport" as a directional descriptor, not a separate place.
+  - Do NOT invent or add extra city-default neighborhoods — the user wants ONLY their named areas evaluated, nothing substituted in.
+  - Leave "requestedResultCount" as your normal best guess; the pipeline will size results to match the number of named areas (capped at 5) regardless.
+Examples:
+  "analyse China Park to airport, Sector V, Salt Lake, and Newtown/Rajarhat for a QSR"
+    → isComparisonRequest=true, neighborhoods=["China Park", "Sector V", "Salt Lake", "New Town", "Rajarhat"]
+  "compare Hinjewadi Phase 1, Phase 2, and Wakad for a coworking space"
+    → isComparisonRequest=true, neighborhoods=["Hinjewadi Phase 1", "Hinjewadi Phase 2", "Wakad"]
+If the user names only ONE area, or asks for general suggestions ("find me a good spot near X", "suggest areas in Y"), set isComparisonRequest=false (default) — normal discovery mode applies and you may supplement with representative neighborhoods as usual.
 
 RULE 5 — SUBREGION AND DISTRICT SPECIFICITY (CRITICAL)
 Never broaden a specific district or region to its parent state or city.
