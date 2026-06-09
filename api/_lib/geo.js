@@ -211,29 +211,57 @@ const OVERPASS_ENDPOINTS = [
 // ─── Google Places density probe (private) ───────────────────────────────────
 
 /**
- * Common place types used as an urban-activity density signal.
- * These exist in virtually all urban Indian localities and give a quick
- * sense of whether Google Maps has real POI coverage for the area.
+ * Sector-aware probe type sets for Google Places density.
+ *
+ * The probe is used as a corroboration signal ("is there real urban activity here?")
+ * and — when OSM Overpass is unavailable — as a partial primary evidence source.
+ * Sector-appropriate types produce more relevant counts and better signal quality.
+ *
+ * Maps archetype key → array of Google Places types (most relevant first).
+ * Falls back to GENERIC_PROBE_TYPES for unrecognised archetypes.
  */
-const DENSITY_PROBE_TYPES = ['restaurant', 'cafe', 'school', 'pharmacy', 'bank'];
+const SECTOR_PROBE_TYPES = {
+  cafe_qsr:            ['restaurant', 'cafe', 'bakery'],
+  retail_high_street:  ['store', 'clothing_store', 'shopping_mall'],
+  grocery_daily_needs: ['supermarket', 'grocery_or_supermarket', 'convenience_store'],
+  gym_fitness:         ['gym', 'spa', 'health'],
+  healthcare_clinic:   ['hospital', 'pharmacy', 'doctor'],
+  large_hospital_campus: ['hospital', 'doctor', 'pharmacy'],
+  education_facility:  ['school', 'university', 'library'],
+  office_commercial:   ['office', 'bank', 'atm'],
+  warehouse_industrial:['storage', 'moving_company', 'hardware_store'],
+  cold_chain_logistics:['storage', 'warehouse', 'supermarket'],
+  hospitality_tourism: ['lodging', 'restaurant', 'tourist_attraction'],
+  energy_utility:      ['electrician', 'hardware_store', 'storage'],
+  data_centre:         ['electrician', 'hardware_store', 'storage'],
+  ev_fuel_station:     ['gas_station', 'car_repair', 'parking'],
+};
+const GENERIC_PROBE_TYPES = ['restaurant', 'cafe', 'bank'];
 
 /**
  * Fetch a lightweight Google Places density count for a location.
- * Runs 2 probe type queries in parallel (to limit latency) and returns
- * the total count found + per-type breakdown + source metadata.
+ * Runs 3 probe type queries in parallel (was 2 — increased for better signal)
+ * and returns the total count + per-type breakdown + source metadata.
  *
- * This is NOT used for per-criterion scoring — it is used solely as a
- * corroboration signal: "does Google see urban activity here at all?"
+ * When sectorArchetype is provided, uses sector-appropriate place types
+ * so the count is meaningful for that use case (e.g. gyms near a fitness
+ * centre query, not cafes).
+ *
+ * This is NOT per-criterion scoring — it is corroboration:
+ * "does Google see relevant activity here at all?"
  *
  * Returns:
  *   { totalCount, breakdown, typesProbed, sourceUsed }
  *   or null if GOOGLE_PLACES_API_KEY is absent or all calls fail.
  */
-export async function fetchGooglePlacesDensity(lat, lng, radiusM) {
+export async function fetchGooglePlacesDensity(lat, lng, radiusM, sectorArchetype = null) {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) return null;
 
-  const probeTypes = DENSITY_PROBE_TYPES.slice(0, 2); // 2 types to limit latency
+  const typeSet = (sectorArchetype && SECTOR_PROBE_TYPES[sectorArchetype])
+    ? SECTOR_PROBE_TYPES[sectorArchetype]
+    : GENERIC_PROBE_TYPES;
+  const probeTypes = typeSet.slice(0, 3); // 3 types for better coverage (was 2)
   const radiusCapped = Math.min(radiusM, 5000);        // cap at 5km for density probe
 
   const results = await Promise.allSettled(
