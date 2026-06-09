@@ -4,6 +4,7 @@
  */
 
 import type { WorkingMemory, SessionMessage } from '../types/session';
+import { isResetIntent } from './resetPatterns';
 
 export interface ResolvedContext {
   isFollowUp: boolean;
@@ -13,18 +14,8 @@ export interface ResolvedContext {
   resetDetected: boolean;
 }
 
-// Phrases that explicitly request a fresh start — discard prior context entirely
-const RESET_PATTERNS = [
-  /\bignore\s+(everything|all|that|the\s+(above|previous|last|prior))\b/i,
-  /\bstart\s+(fresh|from\s+scratch|over|a\s+new)\b/i,
-  /\bforget\s+(everything|all|that|the\s+(above|previous|last|prior)|previous\s+analysis)\b/i,
-  /\bnew\s+(analysis|query|request|search|case)\b/i,
-  /\bseparate\s+(analysis|case|query)\b/i,
-  /\bdifferent\s+(business|case|query|analysis)\b/i,
-  /\bfresh\s+(analysis|start|query)\b/i,
-  /\bfrom\s+scratch\b/i,
-  /\bdiscard\s+(prior|previous|the)\b/i,
-];
+// RESET_PATTERNS live in ./resetPatterns.ts — shared source of truth with the backend.
+// Use isResetIntent() below instead of duplicating the array here.
 
 // Words/phrases that signal a follow-up rather than a new query
 const FOLLOW_UP_STARTERS = [
@@ -72,7 +63,7 @@ export function resolveContext(
   recentMessages: SessionMessage[],
 ): ResolvedContext {
   // Explicit reset request — always discard prior context, even if memory exists
-  if (RESET_PATTERNS.some(p => p.test(rawPrompt))) {
+  if (isResetIntent(rawPrompt)) {
     return {
       isFollowUp: false,
       effectivePrompt: rawPrompt,

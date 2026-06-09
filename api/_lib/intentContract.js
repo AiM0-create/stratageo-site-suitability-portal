@@ -65,6 +65,27 @@ export const CRITERIA_FAMILIES = {
     tags: ['amenity=bank', 'shop=jewelry', 'building=commercial'],
     description: 'Urban affluence proxies',
   },
+  // ── Extended families for large-footprint / infrastructure sectors ──
+  power_infrastructure: {
+    tags: ['power=line', 'power=substation', 'power=tower', 'power=generator'],
+    description: 'Power grid infrastructure',
+  },
+  water_infrastructure: {
+    tags: ['natural=water', 'waterway=river', 'man_made=reservoir', 'landuse=reservoir'],
+    description: 'Water bodies and reservoirs',
+  },
+  hospitality_signals: {
+    tags: ['tourism=hotel', 'tourism=guest_house', 'tourism=resort', 'amenity=hotel'],
+    description: 'Hotel and hospitality infrastructure',
+  },
+  ev_charging: {
+    tags: ['amenity=charging_station', 'amenity=fuel', 'highway=motorway_junction'],
+    description: 'EV charging and fuel station density',
+  },
+  cold_chain_signals: {
+    tags: ['landuse=industrial', 'building=warehouse', 'man_made=storage_tank'],
+    description: 'Cold chain and temperature-controlled storage infrastructure',
+  },
 };
 
 // ─── Archetype definitions ────────────────────────────────────────────────────
@@ -134,6 +155,55 @@ export const ARCHETYPE_DEFINITIONS = {
     confidencePolicy: 'require_3_candidates',
     typicalLandIntensity: 'medium',
     typicalUrbanPreference: 'urban',
+  },
+  // ── Large-footprint / infrastructure archetypes ──────────────────────────
+  energy_utility: {
+    label: 'Solar / Wind / Power Plant / Utility',
+    allowedCriteriaFamilies: ['open_land', 'power_infrastructure', 'water_infrastructure', 'road_freight'],
+    scoringMode: 'open_land_utility',
+    confidencePolicy: 'standard',
+    typicalLandIntensity: 'high',
+    typicalUrbanPreference: 'rural',
+  },
+  data_centre: {
+    label: 'Data Centre / Server Farm',
+    allowedCriteriaFamilies: ['power_infrastructure', 'road_freight', 'industrial_land', 'open_land'],
+    scoringMode: 'industrial_zone_fit',
+    confidencePolicy: 'standard',
+    typicalLandIntensity: 'high',
+    typicalUrbanPreference: 'periurban',
+  },
+  ev_fuel_station: {
+    label: 'EV Charging Hub / Petrol / CNG Station',
+    allowedCriteriaFamilies: ['road_freight', 'foot_traffic', 'parking', 'ev_charging'],
+    scoringMode: 'highway_access',
+    confidencePolicy: 'standard',
+    typicalLandIntensity: 'medium',
+    typicalUrbanPreference: 'suburban',
+  },
+  cold_chain_logistics: {
+    label: 'Cold Chain / Refrigerated Storage / Food Processing',
+    allowedCriteriaFamilies: ['industrial_land', 'road_freight', 'open_land', 'cold_chain_signals', 'water_infrastructure'],
+    scoringMode: 'industrial_zone_fit',
+    confidencePolicy: 'standard',
+    typicalLandIntensity: 'high',
+    typicalUrbanPreference: 'periurban',
+  },
+  hospitality_tourism: {
+    label: 'Hotel / Resort / Serviced Apartment',
+    allowedCriteriaFamilies: ['foot_traffic', 'transit_access', 'hospitality_signals', 'affluence_proxies', 'parking'],
+    scoringMode: 'urban_footfall',
+    confidencePolicy: 'require_3_candidates',
+    typicalLandIntensity: 'medium',
+    typicalUrbanPreference: 'urban',
+  },
+  large_hospital_campus: {
+    label: 'Large Hospital / Medical Campus',
+    allowedCriteriaFamilies: ['residential_density', 'transit_access', 'road_freight', 'parking', 'healthcare_signals', 'open_land'],
+    scoringMode: 'residential_catchment',
+    confidencePolicy: 'require_3_candidates',
+    typicalLandIntensity: 'high',
+    typicalUrbanPreference: 'suburban',
   },
   generic_site_suitability: {
     label: 'Generic Site Suitability',
@@ -243,44 +313,75 @@ export function classifyArchetype(intent) {
   const mp  = (intent.siteProfile?.marketPositioning || '').toLowerCase();
   const ap  = (intent.siteProfile?.accessProfile     || '').toLowerCase();
 
-  // Warehouse / industrial — check first (high specificity)
+  // ── Energy / utility infrastructure — check first (very specific, landIntensity=high) ──
   if (
-    /warehouse|industrial|logistic|freight|godown|cold.?chain|storage|distribution|manufactur|spare.?part/i.test(bt) ||
+    /solar\s*(farm|park|plant|power)|wind\s*(farm|park|turbine)|solar\s*energy|wind\s*energy|photovoltaic|pv\s*plant|utility.?scale\s*(solar|wind|power)|power\s*plant|biomass\s*plant|hydropower/i.test(bt) ||
+    /solar|wind.?energy|power.?plant|renewable.?energy/i.test(sec)
+  ) return 'energy_utility';
+
+  // ── Data centre ──────────────────────────────────────────────────────────────
+  if (/data.?cent(er|re)|server\s*farm|colocation|colo\s*facilit/i.test(bt)) return 'data_centre';
+
+  // ── EV / fuel station ────────────────────────────────────────────────────────
+  if (
+    /ev\s*(charging|station|hub)|electric\s*vehicle\s*charg|charging\s*station|petrol\s*station|cng\s*station|fuel\s*station|pump\s*station/i.test(bt) ||
+    /ev|fuel.?station|charging/i.test(sec)
+  ) return 'ev_fuel_station';
+
+  // ── Cold chain / food processing ─────────────────────────────────────────────
+  if (/cold.?chain|cold\s*storage|refrigerat|frozen|temperature.?controlled|food\s*processing|agri.?processing|perishable/i.test(bt)) {
+    return 'cold_chain_logistics';
+  }
+
+  // ── Large hospital campus (separate from outpatient clinic) ─────────────────
+  if (/\b(hospital\s*campus|medical\s*campus|multi.?specialit|large\s*hospital|super.?specialit|tertiary\s*care|trauma\s*cent(er|re)|cancer\s*cent(er|re))\b/i.test(bt)) {
+    return 'large_hospital_campus';
+  }
+
+  // ── Hospitality / tourism ────────────────────────────────────────────────────
+  if (
+    /\b(hotel|resort|serviced\s*apartment|boutique\s*hotel|lodge|motel|inn|hostel|homestay)\b/i.test(bt) ||
+    /\b(hospitality|tourism)\b/i.test(sec)
+  ) return 'hospitality_tourism';
+
+  // ── Warehouse / industrial (broad: covers logistics, distribution, manufacturing) ──
+  if (
+    /warehouse|industrial|logistic|freight|godown|distribution\s*cent(er|re)|manufactur|spare.?part|storage\s*facilit/i.test(bt) ||
     /warehouse|industrial|logistic|freight/i.test(sec) ||
     mp === 'industrial' || ap === 'freight'
   ) return 'warehouse_industrial';
 
-  // Gym / fitness
+  // ── Gym / fitness ────────────────────────────────────────────────────────────
   if (/\b(gym|fitness|crossfit|yoga|pilates|sports?\s*cent(er|re)|wellness\s*cent(er|re))\b/i.test(bt)) return 'gym_fitness';
 
-  // Cafe / QSR / food & beverage
+  // ── Cafe / QSR / food & beverage ─────────────────────────────────────────────
   if (
     /\b(cafe|coffee\s*shop|qsr|fast.?food|food\s*court|chai|tapri|tea\s*stall|bakery|patisserie|juice\s*bar)\b/i.test(bt) ||
     /\b(cafe|coffee|qsr|food.?bev)/i.test(sec)
   ) return 'cafe_qsr';
 
-  // Grocery / daily needs
+  // ── Grocery / daily needs ────────────────────────────────────────────────────
   if (/\b(grocery|supermarket|kirana|general\s*store|provisions?|daily\s*needs|hypermarket)\b/i.test(bt)) return 'grocery_daily_needs';
 
-  // Healthcare
+  // ── Healthcare (clinic / pharmacy / outpatient) ──────────────────────────────
   if (
-    /\b(clinic|hospital|pharmacy|diagnostic|health\s*cent(er|re)|medical|dental|doctor|nursing\s*home)\b/i.test(bt) ||
+    /\b(clinic|hospital|pharmacy|diagnostic|health\s*cent(er|re)|medical|dental|doctor|nursing\s*home|dialysis)\b/i.test(bt) ||
     /\b(healthcare|medical)\b/i.test(sec)
   ) return 'healthcare_clinic';
 
-  // Education
+  // ── Education ────────────────────────────────────────────────────────────────
   if (
     /\b(school|tutoring|coaching|preschool|kindergarten|college|university|tuition|coaching\s*cent(er|re))\b/i.test(bt) ||
     /\beducation\b/i.test(sec)
   ) return 'education_facility';
 
-  // Office / coworking
+  // ── Office / coworking ───────────────────────────────────────────────────────
   if (
     /\b(office|coworking|co.?working|it\s*park|business\s*cent(er|re)|workspace)\b/i.test(bt) ||
     /\b(office|commercial)\b/i.test(sec)
   ) return 'office_commercial';
 
-  // Retail — classify last (broad match)
+  // ── Retail — classify last (broad match) ────────────────────────────────────
   if (/\b(retail|store|shop|boutique|showroom|outlet)\b/i.test(bt) || /\bretail\b/i.test(sec)) {
     return 'retail_high_street';
   }
