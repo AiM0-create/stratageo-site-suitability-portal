@@ -916,7 +916,11 @@ export default async function handler(req, res) {
       //     LLM variation can only add — it never reorders the base set.
       //   - Unknown cities: LLM list sorted alphabetically, fallback to generic
       //     directional offsets if LLM returned nothing.
-      const defaultNeighborhoods = getNeighborhoodsForCity(city, count + 3, profile.landIntensity);
+      // Fetch a larger neighborhood pool than requested count so geocoding failures
+      // and 500m deduplication still leave enough unique candidates.
+      // Formula: max(count × 2.5 + 4, 15) → for count=5 this tries 17, for count=3 → 15.
+      const neighborhoodPoolSize = Math.max(Math.ceil(count * 2.5) + 4, 15);
+      const defaultNeighborhoods = getNeighborhoodsForCity(city, neighborhoodPoolSize, profile.landIntensity);
       const isKnownCity = hasCityInDefaultList(city);
 
       // ── User-specified preferred areas ──────────────────────────────────────
@@ -941,13 +945,14 @@ export default async function handler(req, res) {
         neighborhoodNames = [
           ...llmNeighborhoods,
           ...defaultNeighborhoods,
-        ].slice(0, count + 4);
+        ].slice(0, neighborhoodPoolSize);
         parsingNotes.push(
           `User-specified areas prioritised: ${llmNeighborhoods.join(', ')}. ` +
           `Supplemented with ${defaultNeighborhoods.length} default neighborhoods.`,
         );
       } else if (isKnownCity) {
-        // Known city, no user-specified areas: use static default list for determinism
+        // Known city, no user-specified areas: use full pool for determinism
+        // (pool is already sized to neighborhoodPoolSize above)
         neighborhoodNames = defaultNeighborhoods;
       } else {
         // Unknown city: use LLM list sorted alphabetically, fallback to generic offsets
@@ -1299,7 +1304,10 @@ export default async function handler(req, res) {
 
     const allCriteriaForFetch = [...dynamicCriteria, ...exclusionFetchCriteria];
 
-    const targetCandidates = candidateLocationsAfterFiltering.slice(0, count + 2);
+    // Score ALL geocoded candidates (not just count+2) so the final ranking has
+    // a real competition pool to pick the top `count` from.
+    // Cap at 20 to avoid runaway Overpass call costs.
+    const targetCandidates = candidateLocationsAfterFiltering.slice(0, Math.min(candidateLocationsAfterFiltering.length, 20));
 
     // Fetch OSM + Google Places density probes in parallel for all candidates
     const [osmSettled, googleDensitySettled] = await Promise.all([
@@ -1312,7 +1320,7 @@ export default async function handler(req, res) {
       ),
       Promise.allSettled(
         targetCandidates.map(candidate =>
-          fetchGooglePlacesDensity(candidate.lat, candidate.lng, effectiveRadius),
+          fetchGooglePlacesDensity(candidate.lat, candidate.lng, effectiveRadius, intentContract.businessArchetype),
         ),
       ),
     ]);

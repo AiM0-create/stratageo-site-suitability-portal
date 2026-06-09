@@ -406,7 +406,14 @@ body {
 
 .drawer-loc-score {
   font-size: 16px; font-weight: 800; flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
 }
+.score-number { line-height: 1; }
+.score-quality-label {
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; opacity: 0.75; line-height: 1;
+}
+.score-excluded .score-quality-label { display: none; }
 .score-high { color: var(--green-700); }
 .score-mid { color: var(--blue-700); }
 .score-low { color: var(--red-600); }

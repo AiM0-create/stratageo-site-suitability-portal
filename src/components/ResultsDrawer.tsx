@@ -54,6 +54,15 @@ const ComparisonChart: React.FC<{ locations: LocationData[] }> = ({ locations })
   );
 };
 
+function getScoreQualityLabel(score: number): string {
+  if (score >= 8.5) return 'Excellent';
+  if (score >= 7.5) return 'Strong';
+  if (score >= 6.5) return 'Good';
+  if (score >= 5.0) return 'Moderate';
+  if (score >= 3.5) return 'Fair';
+  return 'Weak';
+}
+
 const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
   const label = basis === 'osm-observed' ? 'Places + OSM' : basis === 'osm-derived' ? 'Derived' : basis === 'constraint-rule' ? 'Rule' : basis === 'ai-generated' ? 'AI' : 'Default';
   const cls = basis === 'osm-observed' ? 'evidence-osm' : basis === 'constraint-rule' ? 'evidence-rule' : basis === 'ai-generated' ? 'evidence-ai' : 'evidence-default';
@@ -148,13 +157,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   <span className="assumption-value">{spec.businessType}{spec.classificationMeta?.source === 'llm' ? '' : ` (${spec.sectorId})`}</span>
                 </div>
                 <div className="assumption-row">
-                  <span className="assumption-label">Search Radius</span>
+                  <span className="assumption-label" title="Search radius is AI-inferred from your sector type and land intensity — not hardcoded. High-intensity sectors (warehouses, solar) get wider radii; high-street retail stays narrow.">Search Radius ⓘ</span>
                   <span className="assumption-value">{locations[0] ? `${(locations[0].searchRadiusM / 1000).toFixed(1)}km` : '—'}</span>
                 </div>
+                <p className="assumption-note" style={{ marginTop: '-2px', marginBottom: '6px', fontSize: '10px', color: '#64748b' }}>
+                  AI-inferred from sector &amp; land intensity — not hardcoded
+                </p>
                 <div className="assumption-row">
-                  <span className="assumption-label">Confidence</span>
-                  <span className={`assumption-value confidence-${spec.confidence}`}>{spec.confidence}</span>
+                  <span className="assumption-label" title="Data Confidence measures pipeline quality — how much real-world data was collected. High = rich Places + OSM data. Medium = partial coverage. Low = mostly AI estimates. This is NOT a measure of how good the locations are.">Data Confidence ⓘ</span>
+                  <span className={`assumption-value confidence-${spec.confidence}`} title="Data Confidence: high = rich real-world data collected; medium = partial; low = mostly AI estimates">{spec.confidence}</span>
                 </div>
+                <p className="assumption-note" style={{ marginTop: '-2px', marginBottom: '6px', fontSize: '10px', color: '#64748b' }}>
+                  Measures data pipeline quality, not location quality
+                </p>
                 {spec.constraints.length > 0 && (
                   <div className="assumption-section">
                     <span className="assumption-label">Constraints</span>
@@ -213,6 +228,13 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   </div>
                 )}
 
+                {/* AI vs Fixed parameters */}
+                <div className="assumption-section">
+                  <span className="assumption-label">How Parameters Are Set</span>
+                  <p className="assumption-note"><strong>AI-driven:</strong> sector archetype, search radius, criteria weights, land intensity, neighborhood selection, score justifications.</p>
+                  <p className="assumption-note"><strong>Fixed rules:</strong> deduplication distance (500m), score scale (0–10), MCDA weighted-sum formula, data source priority (Places → OSM → AI fallback).</p>
+                </div>
+
                 {/* Sources */}
                 <div className="assumption-section">
                   <span className="assumption-label">Data Sources</span>
@@ -267,7 +289,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     </div>
                     <div className="drawer-loc-coords">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
                   </div>
-                  <div className={`drawer-loc-score ${scoreClass}`}>{loc.mcda_score.toFixed(1)}</div>
+                  <div className={`drawer-loc-score ${scoreClass}`}>
+                    <span className="score-number">{loc.mcda_score.toFixed(1)}</span>
+                    {!loc.excluded && <span className="score-quality-label">{getScoreQualityLabel(loc.mcda_score)}</span>}
+                  </div>
                   <button
                     className="drawer-expand"
                     onClick={(e) => { e.stopPropagation(); setExpandedLoc(isExpanded ? null : loc.name); }}
