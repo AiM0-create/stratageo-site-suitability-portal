@@ -23,6 +23,7 @@
 
 import OpenAI from 'openai';
 import { SYSTEM_PROMPT } from './_lib/intentPrompt.js';
+import { isResetIntent } from './_lib/patterns.js';
 import {
   geocodeLocation,
   reverseGeocode,
@@ -99,20 +100,10 @@ function normalizeCity(city) {
 }
 
 // ─── Reset intent detection ───────────────────────────────────────────────────
-const RESET_PATTERNS = [
-  /\bignore\s+(everything|all|that|the\s+(above|previous|last|prior))\b/i,
-  /\bstart\s+(fresh|from\s+scratch|over|a\s+new)\b/i,
-  /\bforget\s+(everything|all|that|the\s+(above|previous|last|prior)|previous\s+analysis)\b/i,
-  /\bnew\s+(analysis|query|request|search|case)\b/i,
-  /\bseparate\s+(analysis|case|query)\b/i,
-  /\bdifferent\s+(business|case|query|analysis)\b/i,
-  /\bfresh\s+(analysis|start|query)\b/i,
-  /\bfrom\s+scratch\b/i,
-  /\bdiscard\s+(prior|previous|the)\b/i,
-];
-
+// Patterns live in api/_lib/patterns.js (shared with frontend contextResolver).
+// Use the imported isResetIntent() function — do NOT duplicate the array here.
 function detectResetIntent(prompt) {
-  return RESET_PATTERNS.some(p => p.test(prompt));
+  return isResetIntent(prompt);
 }
 
 // ─── Positioning tier extraction ─────────────────────────────────────────────
@@ -606,7 +597,7 @@ export default async function handler(req, res) {
         response_format: { type: 'json_object' },
         temperature: 0,              // deterministic sampling
         seed: promptSeed(prompt),    // same prompt → same token sequence (best-effort)
-        max_tokens: 1500, // intentionally higher than /api/intent to reduce truncation
+        max_tokens: 2000, // raised: complex Hinglish + many exclusions can approach 1500
       });
 
       const rawText = intentRes.choices?.[0]?.message?.content;
@@ -1372,6 +1363,23 @@ export default async function handler(req, res) {
       // Append profile-alignment criteria (land availability, urban-rural fit)
       criteriaBreakdown.push(...scoreProfileAlignment(osmResult.signals, profile));
 
+      // ── Weight renormalization ────────────────────────────────────────────
+      // Dynamic criteria weights are normalized to sum ≈ 1.0 during build, but
+      // profile-alignment criteria (weight 0.08–0.45) are appended afterward,
+      // causing the displayed weight sum to exceed 1.0. Renormalize here so:
+      //   (a) displayed weights always sum to exactly 1.0 in UI/PDF
+      //   (b) computeMCDAScore produces the same result (it divides by totalWeight)
+      //       — this is a no-op for the score, it only affects transparency
+      {
+        const totalW = criteriaBreakdown.reduce((s, c) => s + (c.weight || 0), 0);
+        if (totalW > 0.01) {
+          criteriaBreakdown = criteriaBreakdown.map(c => ({
+            ...c,
+            weight: Math.round((c.weight / totalW) * 1000) / 1000,
+          }));
+        }
+      }
+
       // Compute evidence quality based on raw OSM data — must come before the boost
       const osmSparseData = isSparseData(criteriaBreakdown);
       const googleCorroborates = googleDensityTotal >= 5;
@@ -1660,6 +1668,13 @@ TONE & QUALITY RULES:
     // Step 10 — Build response
     // ═══════════════════════════════════════════════════════
 
+    // Track whether any exclusion zone enforcement was silently bypassed
+    // (all candidates excluded → full set restored). Surface this prominently so
+    // callers can show a warning rather than silently presenting invalid results.
+    const exclusionEnforcementBypassed =
+      fallbackReason === 'all_candidates_excluded_by_named_area_rules' ||
+      fallbackReason === 'hard_subregion_no_valid_candidates';
+
     const debugAlways = {
       totalLatencyMs,
       sectorId: hasDynamicCriteria ? 'dynamic' : 'fallback',
@@ -1667,6 +1682,10 @@ TONE & QUALITY RULES:
       candidatesBeforeFilter: candidateLocationsBeforeFiltering.length,
       candidatesAfterFilter: candidateLocationsAfterFiltering.length,
       rankedCount: rankedLocations.length,
+      // Radius transparency — always included so frontend can show actual radius used
+      effectiveRadiusM: effectiveRadius,
+      requestedSearchRadiusM: effectiveSearchRadiusM,
+      landIntensity: profile.landIntensity,
       // Repeatability diagnostics
       candidateGenerationSource: isCoordAnchored
         ? 'coordinate_offsets'
@@ -1757,7 +1776,13 @@ TONE & QUALITY RULES:
       // ─── Ranked results ───
       rankedLocations,
 
+      // ─── Radius transparency (top-level, always present) ───
+      effectiveRadiusM: effectiveRadius,
+      requestedSearchRadiusM: effectiveSearchRadiusM,
+      landIntensity: profile.landIntensity,
+
       // ─── Exclusion detail ───
+      exclusionEnforcementBypassed,
       resolvedExclusions,
       unresolvedExclusions,
       exactExclusionsApplied: excludedCandidates.length,

@@ -284,7 +284,12 @@ export async function runDemoAnalysis(
   };
 }
 
-// ─── Live analysis ───
+// ─── Live analysis (DEPRECATED — superseded by runServerAnalysis) ───
+//
+// This client-side pipeline is no longer called in the live flow.
+// App.tsx routes directly to runServerAnalysis → /api/analyze.
+// Kept here for reference only. DO NOT add new features to this path.
+// TODO: Remove once all environments confirm runServerAnalysis is stable.
 
 export async function runLiveAnalysis(
   rawPrompt: string,
@@ -835,7 +840,8 @@ export async function runServerAnalysis(
     reasoning: loc.reasoning || '',
     osmSignals: loc.osmSignals || {},
     pois: loc.pois || [],
-    searchRadiusM: 1500, // effectiveRadiusM not in non-verbose debug; use backend default
+    // Use effectiveRadiusM from top-level response (now always present, not just in verbose debug)
+    searchRadiusM: data.effectiveRadiusM || data.debug?.effectiveRadiusM || 1500,
   }));
 
   // ── Build AnalysisSpec from backend response fields ───────────────────────
@@ -864,6 +870,14 @@ export async function runServerAnalysis(
       ...(data.debug?.parsingNotes || []),
       ...(data.debug?.geocodingNotes || []),
       ...(data.warnings || []),
+      // Surface exclusion bypass prominently — not just buried in warnings
+      ...(data.exclusionEnforcementBypassed
+        ? ['⚠ EXCLUSION BYPASS: All candidates fell inside exclusion zones — constraints could not be enforced. Full candidate set shown.']
+        : []),
+      // Surface effective radius used so Analysis Assumptions shows the real value
+      ...(data.effectiveRadiusM
+        ? [`Search radius used: ${(data.effectiveRadiusM / 1000).toFixed(1)}km (land intensity: ${data.landIntensity || 'low'})`]
+        : []),
     ],
     confidence,
     classificationMeta: {
@@ -886,7 +900,7 @@ export async function runServerAnalysis(
     summary: explainSummary || fallbackSummary,
     business_type: data.parsedBusinessType || '',
     target_location: data.parsedCity || '',
-    methodology: `Server pipeline: Google geocoding → OSM/MCDA scoring (${locations[0]?.criteria_breakdown.length || 0} criteria, ${confBand} confidence). All scores deterministic and evidence-backed.`,
+    methodology: `Server pipeline: Google geocoding → OSM/MCDA scoring (${locations[0]?.criteria_breakdown.length || 0} criteria, ${confBand} confidence, ${data.effectiveRadiusM ? `${(data.effectiveRadiusM / 1000).toFixed(1)}km radius` : 'radius auto-capped'}, land intensity: ${data.landIntensity || 'low'}). All scores deterministic and evidence-backed.`,
     spec,
     locations,
     grounding_sources: [
