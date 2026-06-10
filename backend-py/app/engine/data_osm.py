@@ -1,4 +1,12 @@
-"""OSM data fetch via Overpass — one query per layer tag-set over the study bbox."""
+"""OSM data fetch via Overpass — one union query for all layers over the study bbox.
+
+Production lessons baked in:
+- overpass-api.de returns 406 without a descriptive User-Agent → always send one.
+- Public endpoints throttle datacenter IPs → 3 endpoints, ONE attempt each with a
+  moderate timeout (fail over fast rather than retrying a throttled host).
+- The per-layer fallback runs with bounded concurrency, not serially (a serial
+  fallback once turned a failed union query into a 15-minute hang).
+"""
 from __future__ import annotations
 
 import asyncio
@@ -10,10 +18,13 @@ import httpx
 logger = logging.getLogger(__name__)
 
 OVERPASS_ENDPOINTS = [
-    "https://overpass.kumi.systems/api/interpreter",   # tends to throttle less
-    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",            # throttles least
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",  # fast mirror
+    "https://overpass-api.de/api/interpreter",                  # canonical (strict)
 ]
-HTTP_TIMEOUT = 75  # union queries are heavier; fail over after this
+HTTP_TIMEOUT = 50          # per endpoint; one attempt each → worst case ~2.5 min
+USER_AGENT = "stratageo-engine/1.0.1 (site-suitability analysis; stratageo.in)"
+FALLBACK_CONCURRENCY = 2   # parallel per-layer fetches if the union query fails
 
 # (bbox_key, tags_key) → (timestamp, pois)
 _cache: dict[tuple, tuple[float, list[dict]]] = {}
@@ -30,7 +41,7 @@ def _build_query(tags: list[str], bbox: tuple[float, float, float, float]) -> st
         parts.append(f"node{sel}({s},{w},{n},{e});")
         parts.append(f"way{sel}({s},{w},{n},{e});")
     body = "".join(parts)
-    return f"[out:json][timeout:60];({body});out center;"
+    return f"[out:json][timeout:45];({body});out center;"
 
 
 def _classify(poi_tags: dict, layer_tags: list[str]) -> bool:
@@ -47,23 +58,23 @@ async def fetch_all_layers(
     bbox: tuple[float, float, float, float],
 ) -> dict[str, list[dict]]:
     """ONE Overpass query for the union of all layers' tags, classified client-side.
-
-    Collapses N sequential round-trips (the v1 bottleneck: ~3 min/layer when the
-    primary endpoint throttles) into a single fetch + local bucketing.
-    Falls back to per-layer fetches if the union query fails.
-    """
+    Falls back to bounded-concurrency per-layer fetches if the union query fails."""
     union_tags = sorted({t for tags in tag_sets.values() for t in tags})
     try:
         all_pois = await fetch_layer_pois(union_tags, bbox)
     except Exception as e:
         logger.warning("union Overpass fetch failed (%s) — falling back to per-layer", e)
-        out: dict[str, list[dict]] = {}
-        for lid, tags in tag_sets.items():
-            try:
-                out[lid] = await fetch_layer_pois(tags, bbox)
-            except Exception:
-                out[lid] = []
-        return out
+        sem = asyncio.Semaphore(FALLBACK_CONCURRENCY)
+
+        async def one(lid: str, tags: list[str]) -> tuple[str, list[dict]]:
+            async with sem:
+                try:
+                    return lid, await fetch_layer_pois(tags, bbox)
+                except Exception:
+                    return lid, []
+
+        results = await asyncio.gather(*(one(lid, tags) for lid, tags in tag_sets.items()))
+        return dict(results)
 
     out = {lid: [] for lid in tag_sets}
     for poi in all_pois:
@@ -79,7 +90,9 @@ async def fetch_layer_pois(
     tags: list[str],
     bbox: tuple[float, float, float, float],
 ) -> list[dict]:
-    """Returns [{lat, lng, tags}] for all features matching any tag in bbox."""
+    """Returns [{lat, lng, tags}] for all features matching any tag in bbox.
+    One attempt per endpoint — throttled hosts rarely recover within a retry window,
+    so failing over to the next mirror beats retrying the same one."""
     key = (tuple(round(x, 3) for x in bbox), tuple(sorted(tags)))
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < CACHE_TTL:
@@ -88,27 +101,29 @@ async def fetch_layer_pois(
     query = _build_query(tags, bbox)
     last_err: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
-        for attempt in range(2):
-            try:
-                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                    r = await client.post(endpoint, data={"data": query})
-                    r.raise_for_status()
-                    data = r.json()
-                pois = []
-                for el in data.get("elements", []):
-                    if el["type"] == "node":
-                        lat, lng = el.get("lat"), el.get("lon")
-                    else:
-                        c = el.get("center") or {}
-                        lat, lng = c.get("lat"), c.get("lon")
-                    if lat is None or lng is None:
-                        continue
-                    pois.append({"lat": lat, "lng": lng, "tags": el.get("tags", {})})
-                _cache[key] = (time.time(), pois)
-                logger.info("Overpass: %d POIs for tags=%s", len(pois), tags)
-                return pois
-            except Exception as e:
-                last_err = e
-                logger.warning("Overpass attempt failed (%s, try %d): %s", endpoint, attempt + 1, e)
-                await asyncio.sleep(2)
+        try:
+            async with httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT,
+                headers={"User-Agent": USER_AGENT},
+            ) as client:
+                r = await client.post(endpoint, data={"data": query})
+                r.raise_for_status()
+                data = r.json()
+            pois = []
+            for el in data.get("elements", []):
+                if el["type"] == "node":
+                    lat, lng = el.get("lat"), el.get("lon")
+                else:
+                    c = el.get("center") or {}
+                    lat, lng = c.get("lat"), c.get("lon")
+                if lat is None or lng is None:
+                    continue
+                pois.append({"lat": lat, "lng": lng, "tags": el.get("tags", {})})
+            _cache[key] = (time.time(), pois)
+            logger.info("Overpass: %d POIs for %d tag(s) via %s", len(pois), len(tags), endpoint)
+            return pois
+        except Exception as e:
+            last_err = e
+            logger.warning("Overpass attempt failed (%s): %s", endpoint, e)
+            await asyncio.sleep(1)
     raise RuntimeError(f"Overpass fetch failed for tags={tags}: {last_err}")
