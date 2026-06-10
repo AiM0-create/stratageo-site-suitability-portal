@@ -87,16 +87,17 @@ async def resolve_study_area(area: StudyArea) -> tuple[object, list[str]]:
         poly = Point(lng, lat).buffer(max(_m_to_deg_lat(r), _m_to_deg_lng(r, lat)))
         return poly, notes
 
-    # places: geocode each, convex hull, buffer
+    # places: geocode all concurrently (Google primary; Nominatim only on
+    # fallback, where individual misses are rare), convex hull, buffer
+    places = area.places or []
+    results = await asyncio.gather(*(geocode(name) for name in places))
     coords: list[tuple[float, float]] = []  # (lng, lat)
-    for name in area.places or []:
-        pt = await geocode(name)
+    for name, pt in zip(places, results):
         if pt:
             coords.append((pt[1], pt[0]))
             notes.append(f'Geocoded "{name}" → {pt[0]:.4f}, {pt[1]:.4f}')
         else:
             notes.append(f'Could not geocode "{name}" — omitted from study area')
-        await asyncio.sleep(0.2)  # be polite to Nominatim
 
     if not coords:
         raise ValueError("none of the study-area places could be geocoded")
