@@ -15,6 +15,12 @@ dist-ssr
 api/.env
 api/node_modules
 
+# Python backend — never commit secrets or the venv
+backend-py/.env
+backend-py/.venv/
+backend-py/**/__pycache__/
+backend-py/.pytest_cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

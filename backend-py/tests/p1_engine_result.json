@@ -1,0 +1,2177 @@
+{
+  "summary": "CJ Block emerges as the top candidate for the sweets-first QSR format in Kolkata, driven primarily by its exceptional residential population and food cluster whitespace scores. CL Block follows closely, benefiting from a strong residential population and transit proximity, but suffers from lower scores in affinity points and commercial visibility. AL Block ranks the lowest due to its lack of visibility, delivery catchment density, and transit proximity, despite a decent residential population score.",
+  "business_type": "sweets-first QSR",
+  "target_location": "Kolkata",
+  "methodology": "H3 hexagonal grid at resolution 9 (185 cells) over the study area. 8 weighted layers scored per hex with percentile normalization; weighted-sum composite (weights preserved from spec). Walk/drive layers (Residential Population, Affinity POIs - Temples/Markets, Delivery Catchment Density, Transit Proximity, Daytime Generators) scored with calibrated Euclidean proxies (isochrone refinement unavailable). OSM fetch failed for layer 'Food Cluster Whitespace & Ecosystem' — scored as zero (Overpass fetch failed for tags=['amenity=restaurant', 'amenity=cafe', 'amenity=fast_food']: ). OSM fetch failed for layer 'Road Visibility & Commercial Frontage' — scored as zero (Overpass fetch failed for tags=['highway=primary', 'highway=secondary', 'highway=tertiary']: Server error '504 Gateway Timeout' for url 'https://overpass.kumi.systems/api/interpreter'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504). OSM fetch failed for layer 'Daytime Generators' — scored as zero (Overpass fetch failed for tags=['office=*', 'amenity=school', 'amenity=college']: Server error '504 Gateway Timeout' for url 'https://overpass.kumi.systems/api/interpreter'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504). OSM fetch failed for layer 'Apartment Cluster Density' — scored as zero (Overpass fetch failed for tags=['building=apartments']: ). Isochrones unavailable for 'Residential Population' — Euclidean proxy values kept. Isochrones unavailable for 'Affinity POIs - Temples/Markets' — Euclidean proxy values kept. Isochrones unavailable for 'Delivery Catchment Density' — Euclidean proxy values kept. Isochrones unavailable for 'Transit Proximity' — Euclidean proxy values kept. Isochrones unavailable for 'Daytime Generators' — Euclidean proxy values kept.",
+  "spec": {
+    "businessType": "sweets-first QSR",
+    "sectorId": "conversational_v2",
+    "geography": {
+      "city": "Kolkata",
+      "neighborhoods": [
+        "Chinar Park",
+        "Salt Lake",
+        "Sector V",
+        "Newtown"
+      ]
+    },
+    "constraints": [],
+    "userPointConstraints": [],
+    "hasUserPointReference": false,
+    "positiveCriteria": [
+      "Residential Population",
+      "Road Visibility & Commercial Frontage",
+      "Affinity POIs - Temples/Markets",
+      "Delivery Catchment Density",
+      "Transit Proximity",
+      "Daytime Generators",
+      "Apartment Cluster Density"
+    ],
+    "negativeCriteria": [
+      "Food Cluster Whitespace & Ecosystem"
+    ],
+    "inferredWeights": {
+      "residential_population": 0.25,
+      "food_cluster_whitespace_&_ecosystem": 0.17,
+      "road_visibility_&_commercial_frontage": 0.1,
+      "affinity_pois_-_temples_markets": 0.08,
+      "delivery_catchment_density": 0.2,
+      "transit_proximity": 0.1,
+      "daytime_generators": 0.05,
+      "apartment_cluster_density": 0.05
+    },
+    "resultCount": 3,
+    "parsingNotes": [
+      "Geocoded \"Chinar Park, Kolkata\" → 22.6236, 88.4410",
+      "Geocoded \"Salt Lake, Kolkata\" → 22.5904, 88.4169",
+      "Geocoded \"Sector V, Kolkata\" → 22.5755, 88.4323",
+      "Geocoded \"Newtown, Kolkata\" → 22.6129, 88.4666",
+      "H3 grid: 185 hexes at resolution 9",
+      "OSM fetch failed for layer 'Food Cluster Whitespace & Ecosystem' — scored as zero (Overpass fetch failed for tags=['amenity=restaurant', 'amenity=cafe', 'amenity=fast_food']: ).",
+      "OSM fetch failed for layer 'Road Visibility & Commercial Frontage' — scored as zero (Overpass fetch failed for tags=['highway=primary', 'highway=secondary', 'highway=tertiary']: Server error '504 Gateway Timeout' for url 'https://overpass.kumi.systems/api/interpreter'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504).",
+      "OSM fetch failed for layer 'Daytime Generators' — scored as zero (Overpass fetch failed for tags=['office=*', 'amenity=school', 'amenity=college']: Server error '504 Gateway Timeout' for url 'https://overpass.kumi.systems/api/interpreter'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504).",
+      "OSM fetch failed for layer 'Apartment Cluster Density' — scored as zero (Overpass fetch failed for tags=['building=apartments']: ).",
+      "Isochrones unavailable for 'Residential Population' — Euclidean proxy values kept.",
+      "Isochrones unavailable for 'Affinity POIs - Temples/Markets' — Euclidean proxy values kept.",
+      "Isochrones unavailable for 'Delivery Catchment Density' — Euclidean proxy values kept.",
+      "Isochrones unavailable for 'Transit Proximity' — Euclidean proxy values kept.",
+      "Isochrones unavailable for 'Daytime Generators' — Euclidean proxy values kept."
+    ],
+    "confidence": "high"
+  },
+  "locations": [
+    {
+      "name": "CJ Block",
+      "lat": 22.587741172425478,
+      "lng": 88.42448610925413,
+      "mcda_score": 5.7,
+      "criteria_breakdown": [
+        {
+          "name": "Residential Population",
+          "weight": 0.25,
+          "score": 10.0,
+          "rawValue": 432.0,
+          "direction": "positive",
+          "justification": "432 features within 10-min walk (Euclidean proxy ≈800m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "building=residential, landuse=residential"
+        },
+        {
+          "name": "Food Cluster Whitespace & Ecosystem",
+          "weight": 0.17,
+          "score": 10.0,
+          "rawValue": 0.0,
+          "direction": "negative",
+          "justification": "0 features within 300m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "amenity=restaurant, amenity=cafe, amenity=fast_food"
+        },
+        {
+          "name": "Road Visibility & Commercial Frontage",
+          "weight": 0.1,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 100m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "highway=primary, highway=secondary, highway=tertiary"
+        },
+        {
+          "name": "Affinity POIs - Temples/Markets",
+          "weight": 0.08,
+          "score": 6.7,
+          "rawValue": 2.0,
+          "direction": "positive",
+          "justification": "2 features within 7-min walk (Euclidean proxy ≈560m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "amenity=place_of_worship, amenity=marketplace"
+        },
+        {
+          "name": "Delivery Catchment Density",
+          "weight": 0.2,
+          "score": 0.0,
+          "rawValue": 686.0,
+          "direction": "positive",
+          "justification": "686 features within 20-min drive (Euclidean proxy ≈8000m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "building=residential, landuse=residential"
+        },
+        {
+          "name": "Transit Proximity",
+          "weight": 0.1,
+          "score": 10.0,
+          "rawValue": 3.0,
+          "direction": "positive",
+          "justification": "3 features within 5-min walk (Euclidean proxy ≈400m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "railway=station, public_transport=stop_position"
+        },
+        {
+          "name": "Daytime Generators",
+          "weight": 0.05,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 10-min drive (Euclidean proxy ≈4000m).",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "office=*, amenity=school, amenity=college"
+        },
+        {
+          "name": "Apartment Cluster Density",
+          "weight": 0.05,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 500m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "building=apartments"
+        }
+      ],
+      "exclusions": [],
+      "excluded": false,
+      "reasoning": "CJ Block scores highest with a composite score of 5.7/10, largely due to its perfect residential population score of 10.0/10 and food cluster whitespace score of 10.0/10. However, it suffers from a complete lack of road visibility and delivery catchment density, which are critical for a QSR.",
+      "osmSignals": {
+        "residential_population": 432,
+        "food_cluster_whitespace_&_ecosystem": 0,
+        "road_visibility_&_commercial_frontage": 0,
+        "affinity_pois_-_temples_markets": 2,
+        "delivery_catchment_density": 686,
+        "transit_proximity": 3,
+        "daytime_generators": 0,
+        "apartment_cluster_density": 0
+      },
+      "pois": [
+        {
+          "lat": 22.5846672,
+          "lng": 88.4219939,
+          "name": "Karunamoyee Housing Complex",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6235411,
+          "lng": 88.4676912,
+          "name": "Starlit Housing 2",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6224435,
+          "lng": 88.470112,
+          "name": "Starlit Housing 1",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6205487,
+          "lng": 88.4690644,
+          "name": "Hiland Woods",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5720317,
+          "lng": 88.4681082,
+          "name": "akanksha housing complex",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.592514,
+          "lng": 88.4096311,
+          "name": "CD Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5805435,
+          "lng": 88.4202127,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5955608,
+          "lng": 88.4174207,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5911594,
+          "lng": 88.4140356,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6049385,
+          "lng": 88.4168509,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5716637,
+          "lng": 88.4155413,
+          "name": "IB Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5724487,
+          "lng": 88.4139775,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5713554,
+          "lng": 88.4125935,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5709801,
+          "lng": 88.4178145,
+          "name": "IC Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5735225,
+          "lng": 88.4196907,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5744301,
+          "lng": 88.4181413,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5778769,
+          "lng": 88.4194205,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5773763,
+          "lng": 88.4213438,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5791286,
+          "lng": 88.4202272,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5782691,
+          "lng": 88.4219873,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5829734,
+          "lng": 88.4214433,
+          "name": "ED Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5911594,
+          "lng": 88.4140769,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5989202,
+          "lng": 88.4178601,
+          "name": "AF Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6004366,
+          "lng": 88.4220213,
+          "name": "AF Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5806357,
+          "lng": 88.4335674,
+          "name": "BN Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5768146,
+          "lng": 88.4303804,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.575884,
+          "lng": 88.4376925,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5768423,
+          "lng": 88.4373102,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5792189,
+          "lng": 88.4434711,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5784437,
+          "lng": 88.4435166,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5795271,
+          "lng": 88.4429132,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.583127,
+          "lng": 88.430274,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826113,
+          "lng": 88.4234201,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5827159,
+          "lng": 88.4235927,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5823908,
+          "lng": 88.4235309,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826566,
+          "lng": 88.4226478,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828799,
+          "lng": 88.4231858,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5824945,
+          "lng": 88.4227539,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5831746,
+          "lng": 88.4233235,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830717,
+          "lng": 88.4227722,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5833518,
+          "lng": 88.4228912,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.583228,
+          "lng": 88.4226045,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5821312,
+          "lng": 88.4230895,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.581996,
+          "lng": 88.4228514,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5822626,
+          "lng": 88.423317,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5831796,
+          "lng": 88.4229834,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5833165,
+          "lng": 88.4232264,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830507,
+          "lng": 88.4223645,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830045,
+          "lng": 88.4234447,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582889,
+          "lng": 88.4224552,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830374,
+          "lng": 88.4230797,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5829187,
+          "lng": 88.4221894,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828134,
+          "lng": 88.4233584,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5824464,
+          "lng": 88.4231764,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5822112,
+          "lng": 88.4227481,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5834735,
+          "lng": 88.4231233,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582313,
+          "lng": 88.4229359,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5823617,
+          "lng": 88.422575,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5825334,
+          "lng": 88.4224512,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828021,
+          "lng": 88.4228534,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826888,
+          "lng": 88.422325,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826785,
+          "lng": 88.4230333,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5842632,
+          "lng": 88.4219678,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841055,
+          "lng": 88.4216916,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5839529,
+          "lng": 88.4209331,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5840107,
+          "lng": 88.4215184,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5839105,
+          "lng": 88.4213285,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841017,
+          "lng": 88.4213069,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5843102,
+          "lng": 88.4216524,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841914,
+          "lng": 88.421463,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5817178,
+          "lng": 88.422159,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5821882,
+          "lng": 88.4223237,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5827229,
+          "lng": 88.4219204,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582527,
+          "lng": 88.4221317,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5815833,
+          "lng": 88.421954,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5818696,
+          "lng": 88.422447,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5856605,
+          "lng": 88.4287905,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5847844,
+          "lng": 88.4296685,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5849569,
+          "lng": 88.4295456,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5848698,
+          "lng": 88.4296107,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5847903,
+          "lng": 88.4299013,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5849602,
+          "lng": 88.4297588,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5855649,
+          "lng": 88.4288406,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5852184,
+          "lng": 88.4293598,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5854498,
+          "lng": 88.4286369,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5848756,
+          "lng": 88.4298323,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5845177,
+          "lng": 88.430082,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846108,
+          "lng": 88.4300057,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5844253,
+          "lng": 88.4301281,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5845138,
+          "lng": 88.4298526,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846923,
+          "lng": 88.4297258,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846004,
+          "lng": 88.42979,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5810517,
+          "lng": 88.4281222,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5811687,
+          "lng": 88.4283253,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5844694,
+          "lng": 88.4295826,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5843897,
+          "lng": 88.4296473,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5842942,
+          "lng": 88.4297008,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5859378,
+          "lng": 88.4274035,
+          "name": "220",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5860292,
+          "lng": 88.42794,
+          "name": "265",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5861232,
+          "lng": 88.4278697,
+          "name": "266",
+          "type": "residential_population"
+        }
+      ],
+      "searchRadiusM": 8000
+    },
+    {
+      "name": "CL Block",
+      "lat": 22.58019294631242,
+      "lng": 88.42878994484238,
+      "mcda_score": 5.5,
+      "criteria_breakdown": [
+        {
+          "name": "Residential Population",
+          "weight": 0.25,
+          "score": 10.0,
+          "rawValue": 492.0,
+          "direction": "positive",
+          "justification": "492 features within 10-min walk (Euclidean proxy ≈800m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "building=residential, landuse=residential"
+        },
+        {
+          "name": "Food Cluster Whitespace & Ecosystem",
+          "weight": 0.17,
+          "score": 10.0,
+          "rawValue": 0.0,
+          "direction": "negative",
+          "justification": "0 features within 300m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "amenity=restaurant, amenity=cafe, amenity=fast_food"
+        },
+        {
+          "name": "Road Visibility & Commercial Frontage",
+          "weight": 0.1,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 100m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "highway=primary, highway=secondary, highway=tertiary"
+        },
+        {
+          "name": "Affinity POIs - Temples/Markets",
+          "weight": 0.08,
+          "score": 3.3,
+          "rawValue": 1.0,
+          "direction": "positive",
+          "justification": "1 features within 7-min walk (Euclidean proxy ≈560m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "amenity=place_of_worship, amenity=marketplace"
+        },
+        {
+          "name": "Delivery Catchment Density",
+          "weight": 0.2,
+          "score": 0.0,
+          "rawValue": 686.0,
+          "direction": "positive",
+          "justification": "686 features within 20-min drive (Euclidean proxy ≈8000m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "building=residential, landuse=residential"
+        },
+        {
+          "name": "Transit Proximity",
+          "weight": 0.1,
+          "score": 10.0,
+          "rawValue": 3.0,
+          "direction": "positive",
+          "justification": "3 features within 5-min walk (Euclidean proxy ≈400m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "railway=station, public_transport=stop_position"
+        },
+        {
+          "name": "Daytime Generators",
+          "weight": 0.05,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 10-min drive (Euclidean proxy ≈4000m).",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "office=*, amenity=school, amenity=college"
+        },
+        {
+          "name": "Apartment Cluster Density",
+          "weight": 0.05,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 500m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "building=apartments"
+        }
+      ],
+      "exclusions": [],
+      "excluded": false,
+      "reasoning": "CL Block has a composite score of 5.5/10, supported by a strong residential population score of 10.0/10 and transit proximity score of 10.0/10. However, it is hindered by low affinity POIs and no visibility or delivery catchment density, which could limit customer access.",
+      "osmSignals": {
+        "residential_population": 492,
+        "food_cluster_whitespace_&_ecosystem": 0,
+        "road_visibility_&_commercial_frontage": 0,
+        "affinity_pois_-_temples_markets": 1,
+        "delivery_catchment_density": 686,
+        "transit_proximity": 3,
+        "daytime_generators": 0,
+        "apartment_cluster_density": 0
+      },
+      "pois": [
+        {
+          "lat": 22.5846672,
+          "lng": 88.4219939,
+          "name": "Karunamoyee Housing Complex",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6235411,
+          "lng": 88.4676912,
+          "name": "Starlit Housing 2",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6224435,
+          "lng": 88.470112,
+          "name": "Starlit Housing 1",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6205487,
+          "lng": 88.4690644,
+          "name": "Hiland Woods",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5720317,
+          "lng": 88.4681082,
+          "name": "akanksha housing complex",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.592514,
+          "lng": 88.4096311,
+          "name": "CD Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5805435,
+          "lng": 88.4202127,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5955608,
+          "lng": 88.4174207,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5911594,
+          "lng": 88.4140356,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6049385,
+          "lng": 88.4168509,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5716637,
+          "lng": 88.4155413,
+          "name": "IB Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5724487,
+          "lng": 88.4139775,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5713554,
+          "lng": 88.4125935,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5709801,
+          "lng": 88.4178145,
+          "name": "IC Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5735225,
+          "lng": 88.4196907,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5744301,
+          "lng": 88.4181413,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5778769,
+          "lng": 88.4194205,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5773763,
+          "lng": 88.4213438,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5791286,
+          "lng": 88.4202272,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5782691,
+          "lng": 88.4219873,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5829734,
+          "lng": 88.4214433,
+          "name": "ED Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5911594,
+          "lng": 88.4140769,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5989202,
+          "lng": 88.4178601,
+          "name": "AF Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6004366,
+          "lng": 88.4220213,
+          "name": "AF Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5806357,
+          "lng": 88.4335674,
+          "name": "BN Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5768146,
+          "lng": 88.4303804,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.575884,
+          "lng": 88.4376925,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5768423,
+          "lng": 88.4373102,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5792189,
+          "lng": 88.4434711,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5784437,
+          "lng": 88.4435166,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5795271,
+          "lng": 88.4429132,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.583127,
+          "lng": 88.430274,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826113,
+          "lng": 88.4234201,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5827159,
+          "lng": 88.4235927,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5823908,
+          "lng": 88.4235309,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826566,
+          "lng": 88.4226478,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828799,
+          "lng": 88.4231858,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5824945,
+          "lng": 88.4227539,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5831746,
+          "lng": 88.4233235,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830717,
+          "lng": 88.4227722,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5833518,
+          "lng": 88.4228912,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.583228,
+          "lng": 88.4226045,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5821312,
+          "lng": 88.4230895,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.581996,
+          "lng": 88.4228514,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5822626,
+          "lng": 88.423317,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5831796,
+          "lng": 88.4229834,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5833165,
+          "lng": 88.4232264,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830507,
+          "lng": 88.4223645,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830045,
+          "lng": 88.4234447,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582889,
+          "lng": 88.4224552,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830374,
+          "lng": 88.4230797,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5829187,
+          "lng": 88.4221894,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828134,
+          "lng": 88.4233584,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5824464,
+          "lng": 88.4231764,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5822112,
+          "lng": 88.4227481,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5834735,
+          "lng": 88.4231233,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582313,
+          "lng": 88.4229359,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5823617,
+          "lng": 88.422575,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5825334,
+          "lng": 88.4224512,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828021,
+          "lng": 88.4228534,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826888,
+          "lng": 88.422325,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826785,
+          "lng": 88.4230333,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5842632,
+          "lng": 88.4219678,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841055,
+          "lng": 88.4216916,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5839529,
+          "lng": 88.4209331,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5840107,
+          "lng": 88.4215184,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5839105,
+          "lng": 88.4213285,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841017,
+          "lng": 88.4213069,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5843102,
+          "lng": 88.4216524,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841914,
+          "lng": 88.421463,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5817178,
+          "lng": 88.422159,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5821882,
+          "lng": 88.4223237,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5827229,
+          "lng": 88.4219204,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582527,
+          "lng": 88.4221317,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5815833,
+          "lng": 88.421954,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5818696,
+          "lng": 88.422447,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5856605,
+          "lng": 88.4287905,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5847844,
+          "lng": 88.4296685,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5849569,
+          "lng": 88.4295456,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5848698,
+          "lng": 88.4296107,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5847903,
+          "lng": 88.4299013,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5849602,
+          "lng": 88.4297588,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5855649,
+          "lng": 88.4288406,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5852184,
+          "lng": 88.4293598,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5854498,
+          "lng": 88.4286369,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5848756,
+          "lng": 88.4298323,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5845177,
+          "lng": 88.430082,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846108,
+          "lng": 88.4300057,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5844253,
+          "lng": 88.4301281,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5845138,
+          "lng": 88.4298526,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846923,
+          "lng": 88.4297258,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846004,
+          "lng": 88.42979,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5810517,
+          "lng": 88.4281222,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5811687,
+          "lng": 88.4283253,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5844694,
+          "lng": 88.4295826,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5843897,
+          "lng": 88.4296473,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5842942,
+          "lng": 88.4297008,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5859378,
+          "lng": 88.4274035,
+          "name": "220",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5860292,
+          "lng": 88.42794,
+          "name": "265",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5861232,
+          "lng": 88.4278697,
+          "name": "266",
+          "type": "residential_population"
+        }
+      ],
+      "searchRadiusM": 8000
+    },
+    {
+      "name": "AL Block",
+      "lat": 22.58755178341961,
+      "lng": 88.43393916846976,
+      "mcda_score": 4.1,
+      "criteria_breakdown": [
+        {
+          "name": "Residential Population",
+          "weight": 0.25,
+          "score": 9.6,
+          "rawValue": 409.0,
+          "direction": "positive",
+          "justification": "409 features within 10-min walk (Euclidean proxy ≈800m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "building=residential, landuse=residential"
+        },
+        {
+          "name": "Food Cluster Whitespace & Ecosystem",
+          "weight": 0.17,
+          "score": 10.0,
+          "rawValue": 0.0,
+          "direction": "negative",
+          "justification": "0 features within 300m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "amenity=restaurant, amenity=cafe, amenity=fast_food"
+        },
+        {
+          "name": "Road Visibility & Commercial Frontage",
+          "weight": 0.1,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 100m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "highway=primary, highway=secondary, highway=tertiary"
+        },
+        {
+          "name": "Affinity POIs - Temples/Markets",
+          "weight": 0.08,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 7-min walk (Euclidean proxy ≈560m).",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "amenity=place_of_worship, amenity=marketplace"
+        },
+        {
+          "name": "Delivery Catchment Density",
+          "weight": 0.2,
+          "score": 0.0,
+          "rawValue": 686.0,
+          "direction": "positive",
+          "justification": "686 features within 20-min drive (Euclidean proxy ≈8000m).",
+          "evidenceBasis": "osm-derived",
+          "osmQuery": "building=residential, landuse=residential"
+        },
+        {
+          "name": "Transit Proximity",
+          "weight": 0.1,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 5-min walk (Euclidean proxy ≈400m).",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "railway=station, public_transport=stop_position"
+        },
+        {
+          "name": "Daytime Generators",
+          "weight": 0.05,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 10-min drive (Euclidean proxy ≈4000m).",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "office=*, amenity=school, amenity=college"
+        },
+        {
+          "name": "Apartment Cluster Density",
+          "weight": 0.05,
+          "score": 0.0,
+          "rawValue": 0.0,
+          "direction": "positive",
+          "justification": "0 features within 500m radius.",
+          "evidenceBasis": "osm-absent",
+          "osmQuery": "building=apartments"
+        }
+      ],
+      "exclusions": [],
+      "excluded": false,
+      "reasoning": "AL Block ranks lowest with a composite score of 4.1/10, primarily due to its lack of road visibility, delivery catchment density, and transit proximity, all scoring 0.0/10. While it has a decent residential population score of 9.6/10, the absence of key commercial and accessibility factors makes it less favorable.",
+      "osmSignals": {
+        "residential_population": 409,
+        "food_cluster_whitespace_&_ecosystem": 0,
+        "road_visibility_&_commercial_frontage": 0,
+        "affinity_pois_-_temples_markets": 0,
+        "delivery_catchment_density": 686,
+        "transit_proximity": 0,
+        "daytime_generators": 0,
+        "apartment_cluster_density": 0
+      },
+      "pois": [
+        {
+          "lat": 22.5846672,
+          "lng": 88.4219939,
+          "name": "Karunamoyee Housing Complex",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6235411,
+          "lng": 88.4676912,
+          "name": "Starlit Housing 2",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6224435,
+          "lng": 88.470112,
+          "name": "Starlit Housing 1",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6205487,
+          "lng": 88.4690644,
+          "name": "Hiland Woods",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5720317,
+          "lng": 88.4681082,
+          "name": "akanksha housing complex",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.592514,
+          "lng": 88.4096311,
+          "name": "CD Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5805435,
+          "lng": 88.4202127,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5955608,
+          "lng": 88.4174207,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5911594,
+          "lng": 88.4140356,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6049385,
+          "lng": 88.4168509,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5716637,
+          "lng": 88.4155413,
+          "name": "IB Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5724487,
+          "lng": 88.4139775,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5713554,
+          "lng": 88.4125935,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5709801,
+          "lng": 88.4178145,
+          "name": "IC Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5735225,
+          "lng": 88.4196907,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5744301,
+          "lng": 88.4181413,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5778769,
+          "lng": 88.4194205,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5773763,
+          "lng": 88.4213438,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5791286,
+          "lng": 88.4202272,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5782691,
+          "lng": 88.4219873,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5829734,
+          "lng": 88.4214433,
+          "name": "ED Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5911594,
+          "lng": 88.4140769,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5989202,
+          "lng": 88.4178601,
+          "name": "AF Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.6004366,
+          "lng": 88.4220213,
+          "name": "AF Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5806357,
+          "lng": 88.4335674,
+          "name": "BN Block",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5768146,
+          "lng": 88.4303804,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.575884,
+          "lng": 88.4376925,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5768423,
+          "lng": 88.4373102,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5792189,
+          "lng": 88.4434711,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5784437,
+          "lng": 88.4435166,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5795271,
+          "lng": 88.4429132,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.583127,
+          "lng": 88.430274,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826113,
+          "lng": 88.4234201,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5827159,
+          "lng": 88.4235927,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5823908,
+          "lng": 88.4235309,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826566,
+          "lng": 88.4226478,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828799,
+          "lng": 88.4231858,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5824945,
+          "lng": 88.4227539,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5831746,
+          "lng": 88.4233235,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830717,
+          "lng": 88.4227722,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5833518,
+          "lng": 88.4228912,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.583228,
+          "lng": 88.4226045,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5821312,
+          "lng": 88.4230895,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.581996,
+          "lng": 88.4228514,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5822626,
+          "lng": 88.423317,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5831796,
+          "lng": 88.4229834,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5833165,
+          "lng": 88.4232264,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830507,
+          "lng": 88.4223645,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830045,
+          "lng": 88.4234447,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582889,
+          "lng": 88.4224552,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5830374,
+          "lng": 88.4230797,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5829187,
+          "lng": 88.4221894,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828134,
+          "lng": 88.4233584,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5824464,
+          "lng": 88.4231764,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5822112,
+          "lng": 88.4227481,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5834735,
+          "lng": 88.4231233,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582313,
+          "lng": 88.4229359,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5823617,
+          "lng": 88.422575,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5825334,
+          "lng": 88.4224512,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5828021,
+          "lng": 88.4228534,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826888,
+          "lng": 88.422325,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5826785,
+          "lng": 88.4230333,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5842632,
+          "lng": 88.4219678,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841055,
+          "lng": 88.4216916,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5839529,
+          "lng": 88.4209331,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5840107,
+          "lng": 88.4215184,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5839105,
+          "lng": 88.4213285,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841017,
+          "lng": 88.4213069,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5843102,
+          "lng": 88.4216524,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5841914,
+          "lng": 88.421463,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5817178,
+          "lng": 88.422159,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5821882,
+          "lng": 88.4223237,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5827229,
+          "lng": 88.4219204,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.582527,
+          "lng": 88.4221317,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5815833,
+          "lng": 88.421954,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5818696,
+          "lng": 88.422447,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5856605,
+          "lng": 88.4287905,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5847844,
+          "lng": 88.4296685,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5849569,
+          "lng": 88.4295456,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5848698,
+          "lng": 88.4296107,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5847903,
+          "lng": 88.4299013,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5849602,
+          "lng": 88.4297588,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5855649,
+          "lng": 88.4288406,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5852184,
+          "lng": 88.4293598,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5854498,
+          "lng": 88.4286369,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5848756,
+          "lng": 88.4298323,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5845177,
+          "lng": 88.430082,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846108,
+          "lng": 88.4300057,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5844253,
+          "lng": 88.4301281,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5845138,
+          "lng": 88.4298526,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846923,
+          "lng": 88.4297258,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5846004,
+          "lng": 88.42979,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5810517,
+          "lng": 88.4281222,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5811687,
+          "lng": 88.4283253,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5844694,
+          "lng": 88.4295826,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5843897,
+          "lng": 88.4296473,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5842942,
+          "lng": 88.4297008,
+          "name": null,
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5859378,
+          "lng": 88.4274035,
+          "name": "220",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5860292,
+          "lng": 88.42794,
+          "name": "265",
+          "type": "residential_population"
+        },
+        {
+          "lat": 22.5861232,
+          "lng": 88.4278697,
+          "name": "266",
+          "type": "residential_population"
+        }
+      ],
+      "searchRadiusM": 8000
+    }
+  ],
+  "grounding_sources": []
+}
