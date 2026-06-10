@@ -113,6 +113,25 @@ export interface LocationData {
 
 // ─── Analysis Result ───
 
+// ─── v2 engine map layers (conversational analyses only) ───
+
+export interface HexGridCell {
+  h3: string;
+  score: number;            // 0-10 composite (Pass-A surface)
+  excluded: boolean;
+  boundary: [number, number][]; // [lat, lng] ring
+}
+
+export interface CatchmentOutline {
+  locationName: string;
+  locationRank: number;
+  layerId: string;
+  layerName: string;
+  mode: 'walk' | 'drive';
+  minutes: number;
+  polygon: [number, number][]; // [lat, lng] ring
+}
+
 export interface AnalysisResult {
   summary: string;
   business_type: string;
@@ -121,6 +140,9 @@ export interface AnalysisResult {
   spec: AnalysisSpec;
   locations: LocationData[];
   grounding_sources: GroundingSource[];
+  /** Present only for v2 conversational-engine analyses */
+  hexGrid?: HexGridCell[];
+  catchments?: CatchmentOutline[];
 }
 
 export interface GroundingSource {

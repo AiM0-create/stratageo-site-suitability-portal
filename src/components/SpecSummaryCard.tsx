@@ -7,6 +7,8 @@ interface SpecSummaryCardProps {
   readyToExecute: boolean;
   isExecuting: boolean;
   onConfirmExecute: () => void;
+  /** When provided, layer weights become editable number inputs */
+  onSpecEdit?: (updated: SpecV2) => void;
 }
 
 function catchmentLabel(l: SpecV2['layers'][number]): string {
@@ -21,8 +23,19 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
   readyToExecute,
   isExecuting,
   onConfirmExecute,
+  onSpecEdit,
 }) => {
   const totalW = spec.layers.reduce((s, l) => s + l.weight, 0) || 1;
+
+  const handleWeightChange = (layerId: string, pct: number) => {
+    if (!onSpecEdit || !Number.isFinite(pct) || pct <= 0) return;
+    // Store the user's percent verbatim; the engine renormalizes ratios
+    const updated: SpecV2 = {
+      ...spec,
+      layers: spec.layers.map(l => (l.id === layerId ? { ...l, weight: pct } : l)),
+    };
+    onSpecEdit(updated);
+  };
   const area =
     spec.studyArea.type === 'places'
       ? (spec.studyArea.places || []).map(p => p.split(',')[0]).join(', ')
@@ -53,7 +66,22 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
                 {l.name}
                 {l.direction === 'negative' && <span className="spec-layer-neg" title="Lower is better">↓</span>}
               </td>
-              <td className="spec-layer-weight">{Math.round((l.weight / totalW) * 100)}%</td>
+              <td className="spec-layer-weight">
+                {onSpecEdit ? (
+                  <span className="spec-weight-edit">
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={Math.round((l.weight / totalW) * 100)}
+                      onChange={e => handleWeightChange(l.id, Number(e.target.value))}
+                      title="Edit weight — others renormalize proportionally"
+                    />%
+                  </span>
+                ) : (
+                  `${Math.round((l.weight / totalW) * 100)}%`
+                )}
+              </td>
               <td className="spec-layer-catchment">{catchmentLabel(l)}</td>
             </tr>
           ))}

@@ -1400,3 +1400,28 @@ body {
 }
 .spec-card-execute:hover { background: var(--blue-700, #1d4ed8); }
 .spec-card-execute:disabled { background: #94a3b8; cursor: not-allowed; }
+
+/* ─── Map legend: v2 layers (hex grid + catchments) ─── */
+.sg-legend-toggle { cursor: pointer; user-select: none; }
+.sg-legend-toggle input { margin-right: 4px; accent-color: var(--blue-600); vertical-align: -1px; }
+.sg-legend-gradient-row { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px 18px; }
+.sg-legend-gradient {
+  display: inline-block; width: 72px; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, hsl(0,78%,45%), hsl(65,78%,45%), hsl(130,78%,45%));
+}
+.sg-legend-gradient-labels { display: flex; justify-content: space-between; width: 26px; font-size: 9px; color: var(--gray-500, #64748b); gap: 2px; }
+.sg-legend-line {
+  display: inline-block; width: 16px; height: 0; border-top: 2px solid;
+  vertical-align: middle; margin-right: 6px;
+}
+.sg-legend-line-dashed { border-top-style: dashed; }
+
+/* Editable weight inputs in the spec card */
+.spec-weight-edit input {
+  width: 34px; padding: 1px 2px; font-size: 11px; font-weight: 700;
+  color: var(--blue-700, #1d4ed8); text-align: right;
+  border: 1px solid transparent; border-radius: 4px; background: transparent;
+}
+.spec-weight-edit input:hover, .spec-weight-edit input:focus {
+  border-color: var(--gray-300, #cbd5e1); background: #fff; outline: none;
+}

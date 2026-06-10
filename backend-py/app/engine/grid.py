@@ -54,3 +54,8 @@ def hex_distance_rings(a: str, b: str) -> int:
         return h3.grid_distance(a, b)
     except Exception:
         return 999
+
+
+def cell_boundary(h3_id: str) -> list[list[float]]:
+    """Hex boundary as [[lat, lng], ...] (closed ring not required by Leaflet)."""
+    return [[round(lat, 5), round(lng, 5)] for lat, lng in h3.cell_to_boundary(h3_id)]

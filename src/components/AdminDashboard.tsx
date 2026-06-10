@@ -72,8 +72,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                     <div className="sg-admin-card-label">Tokens Used</div>
                   </div>
                   <div className="sg-admin-card">
-                    <div className="sg-admin-card-value">~₹{((stats.totalTokens / 1_000_000) * 2.5).toFixed(1)}</div>
-                    <div className="sg-admin-card-label">Est. API Cost</div>
+                    <div className="sg-admin-card-value">~₹{stats.estCostINR.toFixed(0)}</div>
+                    <div className="sg-admin-card-label">Est. API Cost (per-model rates)</div>
                   </div>
                   <div className="sg-admin-card sg-admin-card-highlight">
                     <div className="sg-admin-card-value">{stats.usersAtLimit}</div>

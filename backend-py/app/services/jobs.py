@@ -24,6 +24,7 @@ from ..engine.data_places import fetch_places_pois
 from ..engine.grid import polyfill
 from ..engine.sandbox import run_custom_layer
 from ..engine.study_area import resolve_study_area, reverse_geocode_name
+from . import storage
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,33 @@ _lock = threading.Lock()
 def get_job(job_id: str) -> Job | None:
     _gc()
     return _jobs.get(job_id)
+
+
+async def get_job_state(job_id: str) -> dict | None:
+    """Job state for polling: in-memory first, GCS snapshot as restart fallback."""
+    job = get_job(job_id)
+    if job is not None:
+        return {
+            "status": job.status, "progress": job.progress, "phase": job.phase,
+            "message": job.message, "result": job.result, "error": job.error,
+        }
+    snap = await storage.get_json(f"jobs/{job_id}.json")
+    if snap is not None:
+        # An instance restart killed the worker mid-run: a snapshot that isn't
+        # terminal will never progress — surface that honestly.
+        if snap.get("status") not in ("done", "error"):
+            snap["status"] = "error"
+            snap["error"] = "The analysis was interrupted by a server restart — please run it again."
+            snap["message"] = snap["error"]
+        return snap
+    return None
+
+
+def _snapshot(job: Job) -> None:
+    storage.put_json_nowait(f"jobs/{job.id}.json", {
+        "status": job.status, "progress": job.progress, "phase": job.phase,
+        "message": job.message, "result": job.result, "error": job.error,
+    })
 
 
 def _gc():
@@ -75,6 +103,11 @@ def _run_in_thread(job: Job, spec: SpecV2) -> None:
         job.status = "error"
         job.error = str(e)[:1000]
         job.message = f"Analysis failed: {e}"
+    # Terminal snapshot (sync context — thread's loop has exited)
+    storage._put_sync(f"jobs/{job.id}.json", {
+        "status": job.status, "progress": job.progress, "phase": job.phase,
+        "message": job.message, "result": job.result, "error": job.error,
+    }) if storage.enabled() else None
 
 
 def _update(job: Job, progress: int, phase: str, message: str) -> None:
@@ -83,6 +116,7 @@ def _update(job: Job, progress: int, phase: str, message: str) -> None:
     job.phase = phase
     job.message = message
     logger.info("job %s [%d%%] %s — %s", job.id[:8], progress, phase, message)
+    _snapshot(job)
 
 
 async def _run_analysis(job: Job, spec: SpecV2) -> None:
@@ -176,6 +210,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
     # ── 6. Pass B — isochrone refinement (all layers fetched in parallel) ──
     iso_layers = [l for l in spec.layers if l.catchment.type in ("walk", "drive")]
+    iso_polygons: dict[tuple[str, int], object] = {}  # (layer_id, hex_index) → shapely poly
     refined_any = False
     if iso_layers and spec.execution.isochroneRefinement:
         _update(job, 70, "isochrones", f"Refining top {len(candidates)} candidates with isochrones...")
@@ -197,6 +232,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     scores[layer.id].refined[ci] = float(
                         count_pois_in_polygon(poly, layer_pois.get(layer.id, [])),
                     )
+                    # keep geometry for map display of the eventual winners
+                    iso_polygons[(layer.id, ci)] = poly
 
     # ── 7. Re-rank with refined values, take topN ───────────────────
     _update(job, 85, "score_pass_b", "Final ranking...")
@@ -230,6 +267,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     notes.extend(fallbacks)
     notes.extend(f"Unsupported: {u.requested} → {u.fallback}" for u in spec.meta.unsupportedRequests)
 
+    # ── Hex suitability surface for map choropleth ───────────────────
+    # All Pass-A composite scores (the engine computed them anyway). Capped at
+    # 3000 hexes by score so metro-scale grids don't bloat the payload.
+    hex_grid = results_mod.build_hex_grid(hexes, composite, excluded)
+
+    # ── Catchment outlines for the winners ───────────────────────────
+    catchments = results_mod.build_catchments(spec, iso_polygons, finals, locations)
+
     job.result = {
         "summary": summary,
         "business_type": spec.businessType,
@@ -238,6 +283,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "spec": results_mod.build_legacy_spec(spec, notes, len(hexes), res),
         "locations": locations,
         "grounding_sources": [],
+        "hexGrid": hex_grid,
+        "catchments": catchments,
     }
     job.status = "done"
     job.progress = 100

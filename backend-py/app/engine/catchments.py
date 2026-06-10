@@ -55,6 +55,25 @@ async def fetch_isochrones(
         else:
             todo.append(c)
 
+    # Persistent cache lookup for the misses (survives scale-to-zero;
+    # saves ORS free-tier quota on repeat analyses of the same area)
+    from ..services import storage
+    if storage.enabled() and todo:
+        from shapely.geometry import shape as shp
+        still_todo = []
+        for c in todo:
+            cached = await storage.get_json(f"iso/{c.h3_id}_{mode}_{minutes}.json")
+            if cached is not None:
+                try:
+                    poly = shp(cached)
+                    _iso_cache[(c.h3_id, mode, minutes)] = poly
+                    out[c.h3_id] = poly
+                    continue
+                except Exception:
+                    pass
+            still_todo.append(c)
+        todo = still_todo
+
     batch_size = s.ors_batch_size
     batches = [todo[i : i + batch_size] for i in range(0, len(todo), batch_size)]
 
@@ -73,6 +92,8 @@ async def fetch_isochrones(
             r.raise_for_status()
             data = r.json()
             # ORS returns one feature per location, group_index ties them back
+            from ..services import storage
+            from shapely.geometry import mapping as shp_mapping
             for feat in data.get("features", []):
                 gi = feat.get("properties", {}).get("group_index", 0)
                 if gi < len(batch):
@@ -80,6 +101,10 @@ async def fetch_isochrones(
                     cell = batch[gi]
                     _iso_cache[(cell.h3_id, mode, minutes)] = poly
                     out[cell.h3_id] = poly
+                    if storage.enabled():
+                        await storage.put_json(
+                            f"iso/{cell.h3_id}_{mode}_{minutes}.json", shp_mapping(poly),
+                        )
         except Exception as e:
             logger.warning("ORS isochrone batch failed (%s %dmin): %s", mode, minutes, e)
             # keep going — remaining batches may still succeed

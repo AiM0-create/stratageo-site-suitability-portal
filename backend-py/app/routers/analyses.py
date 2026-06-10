@@ -26,15 +26,7 @@ async def start_analysis(req: StartRequest):
 
 @router.get("/api/v2/analyses/{job_id}")
 async def get_analysis(job_id: str):
-    job = jobs.get_job(job_id)
-    if not job:
+    state = await jobs.get_job_state(job_id)
+    if state is None:
         raise HTTPException(404, "job not found or expired")
-    return {
-        "ok": True,
-        "status": job.status,
-        "progress": job.progress,
-        "phase": job.phase,
-        "message": job.message,
-        "result": job.result,
-        "error": job.error,
-    }
+    return {"ok": True, **state}

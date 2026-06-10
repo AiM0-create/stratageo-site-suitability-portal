@@ -64,6 +64,15 @@ const App: React.FC = () => {
   // Accumulated gpt-4o tokens across chat turns; logged with the execution entry
   const chatTokensRef = useRef(0);
 
+  // Restore the persisted spec draft when the session changes (refresh / switch)
+  useEffect(() => {
+    const persisted = (currentSession.chatSpec as SpecV2 | null) ?? null;
+    setChatSpec(persisted);
+    setChatSpecStatus(persisted ? 'draft' : 'empty');
+    setChatReady(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSession.id]);
+
   // ─── Dark mode ───
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try { return localStorage.getItem('sg-dark') === '1'; } catch { return false; }
@@ -210,6 +219,10 @@ const App: React.FC = () => {
     addMessage('user', rawPrompt, { intent: 'query' });
     setIsLoading(true);
     setAnalysisStatus({ message: 'Thinking…', progress: 30 });
+    // Cold start (Cloud Run scale-to-zero): explain the wait if it drags
+    const coldStartTimer = setTimeout(() => {
+      setAnalysisStatus({ message: 'Waking the analysis engine (cold start, ~15s)…', progress: 50 });
+    }, 5000);
     try {
       const history = [
         ...currentSession.messages.map(m => ({ role: m.role, content: m.text })),
@@ -219,21 +232,30 @@ const App: React.FC = () => {
         resultCount,
         csvPointCount: userPoints.length,
       });
+      clearTimeout(coldStartTimer);
       addMessage('assistant', resp.reply);
       if (resp.usage?.totalTokens) chatTokensRef.current += resp.usage.totalTokens;
       if (resp.spec) {
         setChatSpec(resp.spec as SpecV2);
         setChatSpecStatus(resp.specStatus);
+        dispatch({ type: 'UPDATE_SPEC', spec: resp.spec });
       }
       setChatReady(resp.readyToExecute && resp.specValid);
     } catch (err: any) {
+      clearTimeout(coldStartTimer);
       const msg = err?.message || 'Chat failed. Please try again.';
       setError(msg);
       addMessage('assistant', msg);
     } finally {
       setIsLoading(false);
     }
-  }, [currentSession.messages, chatSpec, resultCount, userPoints.length, addMessage]);
+  }, [currentSession.messages, chatSpec, resultCount, userPoints.length, addMessage, dispatch]);
+
+  // User edited the plan directly (e.g. a layer weight in the spec card)
+  const handleSpecEdit = useCallback((updated: SpecV2) => {
+    setChatSpec(updated);
+    dispatch({ type: 'UPDATE_SPEC', spec: updated });
+  }, [dispatch]);
 
   // ─── Execute the agreed spec (consumes one prompt credit) ───
   const handleConfirmExecute = useCallback(async () => {
@@ -1100,6 +1122,8 @@ const App: React.FC = () => {
         userPoints={userPoints}
         showBuffers={showBuffers}
         bufferRadiusM={spec?.userPointConstraints?.[0]?.radiusM}
+        hexGrid={result?.hexGrid}
+        catchments={result?.catchments}
       />
 
       <TopBar
@@ -1150,6 +1174,7 @@ const App: React.FC = () => {
         chatReady={chatReady}
         isExecuting={isExecuting}
         onConfirmExecute={handleConfirmExecute}
+        onSpecEdit={handleSpecEdit}
       />
 
       {result && (

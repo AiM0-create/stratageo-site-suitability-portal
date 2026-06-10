@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { LocationData, HeatmapType, UserPoint } from '../types';
+import type { LocationData, HeatmapType, UserPoint, HexGridCell, CatchmentOutline } from '../types';
 import { config } from '../config';
 
 declare const L: any;
@@ -17,7 +17,15 @@ interface MapViewProps {
   bufferRadiusM?: number;
   basemapId?: BasemapId;
   onBasemapChange?: (id: BasemapId) => void;
+  /** v2 engine layers (conversational analyses) */
+  hexGrid?: HexGridCell[];
+  catchments?: CatchmentOutline[];
 }
+
+/** Score 0-10 → red→amber→green ramp for the suitability surface */
+const hexColor = (score: number) => `hsl(${Math.round((Math.max(0, Math.min(10, score)) / 10) * 130)}, 78%, 45%)`;
+
+const CATCHMENT_COLORS: Record<string, string> = { walk: '#059669', drive: '#7c3aed' };
 
 const getMarkerIcon = (rank: number, isSelected: boolean, excluded: boolean) => {
   const color = excluded ? '#94a3b8' : isSelected ? '#1d4ed8' : '#059669';
@@ -45,6 +53,8 @@ export const MapView: React.FC<MapViewProps> = ({
   bufferRadiusM,
   basemapId = 'light',
   onBasemapChange,
+  hexGrid,
+  catchments,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -52,7 +62,11 @@ export const MapView: React.FC<MapViewProps> = ({
   const heatRef = useRef<any>(null);
   const userLayerRef = useRef<any>(null);
   const tileLayerRef = useRef<any>(null);
+  const hexLayerRef = useRef<any>(null);
+  const catchmentLayerRef = useRef<any>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [showHexGrid, setShowHexGrid] = useState(true);
+  const [showCatchments, setShowCatchments] = useState(true);
 
   // Initialize map
   useEffect(() => {
@@ -216,6 +230,78 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, [locations, selectedLocations, onSelectLocation, heatmapType]);
 
+  // ── Hex suitability surface (v2 engine choropleth) ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (hexLayerRef.current) {
+      map.removeLayer(hexLayerRef.current);
+      hexLayerRef.current = null;
+    }
+    if (!showHexGrid || !hexGrid || hexGrid.length === 0) return;
+
+    // Canvas renderer keeps thousands of polygons smooth
+    const renderer = L.canvas({ padding: 0.3 });
+    const group = L.layerGroup();
+    for (const cell of hexGrid) {
+      if (!Array.isArray(cell.boundary) || cell.boundary.length < 3) continue;
+      try {
+        const poly = L.polygon(cell.boundary, {
+          renderer,
+          stroke: false,
+          fillColor: cell.excluded ? '#64748b' : hexColor(cell.score),
+          fillOpacity: cell.excluded ? 0.15 : 0.18 + (cell.score / 10) * 0.32,
+          interactive: true,
+        });
+        poly.bindTooltip(
+          cell.excluded ? 'Excluded zone' : `Suitability: ${cell.score.toFixed(1)}/10`,
+          { sticky: true, direction: 'top', className: 'sg-tooltip-container' },
+        );
+        group.addLayer(poly);
+      } catch { /* skip malformed cell */ }
+    }
+    group.addTo(map);
+    hexLayerRef.current = group;
+  }, [hexGrid, showHexGrid]);
+
+  // ── Catchment isochrone outlines (v2 engine, selected location) ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (catchmentLayerRef.current) {
+      map.removeLayer(catchmentLayerRef.current);
+      catchmentLayerRef.current = null;
+    }
+    if (!showCatchments || !catchments || catchments.length === 0) return;
+
+    // Show catchments for the selected location, else for the #1 ranked one
+    const focusName = selectedLocations[0]?.name || locations.filter(l => !l.excluded)[0]?.name;
+    if (!focusName) return;
+    const relevant = catchments.filter(c => c.locationName === focusName);
+    if (relevant.length === 0) return;
+
+    const group = L.layerGroup();
+    for (const c of relevant) {
+      if (!Array.isArray(c.polygon) || c.polygon.length < 3) continue;
+      try {
+        const poly = L.polygon(c.polygon, {
+          color: CATCHMENT_COLORS[c.mode] || '#1d4ed8',
+          weight: 2,
+          dashArray: c.mode === 'drive' ? '8 5' : undefined,
+          fill: false,
+          interactive: true,
+        });
+        poly.bindTooltip(
+          `${c.minutes}-min ${c.mode} — ${c.layerName}`,
+          { sticky: true, direction: 'top', className: 'sg-tooltip-container' },
+        );
+        group.addLayer(poly);
+      } catch { /* skip */ }
+    }
+    group.addTo(map);
+    catchmentLayerRef.current = group;
+  }, [catchments, showCatchments, selectedLocations, locations]);
+
   // User-uploaded points layer
   useEffect(() => {
     const map = mapRef.current;
@@ -333,6 +419,38 @@ export const MapView: React.FC<MapViewProps> = ({
               <div className="sg-legend-item">
                 <span className="sg-legend-circle" /> Search Radius
               </div>
+            </>
+          )}
+          {hexGrid && hexGrid.length > 0 && (
+            <>
+              <label className="sg-legend-item sg-legend-toggle">
+                <input type="checkbox" checked={showHexGrid} onChange={e => setShowHexGrid(e.target.checked)} />
+                Suitability Grid
+              </label>
+              {showHexGrid && (
+                <div className="sg-legend-gradient-row">
+                  <span className="sg-legend-gradient" />
+                  <span className="sg-legend-gradient-labels"><span>0</span><span>10</span></span>
+                </div>
+              )}
+            </>
+          )}
+          {catchments && catchments.length > 0 && (
+            <>
+              <label className="sg-legend-item sg-legend-toggle">
+                <input type="checkbox" checked={showCatchments} onChange={e => setShowCatchments(e.target.checked)} />
+                Catchments
+              </label>
+              {showCatchments && (
+                <>
+                  <div className="sg-legend-item">
+                    <span className="sg-legend-line" style={{ borderColor: '#059669' }} /> Walk isochrone
+                  </div>
+                  <div className="sg-legend-item">
+                    <span className="sg-legend-line sg-legend-line-dashed" style={{ borderColor: '#7c3aed' }} /> Drive isochrone
+                  </div>
+                </>
+              )}
             </>
           )}
           {userPoints.length > 0 && (
