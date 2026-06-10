@@ -1366,3 +1366,33 @@ body {
   font-size: 12px; color: var(--blue-700);
 }
 .sg-share-banner a { color: var(--blue-700); font-weight: 600; }
+
+/* ─── Spec Summary Card (conversational mode, v1.0.1) ─── */
+.spec-card {
+  margin: 8px 0; padding: 10px 12px; border: 1px solid var(--gray-200, #e2e8f0);
+  border-radius: 10px; background: var(--gray-50, #f8fafc); font-size: 12px;
+}
+.spec-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.spec-card-title { font-weight: 700; font-size: 12px; color: var(--gray-700, #334155); text-transform: uppercase; letter-spacing: 0.04em; }
+.spec-card-status { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+.spec-card-status-complete { background: #dcfce7; color: #166534; }
+.spec-card-status-draft { background: #fef3c7; color: #92400e; }
+.spec-card-status-empty { background: #f1f5f9; color: #64748b; }
+.spec-card-row { margin: 2px 0; color: var(--gray-600, #475569); }
+.spec-card-table { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.spec-card-table td { padding: 2px 4px; border-top: 1px solid var(--gray-100, #f1f5f9); font-size: 11px; }
+.spec-layer-id { color: #94a3b8; font-weight: 600; width: 26px; }
+.spec-layer-name { color: var(--gray-700, #334155); }
+.spec-layer-neg { color: #dc2626; margin-left: 4px; font-weight: 700; }
+.spec-layer-weight { text-align: right; font-weight: 700; color: var(--blue-700, #1d4ed8); width: 40px; }
+.spec-layer-catchment { text-align: right; color: #64748b; width: 86px; }
+.spec-card-exclusions { color: #92400e; }
+.spec-card-unsupported { margin-top: 6px; padding: 6px 8px; background: #fef9c3; border-radius: 6px; }
+.spec-card-unsupported-item { font-size: 11px; color: #854d0e; margin: 2px 0; }
+.spec-card-execute {
+  display: block; width: 100%; margin-top: 8px; padding: 8px 12px;
+  background: var(--blue-600, #2563eb); color: #fff; font-weight: 700; font-size: 13px;
+  border: none; border-radius: 8px; cursor: pointer; transition: background 0.15s;
+}
+.spec-card-execute:hover { background: var(--blue-700, #1d4ed8); }
+.spec-card-execute:disabled { background: #94a3b8; cursor: not-allowed; }

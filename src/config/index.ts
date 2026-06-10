@@ -6,15 +6,23 @@ export const config = {
 
   mode: (import.meta.env.VITE_APP_MODE as 'demo' | 'live') || 'demo',
   aiBackendUrl: (import.meta.env.VITE_AI_BACKEND_URL || '').replace(/\/+$/, ''),
+  /** Python conversational engine (v1.0.1). When set with VITE_CONVERSATIONAL_MODE=1,
+   *  the chat becomes multi-turn and analyses run via /api/v2 on this host. */
+  pyBackendUrl: (import.meta.env.VITE_PY_BACKEND_URL || '').replace(/\/+$/, ''),
 
   /** Demo mode = no backend URL configured. If backend URL exists, we're live. */
   get isDemoMode(): boolean {
-    return !this.aiBackendUrl;
+    return !this.aiBackendUrl && !this.isConversationalMode;
   },
 
   /** Live mode = backend URL is configured (regardless of VITE_APP_MODE). */
   get isLiveMode(): boolean {
-    return !!this.aiBackendUrl;
+    return !!this.aiBackendUrl || this.isConversationalMode;
+  },
+
+  /** Conversational mode = Python backend configured + flag on. */
+  get isConversationalMode(): boolean {
+    return !!this.pyBackendUrl && import.meta.env.VITE_CONVERSATIONAL_MODE === '1';
   },
 
   map: {

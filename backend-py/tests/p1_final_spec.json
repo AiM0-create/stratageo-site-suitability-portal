@@ -1,0 +1,220 @@
+{
+  "version": "2.0",
+  "objective": "Site selection MCDA for a sweets-first QSR format in Kolkata",
+  "businessType": "sweets-first QSR",
+  "studyArea": {
+    "type": "places",
+    "places": [
+      "Chinar Park, Kolkata",
+      "Salt Lake, Kolkata",
+      "Sector V, Kolkata",
+      "Newtown, Kolkata"
+    ],
+    "hullBufferM": 500
+  },
+  "grid": {
+    "type": "h3",
+    "resolution": 9
+  },
+  "layers": [
+    {
+      "id": "L1",
+      "name": "Residential Population",
+      "weight": 25,
+      "direction": "positive",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "building=residential",
+          "landuse=residential"
+        ]
+      },
+      "catchment": {
+        "type": "walk",
+        "minutes": 10
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "10-min walk"
+    },
+    {
+      "id": "L4",
+      "name": "Food Cluster Whitespace & Ecosystem",
+      "weight": 17,
+      "direction": "negative",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "amenity=restaurant",
+          "amenity=cafe",
+          "amenity=fast_food"
+        ]
+      },
+      "catchment": {
+        "type": "euclidean",
+        "meters": 300
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "300m Euclidean"
+    },
+    {
+      "id": "L7",
+      "name": "Road Visibility & Commercial Frontage",
+      "weight": 10,
+      "direction": "positive",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "highway=primary",
+          "highway=secondary",
+          "highway=tertiary"
+        ]
+      },
+      "catchment": {
+        "type": "euclidean",
+        "meters": 100
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "Intersection + 100m Euclidean"
+    },
+    {
+      "id": "L5",
+      "name": "Affinity POIs - Temples/Markets",
+      "weight": 8,
+      "direction": "positive",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "amenity=place_of_worship",
+          "amenity=marketplace"
+        ]
+      },
+      "catchment": {
+        "type": "walk",
+        "minutes": 7
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "7-min walk"
+    },
+    {
+      "id": "L2",
+      "name": "Delivery Catchment Density",
+      "weight": 20,
+      "direction": "positive",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "building=residential",
+          "landuse=residential"
+        ]
+      },
+      "catchment": {
+        "type": "drive",
+        "minutes": 20
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "20-min drive"
+    },
+    {
+      "id": "L3",
+      "name": "Transit Proximity",
+      "weight": 10,
+      "direction": "positive",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "railway=station",
+          "public_transport=stop_position"
+        ]
+      },
+      "catchment": {
+        "type": "walk",
+        "minutes": 5
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "5-min walk"
+    },
+    {
+      "id": "L6",
+      "name": "Daytime Generators",
+      "weight": 5,
+      "direction": "positive",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "office=*",
+          "amenity=school",
+          "amenity=college"
+        ]
+      },
+      "catchment": {
+        "type": "drive",
+        "minutes": 10
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "10-min drive"
+    },
+    {
+      "id": "L8",
+      "name": "Apartment Cluster Density",
+      "weight": 5,
+      "direction": "positive",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "building=apartments"
+        ]
+      },
+      "catchment": {
+        "type": "euclidean",
+        "meters": 500
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "notes": "500m Euclidean"
+    }
+  ],
+  "exclusions": [],
+  "output": {
+    "topN": 3,
+    "minCandidateSeparationHexRings": 2
+  },
+  "execution": {
+    "isochroneRefinement": true,
+    "refineTopK": 25
+  },
+  "meta": {
+    "unsupportedRequests": [],
+    "clarificationsResolved": []
+  }
+}

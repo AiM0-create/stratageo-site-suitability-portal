@@ -4,6 +4,8 @@ import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, Heatma
 import type { BasemapId } from './components/MapView';
 import { config } from './config';
 import { runDemoAnalysis, runServerAnalysis } from './services/analysisService';
+import { sendChatTurn, startAnalysis, pollAnalysis } from './services/chatService';
+import type { SpecV2 } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
@@ -53,6 +55,12 @@ const App: React.FC = () => {
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [isSharedView, setIsSharedView] = useState(false);
   const [lastPrompt, setLastPrompt] = useState('');
+
+  // ─── Conversational mode (v1.0.1) ───
+  const [chatSpec, setChatSpec] = useState<SpecV2 | null>(null);
+  const [chatSpecStatus, setChatSpecStatus] = useState<'empty' | 'draft' | 'complete'>('empty');
+  const [chatReady, setChatReady] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
 
   // ─── Dark mode ───
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -194,7 +202,117 @@ const App: React.FC = () => {
     addMessage('assistant', 'CSV locations cleared.');
   }, [addMessage, updateMemory]);
 
+  // ─── Conversational turn (v1.0.1): chat with the methodology consultant ───
+  const handleChatTurn = useCallback(async (rawPrompt: string) => {
+    setError(null);
+    addMessage('user', rawPrompt, { intent: 'query' });
+    setIsLoading(true);
+    setAnalysisStatus({ message: 'Thinking…', progress: 30 });
+    try {
+      const history = [
+        ...currentSession.messages.map(m => ({ role: m.role, content: m.text })),
+        { role: 'user' as const, content: rawPrompt },
+      ];
+      const resp = await sendChatTurn(history, chatSpec, {
+        resultCount,
+        csvPointCount: userPoints.length,
+      });
+      addMessage('assistant', resp.reply);
+      if (resp.spec) {
+        setChatSpec(resp.spec as SpecV2);
+        setChatSpecStatus(resp.specStatus);
+      }
+      setChatReady(resp.readyToExecute && resp.specValid);
+    } catch (err: any) {
+      const msg = err?.message || 'Chat failed. Please try again.';
+      setError(msg);
+      addMessage('assistant', msg);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentSession.messages, chatSpec, resultCount, userPoints.length, addMessage]);
+
+  // ─── Execute the agreed spec (consumes one prompt credit) ───
+  const handleConfirmExecute = useCallback(async () => {
+    if (!chatSpec) return;
+    const canProceed = await consumePrompt();
+    if (!canProceed) {
+      setLimitModalOpen(true);
+      return;
+    }
+    const analysisStartTime = Date.now();
+    setIsExecuting(true);
+    setIsLoading(true);
+    setError(null);
+    setSelectedLocations([]);
+    setHeatmapType(null);
+    setAnalysisStatus({ message: 'Starting analysis…', progress: 2 });
+    try {
+      const jobId = await startAnalysis(chatSpec);
+      const analysisResultData = await pollAnalysis(jobId, setAnalysisStatus);
+
+      setResult(analysisResultData);
+      setSpec(analysisResultData.spec);
+      if (analysisResultData.locations.length > 0) {
+        const weights: Record<string, number> = {};
+        analysisResultData.locations[0].criteria_breakdown.forEach(c => { weights[c.name] = c.weight; });
+        setCustomWeights(weights);
+      }
+      setDrawerOpen(true);
+      setChatReady(false);
+
+      const top = analysisResultData.locations.filter(l => !l.excluded)[0];
+      addMessage('assistant', top
+        ? `Analysis complete — screened ${analysisResultData.spec.parsingNotes.find(n => n.includes('hexes'))?.match(/\d+ hexes/)?.[0] || 'the study area'}. ${top.name} ranks highest at ${top.mcda_score}/10.`
+        : analysisResultData.summary);
+
+      if (user) {
+        saveAnalysis(user.uid, user.email, lastPrompt || chatSpec.objective, analysisResultData, analysisResultData.spec).catch(() => {});
+        logPrompt({
+          userId: user.uid,
+          email: user.email,
+          prompt: chatSpec.objective,
+          sector: chatSpec.businessType,
+          city: analysisResultData.target_location || '',
+          latencyMs: Date.now() - analysisStartTime,
+          resultCount: analysisResultData.locations.length,
+          topScore: top?.mcda_score ?? null,
+          pdfExported: false,
+          isFollowUp: false,
+          tokensUsed: 0,
+          dataSource: 'hybrid' as any,
+        });
+      }
+
+      updateMemory({
+        businessType: chatSpec.businessType,
+        city: analysisResultData.target_location || null,
+        sectorId: 'conversational_v2',
+        constraints: (chatSpec.exclusions || []).map(e => e.name),
+        lastResultCount: analysisResultData.locations.length,
+        lastSearchRadiusM: analysisResultData.locations[0]?.searchRadiusM || null,
+        lastAnalysisTimestamp: new Date().toISOString(),
+      });
+      if (currentSession.title === 'New Analysis') {
+        dispatch({ type: 'SET_TITLE', title: `${chatSpec.businessType} — ${analysisResultData.target_location || 'study area'}` });
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Analysis failed. Please try again.';
+      setError(msg);
+      addMessage('assistant', msg);
+    } finally {
+      setIsExecuting(false);
+      setIsLoading(false);
+    }
+  }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch]);
+
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
+    // ─── Conversational mode: route to multi-turn chat, no immediate execution ───
+    if (config.isConversationalMode) {
+      setLastPrompt(rawPrompt);
+      return handleChatTurn(rawPrompt);
+    }
+
     // ─── Prompt limit check ───
     const canProceed = await consumePrompt();
     if (!canProceed) {
@@ -369,7 +487,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [resultCount, userPoints, currentSession.memory, currentSession.messages, currentSession.title, addMessage, updateMemory, dispatch, consumePrompt, user]);
+  }, [resultCount, userPoints, currentSession.memory, currentSession.messages, currentSession.title, addMessage, updateMemory, dispatch, consumePrompt, user, handleChatTurn]);
 
   const handleSelectLocation = useCallback((location: LocationData) => {
     const lat = Number(location.lat);
@@ -432,6 +550,9 @@ const App: React.FC = () => {
     setHeatmapType(null);
     setDrawerOpen(false);
     setUserPoints([]);
+    setChatSpec(null);
+    setChatSpecStatus('empty');
+    setChatReady(false);
     newSession();
   }, [newSession, result, spec, customWeights, userPoints, currentSession.id]);
 
@@ -1020,6 +1141,11 @@ const App: React.FC = () => {
         onNewChat={handleNewAnalysis}
         onClearMemoryField={clearMemoryField}
         sessionTitle={currentSession.title}
+        chatSpec={chatSpec}
+        chatSpecStatus={chatSpecStatus}
+        chatReady={chatReady}
+        isExecuting={isExecuting}
+        onConfirmExecute={handleConfirmExecute}
       />
 
       {result && (

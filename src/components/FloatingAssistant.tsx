@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { AnalysisStatus } from '../types';
 import type { WorkingMemory } from '../types/session';
+import type { SpecV2 } from '../types/chat';
 import { config } from '../config';
 import { demoScenarios } from '../data/demoScenarios';
 import { useAuth } from '../contexts/AuthContext';
 import { MAX_PROMPTS_PER_USER } from '../config/firebase';
+import { SpecSummaryCard } from './SpecSummaryCard';
 
 interface FloatingAssistantProps {
   messages: Array<{ role: 'user' | 'assistant'; text: string }>;
@@ -25,6 +27,12 @@ interface FloatingAssistantProps {
   onNewChat: () => void;
   onClearMemoryField: (field: keyof WorkingMemory) => void;
   sessionTitle: string;
+  // ─── Conversational mode (v1.0.1) ───
+  chatSpec?: SpecV2 | null;
+  chatSpecStatus?: 'empty' | 'draft' | 'complete';
+  chatReady?: boolean;
+  isExecuting?: boolean;
+  onConfirmExecute?: () => void;
 }
 
 const SCENARIOS = [
@@ -52,6 +60,11 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   onNewChat,
   onClearMemoryField,
   sessionTitle,
+  chatSpec,
+  chatSpecStatus = 'empty',
+  chatReady = false,
+  isExecuting = false,
+  onConfirmExecute,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
@@ -234,6 +247,17 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 </div>
               </div>
             ))}
+
+            {/* Conversational mode: agreed analysis plan + confirm chip */}
+            {config.isConversationalMode && chatSpec && !isLoading && (
+              <SpecSummaryCard
+                spec={chatSpec}
+                specStatus={chatSpecStatus}
+                readyToExecute={chatReady}
+                isExecuting={isExecuting}
+                onConfirmExecute={onConfirmExecute ?? (() => {})}
+              />
+            )}
 
             {isLoading && (
               <div className="assistant-msg assistant-msg-assistant">
