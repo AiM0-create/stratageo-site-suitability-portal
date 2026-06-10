@@ -75,6 +75,16 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   const [city, setCity] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the input with content (up to ~6 lines), shrink back when cleared
+  const autoGrow = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  };
+  useEffect(autoGrow, [input]);
 
   const promptsLeft = user ? (user.isAdmin ? Infinity : Math.max(0, MAX_PROMPTS_PER_USER - user.promptsUsed)) : 0;
 
@@ -420,8 +430,9 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
               </svg>
             </button>
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
