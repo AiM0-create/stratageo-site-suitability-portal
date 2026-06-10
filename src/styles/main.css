@@ -296,6 +296,8 @@ body {
   flex: 1; font-family: var(--font); font-size: 13px; padding: 7px 10px;
   border: 1px solid var(--gray-200); border-radius: var(--radius); background: rgba(255,255,255,0.7);
   color: var(--gray-800); outline: none; transition: border-color 0.12s;
+  /* textarea: auto-grows via JS up to ~6 lines, no manual resize handle */
+  resize: none; overflow-y: auto; max-height: 132px; line-height: 1.45;
 }
 .assistant-text-input:focus { border-color: var(--blue-600); }
 .assistant-text-input::placeholder { color: var(--gray-400); }
