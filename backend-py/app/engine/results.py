@@ -112,6 +112,64 @@ def build_location(
     }
 
 
+MAX_HEX_GRID_CELLS = 3000
+
+
+def build_hex_grid(hexes: list[HexCell], composite, excluded) -> list[dict]:
+    """Per-hex suitability surface: boundary polygon + 0-10 score for choropleth.
+    Excluded hexes carry excluded=True so the frontend can hatch/grey them."""
+    from .grid import cell_boundary
+
+    order = range(len(hexes))
+    if len(hexes) > MAX_HEX_GRID_CELLS:
+        import numpy as np
+        order = np.argsort(-composite)[:MAX_HEX_GRID_CELLS]
+    out = []
+    for i in order:
+        i = int(i)
+        out.append({
+            "h3": hexes[i].h3_id,
+            "score": round(float(composite[i]) * 10, 2),
+            "excluded": bool(excluded[i]),
+            "boundary": cell_boundary(hexes[i].h3_id),
+        })
+    return out
+
+
+def build_catchments(
+    spec: SpecV2,
+    iso_polygons: dict,           # (layer_id, hex_index) → shapely polygon
+    finals: list[int],
+    locations: list[dict],
+) -> list[dict]:
+    """Simplified isochrone outlines for each ranked location, for map display."""
+    catchments = []
+    layer_by_id = {l.id: l for l in spec.layers}
+    for rank_idx, ci in enumerate(finals):
+        loc_name = locations[rank_idx]["name"] if rank_idx < len(locations) else f"Candidate {rank_idx + 1}"
+        for (lid, hex_idx), poly in iso_polygons.items():
+            if hex_idx != ci:
+                continue
+            layer = layer_by_id.get(lid)
+            if layer is None:
+                continue
+            try:
+                simple = poly.simplify(0.0004, preserve_topology=True)
+                ring = [[round(lat, 5), round(lng, 5)] for lng, lat in simple.exterior.coords]
+            except Exception:
+                continue
+            catchments.append({
+                "locationName": loc_name,
+                "locationRank": rank_idx + 1,
+                "layerId": lid,
+                "layerName": layer.name,
+                "mode": layer.catchment.type,
+                "minutes": layer.catchment.minutes,
+                "polygon": ring,
+            })
+    return catchments
+
+
 def build_legacy_spec(spec: SpecV2, notes: list[str], hex_count: int, res: int) -> dict:
     """AnalysisSpec shape for ResultsDrawer's assumptions panel."""
     city = ""

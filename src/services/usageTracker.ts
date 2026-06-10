@@ -65,6 +65,8 @@ export interface AdminStats {
   totalUsers: number;
   totalPrompts: number;
   totalTokens: number;
+  /** Estimated INR spend, priced per-model: hybrid rows = gpt-4o, rest = gpt-4o-mini */
+  estCostINR: number;
   usersAtLimit: number;
   // Aggregate quality/throughput metrics (over the recent-prompts window)
   avgLatencyMs: number;
@@ -141,6 +143,15 @@ export async function fetchAdminStats(): Promise<AdminStats> {
     sourceCounts[source] = (sourceCounts[source] || 0) + 1;
   });
 
+  // ── Cost estimate: per-model blended INR/1M tokens ──
+  // gpt-4o ≈ $2.50/M in + $10/M out → input-heavy blend ≈ $3.5/M ≈ ₹300/M
+  // gpt-4o-mini ≈ $0.15/M in + $0.60/M out → blend ≈ $0.25/M ≈ ₹21/M
+  const RATE_INR_PER_M = { gpt4o: 300, mini: 21 };
+  const estCostINR = recentPrompts.reduce((sum, p) => {
+    const rate = p.dataSource === 'hybrid' ? RATE_INR_PER_M.gpt4o : RATE_INR_PER_M.mini;
+    return sum + (p.tokensUsed / 1_000_000) * rate;
+  }, 0);
+
   // ── Aggregates over the recent-prompts window ──
   const withLatency = recentPrompts.filter(p => p.latencyMs > 0);
   const avgLatencyMs = withLatency.length
@@ -186,6 +197,7 @@ export async function fetchAdminStats(): Promise<AdminStats> {
     totalUsers: users.length,
     totalPrompts: recentPrompts.length,
     totalTokens,
+    estCostINR,
     usersAtLimit,
     avgLatencyMs,
     avgTopScore,

@@ -33,6 +33,8 @@ export interface Session {
   messages: SessionMessage[];
   memory: WorkingMemory;
   archived: boolean;
+  /** Conversational-mode analysis spec draft (v1.0.1) — survives refresh */
+  chatSpec?: unknown | null;
 }
 
 export interface SessionIndexEntry {

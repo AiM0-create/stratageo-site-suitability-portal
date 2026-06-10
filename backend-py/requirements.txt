@@ -8,3 +8,4 @@ h3>=4.0
 shapely>=2.0
 numpy>=1.26
 scikit-learn>=1.5
+google-cloud-storage>=2.16

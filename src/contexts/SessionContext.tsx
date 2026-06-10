@@ -17,7 +17,8 @@ type SessionAction =
   | { type: 'UPDATE_MEMORY'; updates: Partial<WorkingMemory> }
   | { type: 'SWITCH_SESSION'; sessionId: string }
   | { type: 'SET_TITLE'; title: string }
-  | { type: 'CLEAR_MEMORY_FIELD'; field: keyof WorkingMemory };
+  | { type: 'CLEAR_MEMORY_FIELD'; field: keyof WorkingMemory }
+  | { type: 'UPDATE_SPEC'; spec: unknown | null };
 
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
@@ -100,6 +101,16 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         },
       };
     }
+
+    case 'UPDATE_SPEC':
+      return {
+        ...state,
+        currentSession: {
+          ...state.currentSession,
+          chatSpec: action.spec,
+          updatedAt: new Date().toISOString(),
+        },
+      };
 
     case 'CLEAR_MEMORY_FIELD': {
       const mem = { ...state.currentSession.memory };

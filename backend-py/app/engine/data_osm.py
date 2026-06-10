@@ -98,6 +98,17 @@ async def fetch_layer_pois(
     if hit and time.time() - hit[0] < CACHE_TTL:
         return hit[1]
 
+    # Persistent cache (survives Cloud Run scale-to-zero)
+    from ..services import storage
+    gcs_key = f"overpass/{storage.cache_key(key)}.json"
+    if storage.enabled():
+        cached = await storage.get_json(gcs_key)
+        if cached is not None and time.time() - cached.get("ts", 0) < CACHE_TTL:
+            pois = cached["pois"]
+            _cache[key] = (time.time(), pois)
+            logger.info("Overpass cache hit (GCS): %d POIs for %d tag(s)", len(pois), len(tags))
+            return pois
+
     query = _build_query(tags, bbox)
     last_err: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
@@ -120,6 +131,8 @@ async def fetch_layer_pois(
                     continue
                 pois.append({"lat": lat, "lng": lng, "tags": el.get("tags", {})})
             _cache[key] = (time.time(), pois)
+            if storage.enabled():
+                await storage.put_json(gcs_key, {"ts": time.time(), "pois": pois})
             logger.info("Overpass: %d POIs for %d tag(s) via %s", len(pois), len(tags), endpoint)
             return pois
         except Exception as e:

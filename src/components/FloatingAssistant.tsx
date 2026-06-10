@@ -33,6 +33,7 @@ interface FloatingAssistantProps {
   chatReady?: boolean;
   isExecuting?: boolean;
   onConfirmExecute?: () => void;
+  onSpecEdit?: (updated: SpecV2) => void;
 }
 
 const SCENARIOS = [
@@ -65,6 +66,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   chatReady = false,
   isExecuting = false,
   onConfirmExecute,
+  onSpecEdit,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
@@ -266,6 +268,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 readyToExecute={chatReady}
                 isExecuting={isExecuting}
                 onConfirmExecute={onConfirmExecute ?? (() => {})}
+                onSpecEdit={onSpecEdit}
               />
             )}
 
