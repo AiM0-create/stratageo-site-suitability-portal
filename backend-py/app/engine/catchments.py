@@ -56,34 +56,38 @@ async def fetch_isochrones(
             todo.append(c)
 
     batch_size = s.ors_batch_size
+    batches = [todo[i : i + batch_size] for i in range(0, len(todo), batch_size)]
+
+    async def run_batch(client: httpx.AsyncClient, batch: list[HexCell]) -> None:
+        await _rate_limit()
+        try:
+            r = await client.post(
+                f"{ORS_URL}/{ORS_PROFILE[mode]}",
+                json={
+                    "locations": [[c.lng, c.lat] for c in batch],
+                    "range": [minutes * 60],
+                    "range_type": "time",
+                },
+                headers={"Authorization": s.ors_api_key},
+            )
+            r.raise_for_status()
+            data = r.json()
+            # ORS returns one feature per location, group_index ties them back
+            for feat in data.get("features", []):
+                gi = feat.get("properties", {}).get("group_index", 0)
+                if gi < len(batch):
+                    poly = shape(feat["geometry"])
+                    cell = batch[gi]
+                    _iso_cache[(cell.h3_id, mode, minutes)] = poly
+                    out[cell.h3_id] = poly
+        except Exception as e:
+            logger.warning("ORS isochrone batch failed (%s %dmin): %s", mode, minutes, e)
+            # keep going — remaining batches may still succeed
+
+    # Batches fire concurrently; the token-bucket rate limiter keeps us under
+    # ORS's 20/min. Cuts the isochrone phase from sum(batches) to ~1 round trip.
     async with httpx.AsyncClient(timeout=60) as client:
-        for i in range(0, len(todo), batch_size):
-            batch = todo[i : i + batch_size]
-            await _rate_limit()
-            try:
-                r = await client.post(
-                    f"{ORS_URL}/{ORS_PROFILE[mode]}",
-                    json={
-                        "locations": [[c.lng, c.lat] for c in batch],
-                        "range": [minutes * 60],
-                        "range_type": "time",
-                    },
-                    headers={"Authorization": s.ors_api_key},
-                )
-                r.raise_for_status()
-                data = r.json()
-                feats = data.get("features", [])
-                # ORS returns one feature per location, group_index ties them back
-                for feat in feats:
-                    gi = feat.get("properties", {}).get("group_index", 0)
-                    if gi < len(batch):
-                        poly = shape(feat["geometry"])
-                        cell = batch[gi]
-                        _iso_cache[(cell.h3_id, mode, minutes)] = poly
-                        out[cell.h3_id] = poly
-            except Exception as e:
-                logger.warning("ORS isochrone batch failed (%s %dmin): %s", mode, minutes, e)
-                # keep going — remaining batches may still succeed
+        await asyncio.gather(*(run_batch(client, b) for b in batches))
     return out
 
 

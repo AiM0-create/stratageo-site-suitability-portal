@@ -61,6 +61,8 @@ const App: React.FC = () => {
   const [chatSpecStatus, setChatSpecStatus] = useState<'empty' | 'draft' | 'complete'>('empty');
   const [chatReady, setChatReady] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  // Accumulated gpt-4o tokens across chat turns; logged with the execution entry
+  const chatTokensRef = useRef(0);
 
   // ─── Dark mode ───
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -218,6 +220,7 @@ const App: React.FC = () => {
         csvPointCount: userPoints.length,
       });
       addMessage('assistant', resp.reply);
+      if (resp.usage?.totalTokens) chatTokensRef.current += resp.usage.totalTokens;
       if (resp.spec) {
         setChatSpec(resp.spec as SpecV2);
         setChatSpecStatus(resp.specStatus);
@@ -279,9 +282,10 @@ const App: React.FC = () => {
           topScore: top?.mcda_score ?? null,
           pdfExported: false,
           isFollowUp: false,
-          tokensUsed: 0,
+          tokensUsed: chatTokensRef.current,
           dataSource: 'hybrid' as any,
         });
+        chatTokensRef.current = 0;
       }
 
       updateMemory({

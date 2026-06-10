@@ -24,7 +24,10 @@ class Settings(BaseSettings):
 
     # Engine tuning
     max_hexes: int = 8000           # above this, degrade H3 resolution by 1
-    refine_top_k: int = 25          # candidates carried into isochrone Pass B
+    # Candidates carried into isochrone Pass B. 12 keeps the final top-3
+    # stable (Pass-A ordering rarely shifts >3-4 positions) while halving
+    # ORS round trips vs 25 → 2-3 batches per (mode, minutes) config.
+    refine_top_k: int = 12
     ors_batch_size: int = 5         # locations per ORS isochrone request
     walk_speed_m_per_min: float = 80.0    # 4.8 km/h
     drive_speed_m_per_min: float = 400.0  # 24 km/h urban average

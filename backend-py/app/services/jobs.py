@@ -174,14 +174,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     if not candidates:
         raise ValueError("no candidate hexes survived exclusion masking")
 
-    # ── 6. Pass B — isochrone refinement ────────────────────────────
+    # ── 6. Pass B — isochrone refinement (all layers fetched in parallel) ──
     iso_layers = [l for l in spec.layers if l.catchment.type in ("walk", "drive")]
     refined_any = False
     if iso_layers and spec.execution.isochroneRefinement:
         _update(job, 70, "isochrones", f"Refining top {len(candidates)} candidates with isochrones...")
         cand_cells = [hexes[i] for i in candidates]
-        for layer in iso_layers:
-            isos = await fetch_isochrones(cand_cells, layer.catchment.type, layer.catchment.minutes)
+        iso_results = await asyncio.gather(*(
+            fetch_isochrones(cand_cells, l.catchment.type, l.catchment.minutes)
+            for l in iso_layers
+        ))
+        for layer, isos in zip(iso_layers, iso_results):
             if not isos:
                 fallbacks.append(
                     f"Isochrones unavailable for '{layer.name}' — Euclidean proxy values kept.",
@@ -203,14 +206,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         reverse=True,
     )[: spec.output.topN]
 
-    # ── 8. Build result ─────────────────────────────────────────────
+    # ── 8. Build result (names resolved in parallel) ────────────────
     _update(job, 90, "explain", "Naming locations and writing summary...")
+    names = await asyncio.gather(*(
+        reverse_geocode_name(hexes[ci].lat, hexes[ci].lng) for ci in finals
+    ))
     locations = []
-    for rank, ci in enumerate(finals, 1):
-        cell = hexes[ci]
-        name = await reverse_geocode_name(cell.lat, cell.lng) or f"Candidate {rank}"
+    for rank, (ci, name) in enumerate(zip(finals, names), 1):
         locations.append(
-            results_mod.build_location(spec, hexes, ci, scores, layer_pois, name, rank),
+            results_mod.build_location(
+                spec, hexes, ci, scores, layer_pois, name or f"Candidate {rank}", rank,
+            ),
         )
 
     summary, reasonings = await results_mod.write_explanations(spec, locations)

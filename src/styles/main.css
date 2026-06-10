@@ -1198,6 +1198,8 @@ body {
 .sg-admin-bar-track { flex: 1; height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; }
 .sg-admin-bar-fill { height: 100%; background: var(--blue-600); border-radius: 4px; transition: width 0.3s; }
 .sg-admin-bar-fill-green { background: var(--green-600); }
+.sg-admin-bar-fill-purple { background: #7c3aed; }
+.sg-admin-bar-fill-amber { background: #d97706; }
 .sg-admin-bar-count { font-size: 11px; font-weight: 600; color: var(--gray-700); width: 24px; text-align: right; }
 
 .sg-admin-table { width: 100%; border-collapse: collapse; font-size: 12px; }

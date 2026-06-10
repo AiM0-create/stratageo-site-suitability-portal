@@ -79,6 +79,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                     <div className="sg-admin-card-value">{stats.usersAtLimit}</div>
                     <div className="sg-admin-card-label">Users at Limit ({MAX_PROMPTS_PER_USER}/{MAX_PROMPTS_PER_USER})</div>
                   </div>
+                  <div className="sg-admin-card">
+                    <div className="sg-admin-card-value">{stats.avgLatencyMs ? `${(stats.avgLatencyMs / 1000).toFixed(1)}s` : '—'}</div>
+                    <div className="sg-admin-card-label">Avg Latency</div>
+                  </div>
+                  <div className="sg-admin-card">
+                    <div className="sg-admin-card-value">{stats.avgTopScore != null ? stats.avgTopScore.toFixed(1) : '—'}</div>
+                    <div className="sg-admin-card-label">Avg Top Score</div>
+                  </div>
+                  <div className="sg-admin-card">
+                    <div className="sg-admin-card-value">{stats.promptsLast7d}</div>
+                    <div className="sg-admin-card-label">Analyses (7 days)</div>
+                  </div>
+                  <div className="sg-admin-card">
+                    <div className="sg-admin-card-value">{stats.followUpCount}</div>
+                    <div className="sg-admin-card-label">Follow-up Queries</div>
+                  </div>
+                  <div className="sg-admin-card">
+                    <div className="sg-admin-card-value">{stats.pdfExportCount}</div>
+                    <div className="sg-admin-card-label">PDF Exports</div>
+                  </div>
+                </div>
+
+                <div className="sg-admin-section">
+                  <h3>Top Score Distribution</h3>
+                  <div className="sg-admin-bars">
+                    {stats.scoreDistribution.map(b => (
+                      <div key={b.band} className="sg-admin-bar-row">
+                        <span className="sg-admin-bar-label">{b.band}</span>
+                        <div className="sg-admin-bar-track">
+                          <div
+                            className="sg-admin-bar-fill sg-admin-bar-fill-purple"
+                            style={{ width: `${(b.count / Math.max(1, ...stats.scoreDistribution.map(x => x.count))) * 100}%` }}
+                          />
+                        </div>
+                        <span className="sg-admin-bar-count">{b.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="sg-admin-section">
+                  <h3>Data Sources</h3>
+                  <div className="sg-admin-bars">
+                    {stats.dataSourceBreakdown.map(s => (
+                      <div key={s.name} className="sg-admin-bar-row">
+                        <span className="sg-admin-bar-label">{s.name === 'google-places' ? 'Places' : s.name === 'hybrid' ? 'Hybrid (v2 engine)' : s.name === 'demo' ? 'Demo' : 'OSM'}</span>
+                        <div className="sg-admin-bar-track">
+                          <div
+                            className="sg-admin-bar-fill sg-admin-bar-fill-amber"
+                            style={{ width: `${(s.count / Math.max(1, ...stats.dataSourceBreakdown.map(x => x.count))) * 100}%` }}
+                          />
+                        </div>
+                        <span className="sg-admin-bar-count">{s.count}</span>
+                      </div>
+                    ))}
+                    {stats.dataSourceBreakdown.length === 0 && <p className="sg-admin-empty">No data yet</p>}
+                  </div>
                 </div>
 
                 <div className="sg-admin-section">
@@ -174,9 +231,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                       <th>Sector</th>
                       <th>City</th>
                       <th>Score</th>
+                      <th>Results</th>
                       <th>Tokens</th>
                       <th>Source</th>
                       <th>Latency</th>
+                      <th>PDF</th>
                       <th>Time</th>
                     </tr>
                   </thead>
@@ -191,14 +250,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                         <td>{p.sector}</td>
                         <td>{p.city}</td>
                         <td>{p.topScore?.toFixed(1) || '-'}</td>
-                        <td>{p.tokensUsed || '-'}</td>
+                        <td>{p.resultCount || '-'}</td>
+                        <td>{p.tokensUsed ? p.tokensUsed.toLocaleString() : '-'}</td>
                         <td><span className={`sg-admin-source-badge sg-admin-source-${p.dataSource || 'osm'}`}>{p.dataSource === 'google-places' ? 'Places' : p.dataSource === 'hybrid' ? 'Hybrid' : p.dataSource === 'demo' ? 'Demo' : 'OSM'}</span></td>
                         <td>{(p.latencyMs / 1000).toFixed(1)}s</td>
+                        <td>{p.pdfExported ? '✓' : '-'}</td>
                         <td>{p.timestamp ? timeAgo(p.timestamp) : '-'}</td>
                       </tr>
                     ))}
                     {filteredPrompts.length === 0 && (
-                      <tr><td colSpan={9} className="sg-admin-empty">No prompts yet</td></tr>
+                      <tr><td colSpan={11} className="sg-admin-empty">No prompts yet</td></tr>
                     )}
                   </tbody>
                 </table>

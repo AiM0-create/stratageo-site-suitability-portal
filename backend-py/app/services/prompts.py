@@ -87,7 +87,7 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
     {{"name": "away from industrial", "source": {{"provider": "osm", "tags": ["landuse=industrial"]}}, "bufferM": 300}}
   ],
   "output": {{"topN": 3, "minCandidateSeparationHexRings": 2}},
-  "execution": {{"isochroneRefinement": true, "refineTopK": 25}},
+  "execution": {{"isochroneRefinement": true, "refineTopK": 12}},
   "meta": {{"unsupportedRequests": [{{"requested": "...", "fallback": "..."}}], "clarificationsResolved": []}}
 }}
 

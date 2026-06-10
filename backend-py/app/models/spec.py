@@ -121,7 +121,7 @@ class Output(BaseModel):
 
 class Execution(BaseModel):
     isochroneRefinement: bool = True
-    refineTopK: int = 25
+    refineTopK: int = 12   # server caps at settings.refine_top_k regardless
 
 
 class UnsupportedRequest(BaseModel):
