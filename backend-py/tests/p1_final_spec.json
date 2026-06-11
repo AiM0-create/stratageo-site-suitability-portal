@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "objective": "Site selection MCDA for a sweets-first QSR format in Kolkata",
-  "businessType": "sweets-first QSR",
+  "objective": "site selection MCDA for a sweets-first QSR format in Kolkata",
+  "businessType": "QSR",
   "studyArea": {
     "type": "places",
     "places": [
@@ -9,8 +9,7 @@
       "Salt Lake, Kolkata",
       "Sector V, Kolkata",
       "Newtown, Kolkata"
-    ],
-    "hullBufferM": 500
+    ]
   },
   "grid": {
     "type": "h3",
@@ -26,6 +25,7 @@
         "provider": "osm",
         "tags": [
           "building=residential",
+          "building=apartments",
           "landuse=residential"
         ]
       },
@@ -38,20 +38,21 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "10-min walk"
+      "confidence": "medium",
+      "whyItMatters": "Proximity to residential areas increases potential walk-in customers."
     },
     {
       "id": "L4",
       "name": "Food Cluster Whitespace & Ecosystem",
       "weight": 17,
-      "direction": "negative",
+      "direction": "positive",
       "source": {
-        "provider": "osm",
-        "tags": [
-          "amenity=restaurant",
-          "amenity=cafe",
-          "amenity=fast_food"
-        ]
+        "provider": "google_places",
+        "types": [
+          "restaurant",
+          "cafe"
+        ],
+        "keyword": null
       },
       "catchment": {
         "type": "euclidean",
@@ -62,7 +63,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "300m Euclidean"
+      "confidence": "medium",
+      "whyItMatters": "Presence of food clusters indicates a vibrant commercial ecosystem."
     },
     {
       "id": "L7",
@@ -86,7 +88,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "Intersection + 100m Euclidean"
+      "confidence": "medium",
+      "whyItMatters": "Visibility and accessibility from main roads enhance customer attraction."
     },
     {
       "id": "L5",
@@ -97,7 +100,7 @@
         "provider": "osm",
         "tags": [
           "amenity=place_of_worship",
-          "amenity=marketplace"
+          "shop=market"
         ]
       },
       "catchment": {
@@ -109,7 +112,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "7-min walk"
+      "confidence": "medium",
+      "whyItMatters": "Proximity to cultural and market areas can drive foot traffic."
     },
     {
       "id": "L2",
@@ -120,6 +124,7 @@
         "provider": "osm",
         "tags": [
           "building=residential",
+          "building=apartments",
           "landuse=residential"
         ]
       },
@@ -132,7 +137,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "20-min drive"
+      "confidence": "medium",
+      "whyItMatters": "Larger delivery catchments increase potential delivery orders."
     },
     {
       "id": "L3",
@@ -142,8 +148,8 @@
       "source": {
         "provider": "osm",
         "tags": [
-          "railway=station",
-          "public_transport=stop_position"
+          "public_transport=stop_position",
+          "railway=station"
         ]
       },
       "catchment": {
@@ -155,7 +161,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "5-min walk"
+      "confidence": "medium",
+      "whyItMatters": "Proximity to transit nodes increases accessibility for customers."
     },
     {
       "id": "L6",
@@ -165,9 +172,8 @@
       "source": {
         "provider": "osm",
         "tags": [
-          "office=*",
-          "amenity=school",
-          "amenity=college"
+          "office",
+          "commercial"
         ]
       },
       "catchment": {
@@ -179,7 +185,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "10-min drive"
+      "confidence": "medium",
+      "whyItMatters": "Presence of offices and commercial areas increases daytime foot traffic."
     },
     {
       "id": "L8",
@@ -201,7 +208,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "notes": "500m Euclidean"
+      "confidence": "medium",
+      "whyItMatters": "High density of apartments indicates a large potential customer base."
     }
   ],
   "exclusions": [],
@@ -211,7 +219,46 @@
   },
   "execution": {
     "isochroneRefinement": true,
-    "refineTopK": 25
+    "refineTopK": 12
+  },
+  "plan": {
+    "businessArchetype": "convenience_retail_qsr",
+    "spatialScale": "micro_market",
+    "methodology": "micro-market scoring with footfall catchments",
+    "assumptions": [
+      {
+        "assumption": "Study area defined by bounding box covering Chinar Park, Salt Lake, Sector V, and Newtown in Kolkata.",
+        "basis": "User's specified study area."
+      },
+      {
+        "assumption": "Grid resolution set to 9.",
+        "basis": "User's specified grid resolution."
+      }
+    ],
+    "misleadingVariables": [
+      {
+        "variable": "city-level population",
+        "risk": "Irrelevant at 500m scale for QSR."
+      },
+      {
+        "variable": "road density",
+        "risk": "Vehicular ≠ pedestrian footfall."
+      }
+    ],
+    "scenarios": [
+      {
+        "name": "Balanced",
+        "description": "Equal emphasis on all core and multiplier layers.",
+        "emphasis": "None"
+      }
+    ],
+    "validation": [
+      "Compare model scores at locations of established chains (McDonald's, Haldiram's outlets) — they should score above median."
+    ],
+    "modelFailureRisks": [
+      "OSM data may not fully capture informal settlements, affecting residential density accuracy.",
+      "Google Places data may not fully capture all food cluster POIs."
+    ]
   },
   "meta": {
     "unsupportedRequests": [],

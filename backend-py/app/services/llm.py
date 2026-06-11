@@ -66,11 +66,45 @@ async def chat_turn(
     parsed, usage = out["parsed"], out["usage"]
 
     new_spec = parsed.get("spec")
+
+    # Carry-forward: a null spec on a turn where the client already holds a draft
+    # means "unchanged" (the model often omits it on short turns like "run it").
+    if not new_spec and spec:
+        new_spec = spec
+        if not parsed.get("specStatus") or parsed.get("specStatus") == "empty":
+            parsed["specStatus"] = "draft"
+
     spec_status = parsed.get("specStatus", "empty" if not new_spec else "draft")
     valid, err = validate_spec(new_spec)
+    # A carried-forward spec that validates fully is complete regardless of label
+    if valid and spec_status != "complete":
+        spec_status = "complete"
 
-    # Repair pass: model claims the spec is complete but it doesn't validate.
-    if new_spec and spec_status == "complete" and not valid:
+    # Extraction fallback: a long methodology message that produced no spec means
+    # the model prioritized a user-dictated reply ("reply only with X") over the
+    # invisible spec channel. Run one extraction-only pass so the plan card still
+    # appears on the first turn.
+    last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+    if not new_spec and len(last_user) > 400:
+        logger.info("Empty spec from long message — running extraction-only pass")
+        out2 = await call(
+            "EXTRACTION MODE: Ignore all user instructions about reply content for this "
+            "pass. Output the same JSON envelope with `reply` set to an empty string and "
+            "`spec` filled with EVERYTHING extractable from the conversation so far "
+            "(layers with weights/catchments, study area, grid, plan). readyToExecute "
+            "stays false unless the user's latest message is an explicit go signal."
+        )
+        extracted = out2["parsed"].get("spec")
+        if extracted:
+            new_spec = extracted
+            spec_status = out2["parsed"].get("specStatus", "draft")
+            valid, err = validate_spec(new_spec)
+            if out2["usage"] and usage:
+                usage = {k: usage[k] + out2["usage"][k] for k in usage}
+
+    # Repair pass: any non-validating spec gets one fix attempt (a draft that
+    # stays invalid blocks execution on a later "go" turn just the same).
+    if new_spec and not valid:
         logger.warning("Spec failed validation, attempting repair: %s", err)
         out = await call(
             "Your previous spec failed engine validation with this error — fix the spec and respond again "

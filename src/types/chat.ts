@@ -19,7 +19,22 @@ export interface SpecLayer {
     minutes?: number;
   };
   normalization?: { method: 'percentile' | 'minmax'; pLow?: number; pHigh?: number };
+  // Consultant honesty fields (v1.0.1.2)
+  confidence?: 'high' | 'medium' | 'low';
+  whyItMatters?: string | null;
+  proxyWarning?: string | null;
   notes?: string | null;
+}
+
+export interface ConsultantPlan {
+  businessArchetype?: string;
+  spatialScale?: 'national' | 'city' | 'micro_market' | 'parcel' | 'network' | 'city_then_micro';
+  methodology?: string;
+  assumptions?: Array<{ assumption: string; basis?: string }>;
+  misleadingVariables?: Array<{ variable: string; risk?: string }>;
+  scenarios?: Array<{ name: string; description?: string; emphasis?: string }>;
+  validation?: string[];
+  modelFailureRisks?: string[];
 }
 
 export interface SpecV2 {
@@ -39,6 +54,7 @@ export interface SpecV2 {
   exclusions?: Array<{ name: string; source: { provider: 'osm'; tags: string[] }; bufferM?: number }>;
   output?: { topN: number; minCandidateSeparationHexRings?: number };
   execution?: { isochroneRefinement: boolean; refineTopK?: number };
+  plan?: ConsultantPlan;
   meta?: {
     unsupportedRequests?: Array<{ requested: string; fallback: string }>;
     clarificationsResolved?: string[];

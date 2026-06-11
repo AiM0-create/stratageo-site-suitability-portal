@@ -47,6 +47,13 @@ class Grid(BaseModel):
         return max(7, min(10, v))
 
 
+# OSM keys that can stand alone as "key=*" wildcards
+_OSM_KEYS = {
+    "office", "shop", "building", "landuse", "leisure", "tourism", "natural",
+    "highway", "railway", "power", "amenity", "waterway", "man_made", "healthcare",
+}
+
+
 class OsmSource(BaseModel):
     provider: Literal["osm"] = "osm"
     tags: list[str] = Field(min_length=1)        # ["railway=station", "amenity=cafe"]
@@ -54,7 +61,19 @@ class OsmSource(BaseModel):
     @field_validator("tags")
     @classmethod
     def tags_have_kv(cls, v: list[str]) -> list[str]:
-        cleaned = [t.strip() for t in v if isinstance(t, str) and "=" in t]
+        """Normalize LLM tag sloppiness instead of failing the whole spec:
+        'office' (a key) → 'office=*'; 'school' (a value) → 'amenity=school'."""
+        cleaned: list[str] = []
+        for t in v:
+            if not isinstance(t, str) or not t.strip():
+                continue
+            t = t.strip()
+            if "=" in t:
+                cleaned.append(t)
+            elif t in _OSM_KEYS:
+                cleaned.append(f"{t}=*")
+            else:
+                cleaned.append(f"amenity={t}")
         if not cleaned:
             raise ValueError("osm source needs at least one key=value tag")
         return cleaned
@@ -100,6 +119,10 @@ class Layer(BaseModel):
     source: OsmSource | PlacesSource | CustomSource = Field(discriminator="provider")
     catchment: Catchment
     normalization: Normalization = Normalization()
+    # Consultant honesty fields (v1.0.1.2)
+    confidence: Literal["high", "medium", "low"] = "medium"
+    whyItMatters: Optional[str] = None            # one line tying factor → success metric
+    proxyWarning: Optional[str] = None            # plain-language weakness for weak proxies
     notes: Optional[str] = None
 
 
@@ -129,6 +152,37 @@ class UnsupportedRequest(BaseModel):
     fallback: str
 
 
+# ─── Consultant plan metadata (v1.0.1.2) ──────────────────────────────────────
+
+class PlanAssumption(BaseModel):
+    assumption: str
+    basis: str = ""
+
+
+class MisleadingVariable(BaseModel):
+    variable: str
+    risk: str = ""
+
+
+class Scenario(BaseModel):
+    name: str
+    description: str = ""
+    emphasis: str = ""                            # which layers gain weight in this scenario
+
+
+class ConsultantPlan(BaseModel):
+    businessArchetype: str = "generic"
+    spatialScale: Literal[
+        "national", "city", "micro_market", "parcel", "network", "city_then_micro"
+    ] = "micro_market"
+    methodology: str = ""
+    assumptions: list[PlanAssumption] = []
+    misleadingVariables: list[MisleadingVariable] = []
+    scenarios: list[Scenario] = []
+    validation: list[str] = []
+    modelFailureRisks: list[str] = []
+
+
 class SpecMeta(BaseModel):
     unsupportedRequests: list[UnsupportedRequest] = []
     clarificationsResolved: list[str] = []
@@ -144,6 +198,7 @@ class SpecV2(BaseModel):
     exclusions: list[Exclusion] = []
     output: Output = Output()
     execution: Execution = Execution()
+    plan: ConsultantPlan = ConsultantPlan()
     meta: SpecMeta = SpecMeta()
 
     @model_validator(mode="after")
