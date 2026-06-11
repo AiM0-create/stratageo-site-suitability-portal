@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from openai import AsyncOpenAI
 
@@ -19,6 +20,22 @@ from .prompts import chat_system_prompt
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY = 30
+
+# Deterministic go-signal detection — the model's readyToExecute flag is
+# inconsistent across turns, so an unambiguous user go on a valid, feasible
+# spec is honored server-side (the UI still requires a confirm click).
+GO_SIGNAL = re.compile(
+    r"\b(run it|go ahead|execute|start (the )?(analysis|step)|proceed|chalo|shuru karo|run the analysis)\b",
+    re.IGNORECASE,
+)
+NO_GO = re.compile(
+    r"\b(don'?t|do not|never|not yet|stop|wait|hold|before (you )?(run|execut))\b",
+    re.IGNORECASE,
+)
+
+
+def is_go_signal(text: str) -> bool:
+    return bool(GO_SIGNAL.search(text)) and not NO_GO.search(text)
 
 
 def _client() -> AsyncOpenAI:
@@ -122,11 +139,27 @@ async def chat_turn(
         spec_status = "draft"
     ready = bool(parsed.get("readyToExecute")) and valid
 
+    # Deterministic go: an unambiguous user go-signal on a valid spec counts even
+    # when the model under-reports readyToExecute (observed gpt-4o inconsistency).
+    if not ready and valid and is_go_signal(last_user_text := next(
+        (m.content for m in reversed(messages) if m.role == "user"), "",
+    )):
+        logger.info("Server-side go-signal honored: %r", last_user_text[:60])
+        ready = True
+
+    # ── Feasibility-first gate (server-side, prompt-independent) ──────────
+    # A not_feasible plan can NEVER execute, even on an explicit go signal —
+    # the model's reply explains conflicts/relaxations instead of ranking.
+    feasibility = (new_spec or {}).get("feasibility") if isinstance(new_spec, dict) else None
+    if feasibility and feasibility.get("status") == "not_feasible":
+        ready = False
+
     return ChatResponse(
         reply=parsed.get("reply", ""),
         spec=new_spec,
         specStatus=spec_status if spec_status in ("empty", "draft", "complete") else "draft",
         readyToExecute=ready,
+        feasibility=feasibility if isinstance(feasibility, dict) else None,
         unsupported=[
             u for u in (parsed.get("unsupported") or [])
             if isinstance(u, dict) and u.get("requested") and u.get("fallback")

@@ -26,6 +26,21 @@ export interface SpecLayer {
   notes?: string | null;
 }
 
+export interface ConstraintItem {
+  constraint: string;
+  type: 'hard' | 'soft';
+  status: 'satisfiable' | 'conflicting' | 'unvalidatable';
+  notes?: string;
+}
+
+export interface FeasibilityCheck {
+  status: 'feasible' | 'tradeoffs' | 'not_feasible' | 'insufficient_data';
+  explanation?: string;
+  conflicts?: string[];
+  relaxationOptions?: string[];
+  unvalidatable?: string[];
+}
+
 export interface ConsultantPlan {
   businessArchetype?: string;
   spatialScale?: 'national' | 'city' | 'micro_market' | 'parcel' | 'network' | 'city_then_micro';
@@ -55,6 +70,8 @@ export interface SpecV2 {
   output?: { topN: number; minCandidateSeparationHexRings?: number };
   execution?: { isochroneRefinement: boolean; refineTopK?: number };
   plan?: ConsultantPlan;
+  constraints?: ConstraintItem[];
+  feasibility?: FeasibilityCheck;
   meta?: {
     unsupportedRequests?: Array<{ requested: string; fallback: string }>;
     clarificationsResolved?: string[];
@@ -67,6 +84,7 @@ export interface ChatTurnResponse {
   spec: SpecV2 | null;
   specStatus: 'empty' | 'draft' | 'complete';
   readyToExecute: boolean;
+  feasibility?: FeasibilityCheck | null;
   unsupported: Array<{ requested: string; fallback: string }>;
   specValid: boolean;
   specValidationError: string | null;

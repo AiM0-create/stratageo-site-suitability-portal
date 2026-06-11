@@ -30,6 +30,7 @@ class ChatResponse(BaseModel):
     spec: Optional[dict] = None
     specStatus: Literal["empty", "draft", "complete"] = "empty"
     readyToExecute: bool = False
+    feasibility: Optional[dict] = None   # {status, explanation, conflicts, relaxationOptions, unvalidatable}
     unsupported: list[UnsupportedRequest] = []
     specValid: bool = False              # true when spec passes full SpecV2 validation
     specValidationError: Optional[str] = None

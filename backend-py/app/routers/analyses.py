@@ -16,6 +16,15 @@ class StartRequest(BaseModel):
 
 @router.post("/api/v2/analyses")
 async def start_analysis(req: StartRequest):
+    # Feasibility gate FIRST (raw check) — an infeasible plan often has no layers,
+    # which would otherwise fail schema validation and mask the real reason (409 > 422).
+    feas = (req.spec or {}).get("feasibility") or {}
+    if feas.get("status") == "not_feasible":
+        raise HTTPException(409, {
+            "error": "Plan is marked NOT FEASIBLE — execution refused.",
+            "conflicts": feas.get("conflicts", []),
+            "relaxationOptions": feas.get("relaxationOptions", []),
+        })
     try:
         spec = SpecV2.model_validate(req.spec)
     except ValidationError as e:
