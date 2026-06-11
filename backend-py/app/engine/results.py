@@ -68,14 +68,20 @@ def build_location(
             f" (true {_catchment_label(layer)} isochrone)" if d["refined"]
             else (f" (Euclidean proxy ≈{int(d['proxyRadiusM'])}m)" if layer.catchment.type in ("walk", "drive") else "")
         )
+        just = f"{int(raw)} features within {_catchment_label(layer)}{refinement_note}."
+        if layer.whyItMatters:
+            just += f" {layer.whyItMatters}"
+        if layer.proxyWarning:
+            just += f" ⚠ Proxy caveat: {layer.proxyWarning}"
         criteria.append({
             "name": layer.name,
             "weight": layer.weight,
             "score": norm_score,
             "rawValue": float(raw),
             "direction": layer.direction,
-            "justification": f"{int(raw)} features within {_catchment_label(layer)}{refinement_note}.",
-            "evidenceBasis": _evidence_basis(d, raw, layer.source.provider),
+            "justification": just,
+            "evidenceBasis": _evidence_basis(d, raw, layer.source.provider)
+                if layer.confidence != "low" else "ai-generated",
             "osmQuery": ", ".join(layer.source.tags) if layer.source.provider == "osm" else None,
         })
         osm_signals[_signal_key(layer.name)] = int(raw)
@@ -202,7 +208,10 @@ def build_legacy_spec(spec: SpecV2, notes: list[str], hex_count: int, res: int) 
 
 def build_methodology(spec: SpecV2, hex_count: int, res: int, refined: bool, fallbacks: list[str]) -> str:
     iso_layers = [l.name for l in spec.layers if l.catchment.type in ("walk", "drive")]
-    parts = [
+    parts = []
+    if spec.plan.methodology:
+        parts.append(spec.plan.methodology)
+    parts += [
         f"H3 hexagonal grid at resolution {res} ({hex_count} cells) over the study area.",
         f"{len(spec.layers)} weighted layers scored per hex with "
         f"{spec.layers[0].normalization.method} normalization; weighted-sum composite (weights preserved from spec).",

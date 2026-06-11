@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { AnalysisStatus } from '../types';
 import type { WorkingMemory } from '../types/session';
 import type { SpecV2 } from '../types/chat';
@@ -255,7 +257,13 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               <div key={i} className={`assistant-msg assistant-msg-${msg.role}`}>
                 {msg.role === 'assistant' && <div className="assistant-avatar" />}
                 <div className={`assistant-bubble assistant-bubble-${msg.role}`}>
-                  {msg.text}
+                  {msg.role === 'assistant' ? (
+                    <div className="assistant-markdown">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    msg.text
+                  )}
                 </div>
               </div>
             ))}
