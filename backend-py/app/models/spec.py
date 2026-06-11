@@ -152,6 +152,27 @@ class UnsupportedRequest(BaseModel):
     fallback: str
 
 
+# ─── Feasibility-first gate (v1.0.1.3) ────────────────────────────────────────
+
+class ConstraintItem(BaseModel):
+    constraint: str                               # "rent ≤ ₹20/sq ft"
+    type: Literal["hard", "soft"] = "hard"        # "must" → hard, "prefer" → soft
+    status: Literal[
+        "satisfiable",       # data supports it
+        "conflicting",       # contradicts another hard constraint
+        "unvalidatable",     # no data to prove it (e.g. rent) — confidence downgrade
+    ] = "satisfiable"
+    notes: str = ""
+
+
+class FeasibilityCheck(BaseModel):
+    status: Literal["feasible", "tradeoffs", "not_feasible", "insufficient_data"] = "feasible"
+    explanation: str = ""
+    conflicts: list[str] = []                     # which hard constraints clash, and why
+    relaxationOptions: list[str] = []             # minimum relaxations to become feasible
+    unvalidatable: list[str] = []                 # hard constraints we cannot prove with data
+
+
 # ─── Consultant plan metadata (v1.0.1.2) ──────────────────────────────────────
 
 class PlanAssumption(BaseModel):
@@ -199,6 +220,8 @@ class SpecV2(BaseModel):
     output: Output = Output()
     execution: Execution = Execution()
     plan: ConsultantPlan = ConsultantPlan()
+    constraints: list[ConstraintItem] = []
+    feasibility: FeasibilityCheck = FeasibilityCheck()
     meta: SpecMeta = SpecMeta()
 
     @model_validator(mode="after")

@@ -1,7 +1,7 @@
 {
   "version": "2.0",
   "objective": "site selection MCDA for a sweets-first QSR format in Kolkata",
-  "businessType": "QSR",
+  "businessType": "sweets-first QSR",
   "studyArea": {
     "type": "places",
     "places": [
@@ -33,12 +33,7 @@
         "type": "walk",
         "minutes": 10
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
-      "confidence": "medium",
+      "confidence": "high",
       "whyItMatters": "Proximity to residential areas increases potential walk-in customers."
     },
     {
@@ -47,24 +42,18 @@
       "weight": 17,
       "direction": "positive",
       "source": {
-        "provider": "google_places",
-        "types": [
-          "restaurant",
-          "cafe"
-        ],
-        "keyword": null
+        "provider": "osm",
+        "tags": [
+          "amenity=restaurant",
+          "amenity=cafe"
+        ]
       },
       "catchment": {
         "type": "euclidean",
         "meters": 300
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
       "confidence": "medium",
-      "whyItMatters": "Presence of food clusters indicates a vibrant commercial ecosystem."
+      "whyItMatters": "Identifying areas with less food competition can capture unmet demand."
     },
     {
       "id": "L7",
@@ -75,21 +64,15 @@
         "provider": "osm",
         "tags": [
           "highway=primary",
-          "highway=secondary",
-          "highway=tertiary"
+          "highway=secondary"
         ]
       },
       "catchment": {
         "type": "euclidean",
         "meters": 100
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
       "confidence": "medium",
-      "whyItMatters": "Visibility and accessibility from main roads enhance customer attraction."
+      "whyItMatters": "High visibility increases brand awareness and foot traffic."
     },
     {
       "id": "L5",
@@ -107,13 +90,8 @@
         "type": "walk",
         "minutes": 7
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
       "confidence": "medium",
-      "whyItMatters": "Proximity to cultural and market areas can drive foot traffic."
+      "whyItMatters": "Proximity to affinity POIs can drive additional foot traffic."
     },
     {
       "id": "L2",
@@ -132,13 +110,8 @@
         "type": "drive",
         "minutes": 20
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
-      "confidence": "medium",
-      "whyItMatters": "Larger delivery catchments increase potential delivery orders."
+      "confidence": "high",
+      "whyItMatters": "Larger delivery catchment increases potential delivery orders."
     },
     {
       "id": "L3",
@@ -156,12 +129,7 @@
         "type": "walk",
         "minutes": 5
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
-      "confidence": "medium",
+      "confidence": "high",
       "whyItMatters": "Proximity to transit nodes increases accessibility for customers."
     },
     {
@@ -173,20 +141,16 @@
         "provider": "osm",
         "tags": [
           "office",
-          "commercial"
+          "school",
+          "university"
         ]
       },
       "catchment": {
         "type": "drive",
         "minutes": 10
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
       "confidence": "medium",
-      "whyItMatters": "Presence of offices and commercial areas increases daytime foot traffic."
+      "whyItMatters": "Nearby daytime population can boost lunch-time sales."
     },
     {
       "id": "L8",
@@ -203,13 +167,8 @@
         "type": "euclidean",
         "meters": 500
       },
-      "normalization": {
-        "method": "percentile",
-        "pLow": 5,
-        "pHigh": 95
-      },
       "confidence": "medium",
-      "whyItMatters": "High density of apartments indicates a large potential customer base."
+      "whyItMatters": "Dense apartment clusters indicate potential customer base."
     }
   ],
   "exclusions": [],
@@ -221,43 +180,43 @@
     "isochroneRefinement": true,
     "refineTopK": 12
   },
+  "constraints": [],
+  "feasibility": {
+    "status": "feasible",
+    "explanation": "The study area and layers are well-defined with no conflicting constraints."
+  },
   "plan": {
     "businessArchetype": "convenience_retail_qsr",
     "spatialScale": "micro_market",
     "methodology": "micro-market scoring with footfall catchments",
     "assumptions": [
       {
-        "assumption": "Study area defined by bounding box covering Chinar Park, Salt Lake, Sector V, and Newtown in Kolkata.",
-        "basis": "User's specified study area."
-      },
-      {
-        "assumption": "Grid resolution set to 9.",
-        "basis": "User's specified grid resolution."
+        "assumption": "Study area includes Chinar Park, Salt Lake, Sector V, and Newtown in Kolkata.",
+        "basis": "User specified bounding box covering these areas."
       }
     ],
     "misleadingVariables": [
       {
         "variable": "city-level population",
-        "risk": "Irrelevant at 500m scale for QSR."
+        "risk": "Irrelevant at 500m scale for micro-market analysis."
       },
       {
         "variable": "road density",
-        "risk": "Vehicular ≠ pedestrian footfall."
+        "risk": "Vehicular traffic does not equate to pedestrian footfall."
       }
     ],
     "scenarios": [
       {
         "name": "Balanced",
-        "description": "Equal emphasis on all core and multiplier layers.",
-        "emphasis": "None"
+        "description": "Equal emphasis on residential and commercial factors.",
+        "emphasis": "L1 and L7 gain weight."
       }
     ],
     "validation": [
       "Compare model scores at locations of established chains (McDonald's, Haldiram's outlets) — they should score above median."
     ],
     "modelFailureRisks": [
-      "OSM data may not fully capture informal settlements, affecting residential density accuracy.",
-      "Google Places data may not fully capture all food cluster POIs."
+      "OSM residential counts may understate informal settlements, affecting catchment analysis."
     ]
   },
   "meta": {

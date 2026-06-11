@@ -26,6 +26,13 @@ const SCALE_LABELS: Record<string, string> = {
   city_then_micro: 'City → micro-market',
 };
 
+const FEASIBILITY_META: Record<string, { icon: string; label: string; cls: string }> = {
+  feasible: { icon: '✅', label: 'Feasible', cls: 'feasible' },
+  tradeoffs: { icon: '⚠️', label: 'Feasible with tradeoffs', cls: 'tradeoffs' },
+  not_feasible: { icon: '❌', label: 'Not feasible as specified', cls: 'not-feasible' },
+  insufficient_data: { icon: '❓', label: 'Insufficient data — using labeled proxies', cls: 'insufficient' },
+};
+
 const Collapsible: React.FC<{ title: string; defaultOpen?: boolean; badgeClass?: string; children: React.ReactNode }> = ({
   title, defaultOpen = false, badgeClass, children,
 }) => {
@@ -69,6 +76,8 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
         : 'point + radius';
   const unsupported = spec.meta?.unsupportedRequests || [];
   const weakProxies = spec.layers.filter(l => l.confidence === 'low' || l.proxyWarning);
+  // Not-feasible plans show the conflict + options instead of factors/execute
+  const blocked = spec.feasibility?.status === 'not_feasible';
 
   return (
     <div className="spec-card">
@@ -80,6 +89,54 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
       </div>
 
       <div className="spec-card-row"><strong>{spec.businessType}</strong></div>
+
+      {/* ── Feasibility gate banner ── */}
+      {spec.feasibility && spec.feasibility.status && (
+        <div className={`spec-feasibility spec-feasibility-${(FEASIBILITY_META[spec.feasibility.status] || FEASIBILITY_META.feasible).cls}`}>
+          <div className="spec-feasibility-status">
+            {(FEASIBILITY_META[spec.feasibility.status] || FEASIBILITY_META.feasible).icon}{' '}
+            {(FEASIBILITY_META[spec.feasibility.status] || FEASIBILITY_META.feasible).label}
+          </div>
+          {spec.feasibility.explanation && <div className="spec-feasibility-why">{spec.feasibility.explanation}</div>}
+          {(spec.feasibility.conflicts?.length ?? 0) > 0 && (
+            <ul className="spec-list">
+              {spec.feasibility.conflicts!.map((c, i) => <li key={i}>{c}</li>)}
+            </ul>
+          )}
+          {(spec.feasibility.relaxationOptions?.length ?? 0) > 0 && (
+            <>
+              <div className="spec-subhead">Options to proceed</div>
+              <ul className="spec-list">
+                {spec.feasibility.relaxationOptions!.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </>
+          )}
+          {(spec.feasibility.unvalidatable?.length ?? 0) > 0 && (
+            <div className="spec-feasibility-unvalidatable">
+              Cannot be validated from data: {spec.feasibility.unvalidatable!.join('; ')}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Constraint table (when the user gave explicit constraints) ── */}
+      {(spec.constraints?.length ?? 0) > 0 && (
+        <Collapsible title={`Constraints (${spec.constraints!.length})`} defaultOpen={spec.feasibility?.status === 'not_feasible'}>
+          <table className="spec-card-table">
+            <thead><tr><th>Constraint</th><th>Type</th><th>Status</th></tr></thead>
+            <tbody>
+              {spec.constraints!.map((c, i) => (
+                <tr key={i} className={c.status === 'conflicting' ? 'spec-row-conflict' : c.status === 'unvalidatable' ? 'spec-row-weak-proxy' : ''}>
+                  <td className="spec-layer-name" title={c.notes || undefined}>{c.constraint}</td>
+                  <td><span className={`spec-constraint-type spec-constraint-${c.type}`}>{c.type}</span></td>
+                  <td>{c.status === 'conflicting' ? '✕ conflict' : c.status === 'unvalidatable' ? '? unverifiable' : '✓'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Collapsible>
+      )}
+
       {plan?.methodology && (
         <div className="spec-card-methodology">
           {plan.spatialScale && <span className="spec-scale-badge">{SCALE_LABELS[plan.spatialScale] || plan.spatialScale}</span>}
@@ -111,8 +168,8 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
         </Collapsible>
       )}
 
-      {/* ── Factor framework ── */}
-      <table className="spec-card-table">
+      {/* ── Factor framework (hidden when the request is not feasible) ── */}
+      {!blocked && <table className="spec-card-table">
         <thead>
           <tr><th></th><th>Factor</th><th>Wt</th><th>Catchment</th><th>Conf.</th></tr>
         </thead>
@@ -147,7 +204,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
             </tr>
           ))}
         </tbody>
-      </table>
+      </table>}
 
       {/* ── Hard exclusions (red) ── */}
       {(spec.exclusions?.length ?? 0) > 0 && (
@@ -202,7 +259,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
         </div>
       )}
 
-      {readyToExecute && (
+      {readyToExecute && !blocked && (
         <button className="spec-card-execute" onClick={onConfirmExecute} disabled={isExecuting}>
           {isExecuting ? 'Running analysis…' : '▶ Start analysis'}
         </button>
