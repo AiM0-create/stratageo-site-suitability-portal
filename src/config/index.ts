@@ -9,6 +9,8 @@ export const config = {
   /** Python conversational engine (v1.0.1). When set with VITE_CONVERSATIONAL_MODE=1,
    *  the chat becomes multi-turn and analyses run via /api/v2 on this host. */
   pyBackendUrl: (import.meta.env.VITE_PY_BACKEND_URL || '').replace(/\/+$/, ''),
+  /** Rotatable kill-switch token sent as X-App-Token to the engine (not a secret). */
+  appToken: import.meta.env.VITE_APP_TOKEN || '',
 
   /** Demo mode = no backend URL configured. If backend URL exists, we're live. */
   get isDemoMode(): boolean {

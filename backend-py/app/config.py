@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     chat_model: str = "gpt-4o"
     explain_model: str = "gpt-4o-mini"
 
+    # ── Abuse / cost protection (the backend is a public endpoint that spends
+    #    money on every chat turn, so these are the primary cost guardrails) ──
+    # Optional soft gate: if set, requests must carry header X-App-Token=<value>.
+    # Baked into the frontend build; rotate to instantly cut off scripted abuse.
+    app_shared_token: str = ""
+    rate_limit_per_min: int = 20          # chat turns per IP per minute
+    rate_limit_global_per_min: int = 200  # whole-service ceiling per minute
+    max_request_bytes: int = 256 * 1024   # 256 KB request body cap
+    max_messages: int = 60                # conversation history cap
+    max_message_chars: int = 12_000       # per-message content cap
+
     # Engine tuning
     max_hexes: int = 8000           # above this, degrade H3 resolution by 1
     # Candidates carried into isochrone Pass B. 12 keeps the final top-3
