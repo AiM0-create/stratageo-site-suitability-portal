@@ -15,19 +15,32 @@ from openai import AsyncOpenAI
 
 from ..config import get_settings
 from ..models.chat import ChatMessage, ChatResponse, validate_spec
+from .archetypes import ARCHETYPE_PLAYBOOK
 from .prompts import chat_system_prompt
 
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY = 30
 
-# Deterministic go-signal detection — the model's readyToExecute flag is
-# inconsistent across turns, so an unambiguous user go on a valid, feasible
-# spec is honored server-side (the UI still requires a confirm click).
-GO_SIGNAL = re.compile(
-    r"\b(run it|go ahead|execute|start (the )?(analysis|step)|proceed|chalo|shuru karo|run the analysis)\b",
+# ─── Deterministic stage / intent signals ─────────────────────────────────────
+# The model's own stage/readyToExecute flags are inconsistent across turns, so
+# unambiguous user signals are classified server-side as the source of truth.
+# Stage ladder: chat → framework → ready (the UI still requires a confirm click).
+
+RUN_SIGNAL = re.compile(
+    r"\b(run( it| now| the analysis| analysis)?|execute|start (the )?(analysis|step)"
+    r"|generate (the )?(sites|locations|results)|rank (the )?(sites|locations)"
+    r"|show (me )?(the )?final (results|locations|sites|recommendations)|chalo|shuru karo)\b",
     re.IGNORECASE,
 )
+FRAMEWORK_SIGNAL = re.compile(
+    r"\b(move ahead|go ahead|continue|proceed|next step"
+    r"|show (me )?(the )?(analysis|framework|weights|plan|methodology)"
+    r"|prepare (the )?(framework|analysis|plan))\b",
+    re.IGNORECASE,
+)
+# Bare short affirmations ("yes", "ok", "sure") count as framework consent only
+AFFIRMATION = re.compile(r"^\s*(yes|yeah|yep|ok(ay)?|sure|haan|please do|sounds good)[\s.!]*$", re.IGNORECASE)
 NO_GO = re.compile(
     r"\b(don'?t|do not|never|not yet|stop|wait|hold|before (you )?(run|execut))\b",
     re.IGNORECASE,
@@ -35,7 +48,54 @@ NO_GO = re.compile(
 
 
 def is_go_signal(text: str) -> bool:
-    return bool(GO_SIGNAL.search(text)) and not NO_GO.search(text)
+    return bool(RUN_SIGNAL.search(text)) and not NO_GO.search(text)
+
+
+def is_framework_signal(text: str) -> bool:
+    return (bool(FRAMEWORK_SIGNAL.search(text)) or bool(AFFIRMATION.match(text))) and not NO_GO.search(text)
+
+
+def _backfill_plan(spec: dict) -> None:
+    """Deterministically complete sparse plan arrays at framework stage.
+
+    gpt-4o reliably writes the framework REPLY but often under-fills the
+    structured plan arrays on long turns. These backfills are honest — they
+    state what the system actually assumed/does — and come from the archetype
+    playbook plus the spec itself. Mutates spec in place.
+    """
+    plan = spec.setdefault("plan", {})
+    playbook = ARCHETYPE_PLAYBOOK.get(plan.get("businessArchetype") or "", {})
+
+    assumptions = plan.setdefault("assumptions", [])
+    if len(assumptions) < 2:
+        sa = spec.get("studyArea") or {}
+        places = ", ".join(p.split(",")[0] for p in (sa.get("places") or [])[:5])
+        if places and not any("study area" in (a.get("assumption") or "").lower() for a in assumptions):
+            assumptions.append({
+                "assumption": f"Study area: {places}",
+                "basis": "selected by the consultant from the request and domain knowledge",
+            })
+        if not any("default" in (a.get("assumption") or "").lower() for a in assumptions):
+            res = ((spec.get("grid") or {}).get("resolution")) or 9
+            top_n = ((spec.get("output") or {}).get("topN")) or 3
+            assumptions.append({
+                "assumption": f"Engine defaults applied: H3 resolution {res}, top {top_n} results, isochrone refinement on",
+                "basis": "standard configuration, adjustable on request",
+            })
+
+    if not plan.get("validation") and playbook.get("validation"):
+        plan["validation"] = [playbook["validation"]]
+
+    if not plan.get("modelFailureRisks"):
+        risks = list(playbook.get("weakProxyWarnings") or [])[:2]
+        risks.append("OpenStreetMap coverage varies by area — sparse mapping can depress scores independently of real-world suitability")
+        plan["modelFailureRisks"] = risks
+
+    if not plan.get("misleadingVariables") and playbook.get("misleadingVariables"):
+        plan["misleadingVariables"] = [
+            {"variable": m.split("(")[0].strip(), "risk": m}
+            for m in playbook["misleadingVariables"][:3]
+        ]
 
 
 def _client() -> AsyncOpenAI:
@@ -121,7 +181,8 @@ async def chat_turn(
 
     # Repair pass: any non-validating spec gets one fix attempt (a draft that
     # stays invalid blocks execution on a later "go" turn just the same).
-    if new_spec and not valid:
+    # Skipped at chat stage — an exploratory spec without layers is expected there.
+    if new_spec and not valid and parsed.get("stage") != "chat":
         logger.warning("Spec failed validation, attempting repair: %s", err)
         out = await call(
             "Your previous spec failed engine validation with this error — fix the spec and respond again "
@@ -141,11 +202,32 @@ async def chat_turn(
 
     # Deterministic go: an unambiguous user go-signal on a valid spec counts even
     # when the model under-reports readyToExecute (observed gpt-4o inconsistency).
-    if not ready and valid and is_go_signal(last_user_text := next(
-        (m.content for m in reversed(messages) if m.role == "user"), "",
-    )):
-        logger.info("Server-side go-signal honored: %r", last_user_text[:60])
+    if not ready and valid and is_go_signal(last_user):
+        logger.info("Server-side go-signal honored: %r", last_user[:60])
         ready = True
+
+    # ── Stage resolution (chat → framework → ready) ───────────────────────
+    # Server-side signals are authoritative; the model's stage fills the gaps.
+    model_stage = parsed.get("stage")
+    if model_stage not in ("chat", "framework", "ready"):
+        # default: first exchange is conversational, later turns show the framework
+        model_stage = "chat" if len(messages) <= 1 else "framework"
+    if ready:
+        stage = "ready"
+    elif is_framework_signal(last_user):
+        stage = "framework"
+    elif is_go_signal(last_user):
+        stage = "framework"   # go-signal on an invalid/incomplete spec → show framework
+    else:
+        stage = model_stage
+    # Never claim "ready" without readyToExecute actually set
+    if stage == "ready" and not ready:
+        stage = "framework"
+
+    # Framework/ready stages must carry a complete plan block — backfill
+    # deterministically from the archetype playbook when the model skimps.
+    if stage != "chat" and isinstance(new_spec, dict) and new_spec.get("layers"):
+        _backfill_plan(new_spec)
 
     # ── Feasibility-first gate (server-side, prompt-independent) ──────────
     # A not_feasible plan can NEVER execute, even on an explicit go signal —
@@ -153,9 +235,12 @@ async def chat_turn(
     feasibility = (new_spec or {}).get("feasibility") if isinstance(new_spec, dict) else None
     if feasibility and feasibility.get("status") == "not_feasible":
         ready = False
+        if stage == "ready":
+            stage = "framework"
 
     return ChatResponse(
         reply=parsed.get("reply", ""),
+        stage=stage,
         spec=new_spec,
         specStatus=spec_status if spec_status in ("empty", "draft", "complete") else "draft",
         readyToExecute=ready,

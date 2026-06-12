@@ -27,9 +27,19 @@ PROMPT = (
 
 def main() -> int:
     failures = []
-    r = httpx.post(f"{BASE}/api/v2/chat", json={
-        "messages": [{"role": "user", "content": PROMPT}], "spec": None,
-    }, timeout=180)
+    # Staged flow: turn 1 is conversational (chat stage); the full consultant
+    # framework appears on turn 2 after the user agrees to move ahead.
+    messages = [{"role": "user", "content": PROMPT}]
+    r1 = httpx.post(f"{BASE}/api/v2/chat", json={"messages": messages, "spec": None}, timeout=180)
+    r1.raise_for_status()
+    t1 = r1.json()
+    print(f"T1 (chat stage): stage={t1['stage']} ready={t1['readyToExecute']} len={len(t1['reply'])}")
+    if t1["stage"] != "chat":
+        failures.append(f"turn 1 stage={t1['stage']}, expected chat")
+
+    messages += [{"role": "assistant", "content": t1["reply"]},
+                 {"role": "user", "content": "move ahead, show me the framework"}]
+    r = httpx.post(f"{BASE}/api/v2/chat", json={"messages": messages, "spec": t1.get("spec")}, timeout=180)
     r.raise_for_status()
     t = r.json()
     reply, spec = t["reply"], t.get("spec") or {}

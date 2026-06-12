@@ -22,4 +22,4 @@ export const ADMIN_EMAILS: string[] = [
   'sagar.mysorekar@stratageo.in',
 ];
 
-export const MAX_PROMPTS_PER_USER = 4;
+export const MAX_PROMPTS_PER_USER = 10;

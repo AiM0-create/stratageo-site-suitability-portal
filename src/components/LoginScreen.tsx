@@ -148,7 +148,7 @@ export const LoginScreen: React.FC = () => {
 
         <p className="sg-login-note">
           Sign in to access your complimentary analysis sessions.
-          Each account includes 4 AI-powered site evaluations.
+          Each account includes 10 AI-powered site evaluations.
         </p>
       </div>
 
