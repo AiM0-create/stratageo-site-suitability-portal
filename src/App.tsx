@@ -60,6 +60,7 @@ const App: React.FC = () => {
   const [chatSpec, setChatSpec] = useState<SpecV2 | null>(null);
   const [chatSpecStatus, setChatSpecStatus] = useState<'empty' | 'draft' | 'complete'>('empty');
   const [chatReady, setChatReady] = useState(false);
+  const [chatStage, setChatStage] = useState<'chat' | 'framework' | 'ready'>('chat');
   const [isExecuting, setIsExecuting] = useState(false);
   // Accumulated gpt-4o tokens across chat turns; logged with the execution entry
   const chatTokensRef = useRef(0);
@@ -70,6 +71,7 @@ const App: React.FC = () => {
     setChatSpec(persisted);
     setChatSpecStatus(persisted ? 'draft' : 'empty');
     setChatReady(false);
+    setChatStage(persisted ? 'framework' : 'chat');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSession.id]);
 
@@ -240,6 +242,7 @@ const App: React.FC = () => {
         setChatSpecStatus(resp.specStatus);
         dispatch({ type: 'UPDATE_SPEC', spec: resp.spec });
       }
+      setChatStage(resp.stage || 'chat');
       setChatReady(resp.readyToExecute && resp.specValid);
     } catch (err: any) {
       clearTimeout(coldStartTimer);
@@ -579,6 +582,7 @@ const App: React.FC = () => {
     setChatSpec(null);
     setChatSpecStatus('empty');
     setChatReady(false);
+    setChatStage('chat');
     newSession();
   }, [newSession, result, spec, customWeights, userPoints, currentSession.id]);
 
@@ -1172,6 +1176,7 @@ const App: React.FC = () => {
         chatSpec={chatSpec}
         chatSpecStatus={chatSpecStatus}
         chatReady={chatReady}
+        chatStage={chatStage}
         isExecuting={isExecuting}
         onConfirmExecute={handleConfirmExecute}
         onSpecEdit={handleSpecEdit}

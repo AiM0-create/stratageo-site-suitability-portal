@@ -27,6 +27,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     ok: bool = True
     reply: str
+    stage: Literal["chat", "framework", "ready"] = "chat"
     spec: Optional[dict] = None
     specStatus: Literal["empty", "draft", "complete"] = "empty"
     readyToExecute: bool = False

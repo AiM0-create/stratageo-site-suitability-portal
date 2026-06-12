@@ -33,6 +33,8 @@ interface FloatingAssistantProps {
   chatSpec?: SpecV2 | null;
   chatSpecStatus?: 'empty' | 'draft' | 'complete';
   chatReady?: boolean;
+  /** Staged flow: the plan card stays hidden while the conversation is exploratory */
+  chatStage?: 'chat' | 'framework' | 'ready';
   isExecuting?: boolean;
   onConfirmExecute?: () => void;
   onSpecEdit?: (updated: SpecV2) => void;
@@ -66,6 +68,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   chatSpec,
   chatSpecStatus = 'empty',
   chatReady = false,
+  chatStage = 'chat',
   isExecuting = false,
   onConfirmExecute,
   onSpecEdit,
@@ -268,8 +271,10 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               </div>
             ))}
 
-            {/* Conversational mode: agreed analysis plan + confirm chip */}
-            {config.isConversationalMode && chatSpec && !isLoading && (
+            {/* Conversational mode: agreed analysis plan + confirm chip.
+                Hidden during the exploratory "chat" stage — the framework only
+                appears once the user asks to move ahead. */}
+            {config.isConversationalMode && chatSpec && !isLoading && chatStage !== 'chat' && (
               <SpecSummaryCard
                 spec={chatSpec}
                 specStatus={chatSpecStatus}

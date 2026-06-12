@@ -78,9 +78,13 @@ export interface SpecV2 {
   };
 }
 
+export type ChatStage = 'chat' | 'framework' | 'ready';
+
 export interface ChatTurnResponse {
   ok: boolean;
   reply: string;
+  /** Conversation stage: chat = exploring (no framework shown), framework = plan visible, ready = run confirmed */
+  stage: ChatStage;
   spec: SpecV2 | null;
   specStatus: 'empty' | 'draft' | 'complete';
   readyToExecute: boolean;

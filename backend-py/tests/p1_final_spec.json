@@ -9,7 +9,8 @@
       "Salt Lake, Kolkata",
       "Sector V, Kolkata",
       "Newtown, Kolkata"
-    ]
+    ],
+    "hullBufferM": 500
   },
   "grid": {
     "type": "h3",
@@ -25,7 +26,6 @@
         "provider": "osm",
         "tags": [
           "building=residential",
-          "building=apartments",
           "landuse=residential"
         ]
       },
@@ -33,8 +33,13 @@
         "type": "walk",
         "minutes": 10
       },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
       "confidence": "high",
-      "whyItMatters": "Proximity to residential areas increases potential walk-in customers."
+      "whyItMatters": "Proximity to residential areas increases walk-in traffic."
     },
     {
       "id": "L4",
@@ -42,18 +47,23 @@
       "weight": 17,
       "direction": "positive",
       "source": {
-        "provider": "osm",
-        "tags": [
-          "amenity=restaurant",
-          "amenity=cafe"
+        "provider": "google_places",
+        "types": [
+          "restaurant",
+          "cafe"
         ]
       },
       "catchment": {
         "type": "euclidean",
         "meters": 300
       },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
       "confidence": "medium",
-      "whyItMatters": "Identifying areas with less food competition can capture unmet demand."
+      "whyItMatters": "Identifies areas with potential for new food outlets."
     },
     {
       "id": "L7",
@@ -71,8 +81,13 @@
         "type": "euclidean",
         "meters": 100
       },
-      "confidence": "medium",
-      "whyItMatters": "High visibility increases brand awareness and foot traffic."
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "confidence": "high",
+      "whyItMatters": "High visibility locations attract more customers."
     },
     {
       "id": "L5",
@@ -83,15 +98,20 @@
         "provider": "osm",
         "tags": [
           "amenity=place_of_worship",
-          "shop=market"
+          "shop=marketplace"
         ]
       },
       "catchment": {
         "type": "walk",
         "minutes": 7
       },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
       "confidence": "medium",
-      "whyItMatters": "Proximity to affinity POIs can drive additional foot traffic."
+      "whyItMatters": "Proximity to cultural and market areas increases foot traffic."
     },
     {
       "id": "L2",
@@ -102,7 +122,6 @@
         "provider": "osm",
         "tags": [
           "building=residential",
-          "building=apartments",
           "landuse=residential"
         ]
       },
@@ -110,8 +129,13 @@
         "type": "drive",
         "minutes": 20
       },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
       "confidence": "high",
-      "whyItMatters": "Larger delivery catchment increases potential delivery orders."
+      "whyItMatters": "Larger delivery catchments increase potential revenue."
     },
     {
       "id": "L3",
@@ -129,8 +153,13 @@
         "type": "walk",
         "minutes": 5
       },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
       "confidence": "high",
-      "whyItMatters": "Proximity to transit nodes increases accessibility for customers."
+      "whyItMatters": "Proximity to transit nodes increases accessibility."
     },
     {
       "id": "L6",
@@ -138,19 +167,23 @@
       "weight": 5,
       "direction": "positive",
       "source": {
-        "provider": "osm",
-        "tags": [
+        "provider": "google_places",
+        "types": [
           "office",
-          "school",
-          "university"
+          "school"
         ]
       },
       "catchment": {
         "type": "drive",
         "minutes": 10
       },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
       "confidence": "medium",
-      "whyItMatters": "Nearby daytime population can boost lunch-time sales."
+      "whyItMatters": "Daytime population increases potential customer base."
     },
     {
       "id": "L8",
@@ -166,6 +199,11 @@
       "catchment": {
         "type": "euclidean",
         "meters": 500
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
       },
       "confidence": "medium",
       "whyItMatters": "Dense apartment clusters indicate potential customer base."
@@ -183,7 +221,10 @@
   "constraints": [],
   "feasibility": {
     "status": "feasible",
-    "explanation": "The study area and layers are well-defined with no conflicting constraints."
+    "explanation": "All constraints are satisfiable within the study area.",
+    "conflicts": [],
+    "relaxationOptions": [],
+    "unvalidatable": []
   },
   "plan": {
     "businessArchetype": "convenience_retail_qsr",
@@ -191,32 +232,36 @@
     "methodology": "micro-market scoring with footfall catchments",
     "assumptions": [
       {
-        "assumption": "Study area includes Chinar Park, Salt Lake, Sector V, and Newtown in Kolkata.",
-        "basis": "User specified bounding box covering these areas."
+        "assumption": "Study area covers Chinar Park, Salt Lake, Sector V, and Newtown",
+        "basis": "user specification"
+      },
+      {
+        "assumption": "Grid resolution set to 9",
+        "basis": "default setting"
       }
     ],
     "misleadingVariables": [
       {
         "variable": "city-level population",
-        "risk": "Irrelevant at 500m scale for micro-market analysis."
+        "risk": "irrelevant at 500m scale"
       },
       {
         "variable": "road density",
-        "risk": "Vehicular traffic does not equate to pedestrian footfall."
+        "risk": "vehicular ≠ pedestrian footfall"
       }
     ],
     "scenarios": [
       {
         "name": "Balanced",
-        "description": "Equal emphasis on residential and commercial factors.",
-        "emphasis": "L1 and L7 gain weight."
+        "description": "Equal emphasis on all core layers",
+        "emphasis": "none"
       }
     ],
     "validation": [
-      "Compare model scores at locations of established chains (McDonald's, Haldiram's outlets) — they should score above median."
+      "compare model scores at locations of established chains (McDonald's, Haldiram's outlets)"
     ],
     "modelFailureRisks": [
-      "OSM residential counts may understate informal settlements, affecting catchment analysis."
+      "OSM residential counts may understate informal settlements"
     ]
   },
   "meta": {

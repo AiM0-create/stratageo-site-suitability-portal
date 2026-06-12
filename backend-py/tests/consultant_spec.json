@@ -1,14 +1,13 @@
 {
   "version": "2.0",
-  "objective": "Identify a suitable location for a premium senior living and wellness retreat in India.",
+  "objective": "Identify optimal location for a premium senior living and wellness retreat in India.",
   "businessType": "premium senior living and wellness retreat",
   "studyArea": {
     "type": "places",
     "places": [
       "Coimbatore",
       "Pondicherry",
-      "Dehradun",
-      "Pune"
+      "Dehradun"
     ]
   },
   "grid": {
@@ -37,20 +36,19 @@
         "pHigh": 95
       },
       "confidence": "high",
-      "whyItMatters": "Essential for healthcare access",
+      "whyItMatters": "Ensures healthcare availability for residents.",
       "proxyWarning": null
     },
     {
       "id": "L2",
       "name": "Green/open environment",
-      "weight": 30,
+      "weight": 25,
       "direction": "positive",
       "source": {
         "provider": "osm",
         "tags": [
           "leisure=park",
           "landuse=forest",
-          "landuse=farmland",
           "natural=wood"
         ]
       },
@@ -63,8 +61,8 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "confidence": "medium",
-      "whyItMatters": "Enhances tranquility",
+      "confidence": "high",
+      "whyItMatters": "Provides tranquility and a natural setting.",
       "proxyWarning": null
     },
     {
@@ -89,19 +87,19 @@
         "pHigh": 95
       },
       "confidence": "high",
-      "whyItMatters": "Facilitates family visits",
+      "whyItMatters": "Facilitates family visits and connectivity.",
       "proxyWarning": null
     },
     {
       "id": "L4",
       "name": "Existing retiree/wellness clusters",
-      "weight": 25,
+      "weight": 15,
       "direction": "positive",
       "source": {
         "provider": "osm",
         "tags": [
           "place_of_worship",
-          "community_centre"
+          "community"
         ]
       },
       "catchment": {
@@ -114,8 +112,32 @@
         "pHigh": 95
       },
       "confidence": "medium",
-      "whyItMatters": "Indicates demand",
-      "proxyWarning": "Community density used as a proxy for retiree clusters"
+      "whyItMatters": "Indicates social fabric and community integration.",
+      "proxyWarning": null
+    },
+    {
+      "id": "L5",
+      "name": "Industrial/noise adjacency",
+      "weight": 15,
+      "direction": "negative",
+      "source": {
+        "provider": "osm",
+        "tags": [
+          "landuse=industrial"
+        ]
+      },
+      "catchment": {
+        "type": "euclidean",
+        "meters": 500
+      },
+      "normalization": {
+        "method": "percentile",
+        "pLow": 5,
+        "pHigh": 95
+      },
+      "confidence": "high",
+      "whyItMatters": "Avoids areas that could disrupt tranquility.",
+      "proxyWarning": null
     }
   ],
   "exclusions": [
@@ -141,7 +163,7 @@
   "constraints": [],
   "feasibility": {
     "status": "feasible",
-    "explanation": "The request is open-ended with a flexible budget, allowing for a comprehensive analysis of potential locations.",
+    "explanation": "Budget flexibility allows for a focus on optimal location characteristics.",
     "conflicts": [],
     "relaxationOptions": [],
     "unvalidatable": []
@@ -149,39 +171,44 @@
   "plan": {
     "businessArchetype": "senior_living_wellness",
     "spatialScale": "city_then_micro",
-    "methodology": "Hierarchical analysis to shortlist cities and score micro-markets.",
+    "methodology": "Hierarchical: city/region screening followed by micro-market scoring.",
     "assumptions": [
       {
-        "assumption": "Candidate cities: Coimbatore, Pondicherry, Dehradun, Pune",
-        "basis": "Chosen for climate, healthcare depth, connectivity"
+        "assumption": "Candidate cities are Coimbatore, Pondicherry, and Dehradun.",
+        "basis": "Chosen for climate, healthcare depth, and connectivity."
       },
       {
-        "assumption": "Budget flexibility allows for a wide range of options",
-        "basis": "User's statement of flexible budget"
+        "assumption": "Study area: Coimbatore, Pondicherry, Dehradun",
+        "basis": "selected by the consultant from the request and domain knowledge"
+      },
+      {
+        "assumption": "Engine defaults applied: H3 resolution 9, top 3 results, isochrone refinement on",
+        "basis": "standard configuration, adjustable on request"
       }
     ],
     "misleadingVariables": [
       {
-        "variable": "Population density",
-        "risk": "Negative for tranquility-led products"
-      },
-      {
-        "variable": "Commercial hub proximity",
-        "risk": "Reduces the asset's value"
+        "variable": "population density",
+        "risk": "Negative for tranquility-led products."
       }
     ],
     "scenarios": [
       {
         "name": "Balanced",
-        "description": "Equal emphasis on healthcare and tranquility",
-        "emphasis": "Balanced approach"
+        "description": "Equal emphasis on healthcare and environment.",
+        "emphasis": "none"
+      },
+      {
+        "name": "Connectivity Focus",
+        "description": "Increased weight on airport/rail access.",
+        "emphasis": "airport/rail access"
       }
     ],
     "validation": [
-      "Benchmark against known successful projects (Columbia Pacific Coimbatore, Antara Dehradun) — their locations should score well"
+      "benchmark against known successful projects (Columbia Pacific Coimbatore, Antara Dehradun) — their locations should score well"
     ],
     "modelFailureRisks": [
-      "No climate/AQI data available; land-price data unavailable — use periurban distance as a proxy"
+      "Over-reliance on OSM data may miss informal settlements."
     ]
   },
   "meta": {
