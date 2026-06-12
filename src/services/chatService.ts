@@ -5,6 +5,16 @@ import type { AnalysisJobStatus, ChatTurnResponse, SpecV2 } from '../types/chat'
 
 const base = () => config.pyBackendUrl;
 
+// Build-time app token. Not a true secret (it ships in the bundle) but a
+// rotatable kill-switch: requests without the current build's token are
+// rejected, so a scraped Cloud Run URL alone can't drive cost. Paired with
+// per-IP rate limiting on the server.
+const jsonHeaders = (): Record<string, string> => {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (config.appToken) h['X-App-Token'] = config.appToken;
+  return h;
+};
+
 export async function checkPyHealth(): Promise<boolean> {
   try {
     const r = await fetch(`${base()}/health`, { signal: AbortSignal.timeout(8000) });
@@ -22,7 +32,7 @@ export async function sendChatTurn(
 ): Promise<ChatTurnResponse> {
   const r = await fetch(`${base()}/api/v2/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(),
     body: JSON.stringify({ messages, spec, context: context ?? null }),
   });
   if (!r.ok) {
@@ -35,7 +45,7 @@ export async function sendChatTurn(
 export async function startAnalysis(spec: SpecV2): Promise<string> {
   const r = await fetch(`${base()}/api/v2/analyses`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonHeaders(),
     body: JSON.stringify({ spec }),
   });
   if (!r.ok) {

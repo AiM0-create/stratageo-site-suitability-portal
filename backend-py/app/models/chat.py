@@ -1,27 +1,48 @@
 """Request/response models for /api/v2/chat."""
 from __future__ import annotations
 
+import json
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
+from ..config import get_settings
 from .spec import SpecV2, UnsupportedRequest
 
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str
+    content: str = Field(max_length=20_000)  # hard cap; finer cap applied in request validator
 
 
 class ChatContext(BaseModel):
-    resultCount: Optional[int] = None
-    csvPointCount: Optional[int] = None
+    resultCount: Optional[int] = Field(default=None, ge=1, le=10)
+    csvPointCount: Optional[int] = Field(default=None, ge=0, le=100_000)
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(min_length=1, max_length=120)
     spec: Optional[dict] = None          # client-held draft; validated loosely (may be mid-construction)
     context: Optional[ChatContext] = None
+
+    @field_validator("messages")
+    @classmethod
+    def cap_messages(cls, v: list[ChatMessage]) -> list[ChatMessage]:
+        s = get_settings()
+        if len(v) > s.max_messages:
+            # keep only the most recent turns — older history is summarized by the LLM anyway
+            v = v[-s.max_messages:]
+        for m in v:
+            if len(m.content) > s.max_message_chars:
+                m.content = m.content[: s.max_message_chars]
+        return v
+
+    @field_validator("spec")
+    @classmethod
+    def cap_spec(cls, v: Optional[dict]) -> Optional[dict]:
+        if v is not None and len(json.dumps(v, default=str)) > 200_000:
+            raise ValueError("spec payload too large")
+        return v
 
 
 class ChatResponse(BaseModel):

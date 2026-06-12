@@ -31,6 +31,9 @@ jobs:
           VITE_AI_BACKEND_URL: https://stratageo-site-suitability-portal.vercel.app
           VITE_PY_BACKEND_URL: https://stratageo-engine-1020081478981.asia-south1.run.app
           VITE_CONVERSATIONAL_MODE: '1'
+          # Rotatable kill-switch token (ships in bundle; not a true secret).
+          # Rotate by updating this GH secret AND APP_SHARED_TOKEN on Cloud Run.
+          VITE_APP_TOKEN: ${{ secrets.VITE_APP_TOKEN }}
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4

@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// Stratageo portal — server-side enforcement of the quota / admin model.
+// Without these rules the client could write isAdmin:true or reset promptsUsed
+// to bypass the 10-prompt limit. Deploy with: firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    // Admins are identified by a verified email on the auth token — NOT by a
+    // self-writable document field. Keep this list in sync with ADMIN_EMAILS.
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+             'abhishek.rawat@stratageo.in',
+             'sagar.mysorekar@stratageo.in'
+           ];
+    }
+
+    // ── users/{uid} ──────────────────────────────────────────────
+    // A user may read only their own doc. Admins may read all (dashboard).
+    // Create: only your own doc, and you may NOT set isAdmin:true yourself.
+    // Update: you may only bump promptsUsed by exactly +1 and touch lastLogin —
+    //   you cannot zero your quota or grant yourself admin. Admins: full write.
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+
+      allow create: if isOwner(uid)
+        && request.resource.data.promptsUsed == 0
+        // a user may only mint a non-admin doc; an admin email may set isAdmin:true
+        && (request.resource.data.isAdmin == false || isAdmin());
+
+      allow update: if isAdmin()
+        || (isOwner(uid)
+            && request.resource.data.isAdmin == resource.data.isAdmin
+            && request.resource.data.email == resource.data.email
+            && (
+                 // login-only touch (no quota change)
+                 request.resource.data.promptsUsed == resource.data.promptsUsed
+                 // or a single legitimate prompt consumption
+                 || request.resource.data.promptsUsed == resource.data.promptsUsed + 1
+               )
+            && request.resource.data.promptsUsed <= 10);
+
+      allow delete: if isAdmin();
+    }
+
+    // ── prompts/{id} (usage log) ─────────────────────────────────
+    // Append-only audit log: a signed-in user may create entries tagged with
+    // their own uid; nobody may edit or delete. Admins read all for analytics.
+    match /prompts/{id} {
+      allow read:   if isAdmin();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ── analyses/{id} (share-by-link results) ────────────────────
+    // Read is public by design: a saved analysis is a capability-URL share
+    // (the unguessable shareId is the secret). This matches existing behavior.
+    // Writes are locked to the owner so shared results can't be tampered with.
+    match /analyses/{id} {
+      allow read:   if true;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isOwner(resource.data.userId) || isAdmin();
+    }
+
+    // Default deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

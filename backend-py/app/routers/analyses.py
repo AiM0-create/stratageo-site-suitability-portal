@@ -1,6 +1,7 @@
 import logging
+import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, ValidationError
 
 from ..models.spec import SpecV2
@@ -34,7 +35,13 @@ async def start_analysis(req: StartRequest):
 
 
 @router.get("/api/v2/analyses/{job_id}")
-async def get_analysis(job_id: str):
+async def get_analysis(job_id: str = Path(..., max_length=64)):
+    # job ids are server-minted UUID4s; reject anything else (defense-in-depth
+    # against crafted GCS object keys in the persisted-job lookup).
+    try:
+        uuid.UUID(job_id)
+    except ValueError as e:
+        raise HTTPException(400, "invalid job id") from e
     state = await jobs.get_job_state(job_id)
     if state is None:
         raise HTTPException(404, "job not found or expired")

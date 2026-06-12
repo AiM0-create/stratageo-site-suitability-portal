@@ -18,5 +18,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
     except HTTPException:
         raise
     except Exception as e:
+        # Log full detail server-side; return a generic message so internal
+        # errors (incl. upstream API errors that may echo key fragments) never
+        # leak to the client.
         logger.exception("chat turn failed")
-        raise HTTPException(500, f"chat turn failed: {e}") from e
+        raise HTTPException(502, "The assistant is temporarily unavailable. Please try again.") from e
