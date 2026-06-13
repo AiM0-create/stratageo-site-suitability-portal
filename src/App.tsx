@@ -942,17 +942,25 @@ const App: React.FC = () => {
           const jLines = pdf.splitTextToSize(cr.justification || '', cBarX - cNameX - 2);
           pdf.text(jLines.slice(0,1), cNameX, y + 8.5);
 
-          // Score bar
-          const crCol = cr.direction === 'negative'
-            ? (cr.score <= 3 ? C.red : cr.score <= 6 ? C.orange : C.green)
-            : (cr.score >= 7 ? C.green : cr.score >= 4 ? C.blue : C.red);
-          bar(cr.score, cBarX, cBarW, y + 4, 3, crCol);
+          // Score bar (null score = insufficient data → no bar, "N/A")
+          if (cr.score == null) {
+            pdf.setFontSize(8); pdf.setFont('helvetica','bold'); T(C.red);
+            pdf.text('N/A', cScoreX, y + 5.5);
+            pdf.setFontSize(6); pdf.setFont('helvetica','normal'); T(C.s5);
+            pdf.text('no data', cScoreX, y + 9);
+          } else {
+            const s = cr.score;
+            const crCol = cr.direction === 'negative'
+              ? (s <= 3 ? C.red : s <= 6 ? C.orange : C.green)
+              : (s >= 7 ? C.green : s >= 4 ? C.blue : C.red);
+            bar(s, cBarX, cBarW, y + 4, 3, crCol);
 
-          // Score number — in its own column, no overlap with bar or evidence
-          pdf.setFontSize(9); pdf.setFont('helvetica','bold'); T(crCol);
-          pdf.text(`${cr.score.toFixed(1)}`, cScoreX, y + 5.5);
-          pdf.setFontSize(6.5); T(C.s5);
-          pdf.text('/10', cScoreX, y + 9);
+            // Score number — in its own column, no overlap with bar or evidence
+            pdf.setFontSize(9); pdf.setFont('helvetica','bold'); T(crCol);
+            pdf.text(`${s.toFixed(1)}`, cScoreX, y + 5.5);
+            pdf.setFontSize(6.5); T(C.s5);
+            pdf.text('/10', cScoreX, y + 9);
+          }
 
           // Raw evidence — starts well after score column
           pdf.setFontSize(9); pdf.setFont('helvetica','bold'); T(C.s9);

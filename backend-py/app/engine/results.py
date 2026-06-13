@@ -55,13 +55,32 @@ def build_location(
 ) -> dict:
     cell = hexes[hex_index]
     total01, detail = composite_for_hex(spec, scores, hex_index)
-    mcda = round(total01 * 10, 1)
+    # None when NO layer has data — withhold rather than print a fabricated score.
+    mcda = round(total01 * 10, 1) if total01 is not None else None
 
     criteria = []
     osm_signals: dict[str, int] = {}
     for layer in spec.layers:
         d = detail[layer.id]
-        ls = scores[layer.id]
+        # ── Missing-data layer: never fabricate a 0 or 10 score ──
+        if not d.get("hasData", True):
+            req = getattr(layer, "required", False)
+            msg = ("Insufficient data to evaluate this required constraint."
+                   if req else "No data available for this factor — excluded from the score.")
+            criteria.append({
+                "name": layer.name,
+                "weight": layer.weight,
+                "score": None,                       # withheld, not 0/10
+                "rawValue": None,
+                "direction": layer.direction,
+                "required": req,
+                "justification": msg,
+                "evidenceBasis": "insufficient-data",
+                "osmQuery": ", ".join(layer.source.tags) if layer.source.provider == "osm" else None,
+            })
+            osm_signals[_signal_key(layer.name)] = 0
+            continue
+
         raw = d["raw"]
         norm_score = round(d["normScore"] * 10, 1)
         refinement_note = (
@@ -79,6 +98,7 @@ def build_location(
             "score": norm_score,
             "rawValue": float(raw),
             "direction": layer.direction,
+            "required": getattr(layer, "required", False),
             "justification": just,
             "evidenceBasis": _evidence_basis(d, raw, layer.source.provider)
                 if layer.confidence != "low" else "ai-generated",
@@ -107,7 +127,8 @@ def build_location(
         "name": name or f"Candidate {rank}",
         "lat": cell.lat,
         "lng": cell.lng,
-        "mcda_score": mcda,
+        "mcda_score": mcda if mcda is not None else 0.0,  # 0.0 keeps the type numeric
+        "scoreWithheld": mcda is None,                    # true → composite not computable
         "criteria_breakdown": criteria,
         "exclusions": [],
         "excluded": False,
@@ -229,24 +250,46 @@ def build_methodology(spec: SpecV2, hex_count: int, res: int, refined: bool, fal
     return " ".join(parts)
 
 
-async def write_explanations(spec: SpecV2, locations: list[dict]) -> tuple[str, list[str]]:
-    """One gpt-4o-mini call → (summary, [reasoning per location])."""
+async def write_explanations(
+    spec: SpecV2, locations: list[dict], data_sufficiency: dict | None = None,
+) -> tuple[str, list[str]]:
+    """One gpt-4o-mini call → (summary, [reasoning per location]). None-safe for
+    withheld scores and missing-data layers; honest when data is insufficient."""
     s = get_settings()
     client = AsyncOpenAI(api_key=s.openai_api_key)
+
+    def crit_str(c: dict) -> str:
+        if c.get("score") is None or c.get("rawValue") is None:
+            return f"{c['name']}: NO DATA (excluded — {c.get('justification', 'insufficient data')})"
+        return f"{c['name']}: {c['score']}/10 ({int(c['rawValue'])} observed, weight {c['weight']:.0%})"
+
     loc_lines = []
     for i, loc in enumerate(locations):
-        crits = "; ".join(
-            f"{c['name']}: {c['score']}/10 ({int(c['rawValue'])} observed, weight {c['weight']:.0%})"
-            for c in loc["criteria_breakdown"]
+        crits = "; ".join(crit_str(c) for c in loc["criteria_breakdown"])
+        score_txt = "SCORE WITHHELD (insufficient data)" if loc.get("scoreWithheld") else f"composite {loc['mcda_score']}/10"
+        excl = " [EXCLUDED: " + "; ".join(e["detail"] for e in loc.get("exclusions", []) if not e.get("passed", True)) + "]" if loc.get("excluded") else ""
+        loc_lines.append(f"{i + 1}. {loc['name']} — {score_txt}.{excl} {crits}")
+
+    ds = data_sufficiency or {}
+    honesty = ""
+    if ds.get("status") == "insufficient":
+        honesty = (
+            "\n\nCRITICAL — DATA IS INSUFFICIENT: " + ds.get("note", "")
+            + " You MUST NOT present a ranked recommendation or call the analysis complete. "
+            "State plainly which required constraint could not be evaluated and that no "
+            "valid site can be recommended until that data is available. Do NOT invent a winner."
         )
-        loc_lines.append(f"{i + 1}. {loc['name']} — composite {loc['mcda_score']}/10. {crits}")
+    elif ds.get("noDataLayers"):
+        honesty = ("\n\nNote: these factors had NO data and were excluded from scoring "
+                   "(do not claim they were evaluated): " + ", ".join(ds["noDataLayers"]) + ".")
 
     prompt = (
         f"You are a GIS site-selection analyst. Business: {spec.businessType}. Objective: {spec.objective}.\n"
-        f"Ranked candidates with per-layer scores:\n" + "\n".join(loc_lines) + "\n\n"
-        'Return JSON: {"summary": "3-4 sentence executive summary of the comparison", '
-        '"reasonings": ["2-3 sentence assessment for each location, in order"]}. '
-        "Be specific about which layers drive each score. Never invent data not shown above."
+        f"Candidates with per-layer scores:\n" + "\n".join(loc_lines) + honesty + "\n\n"
+        'Return JSON: {"summary": "3-4 sentence executive summary", '
+        '"reasonings": ["2-3 sentence assessment for each candidate, in order"]}. '
+        "Be specific about which layers drive each score. NEVER invent data not shown above. "
+        "A layer marked NO DATA was not measured — never describe it as good, perfect, or satisfied."
     )
     try:
         res = await client.chat.completions.create(

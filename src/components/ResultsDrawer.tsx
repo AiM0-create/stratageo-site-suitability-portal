@@ -67,6 +67,7 @@ const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
   const label =
     basis === 'osm-observed'        ? 'OSM + Places' :
     basis === 'osm-absent'          ? 'No Data' :
+    basis === 'insufficient-data'   ? 'Insufficient Data' :
     basis === 'osm-derived'         ? 'Derived' :
     basis === 'google-corroborated' ? 'Google' :
     basis === 'constraint-rule'     ? 'Rule' :
@@ -75,10 +76,12 @@ const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
   const cls =
     basis === 'osm-observed'        ? 'evidence-osm' :
     basis === 'osm-absent'          ? 'evidence-absent' :
+    basis === 'insufficient-data'   ? 'evidence-absent' :
     basis === 'google-corroborated' ? 'evidence-google' :
     basis === 'constraint-rule'     ? 'evidence-rule' :
     basis === 'ai-generated'        ? 'evidence-ai' : 'evidence-default';
   const title =
+    basis === 'insufficient-data'   ? 'No data was available to evaluate this factor — it is excluded from the score, not scored 0 or 10' :
     basis === 'osm-absent'          ? 'Zero features observed in OSM — may be a coverage gap, not genuine absence' :
     basis === 'google-corroborated' ? 'OSM data sparse but Google Places confirms real-world activity here; score floor lifted' :
     basis === 'osm-observed'        ? 'Score based on features counted from OpenStreetMap Overpass data' : undefined;
@@ -306,8 +309,17 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     <div className="drawer-loc-coords">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
                   </div>
                   <div className={`drawer-loc-score ${scoreClass}`}>
-                    <span className="score-number">{loc.mcda_score.toFixed(1)}</span>
-                    {!loc.excluded && <span className="score-quality-label">{getScoreQualityLabel(loc.mcda_score)}</span>}
+                    {(loc as any).scoreWithheld ? (
+                      <>
+                        <span className="score-number" style={{ fontSize: '15px' }}>—</span>
+                        <span className="score-quality-label" style={{ color: '#991b1b' }}>Withheld</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="score-number">{loc.mcda_score.toFixed(1)}</span>
+                        {!loc.excluded && <span className="score-quality-label">{getScoreQualityLabel(loc.mcda_score)}</span>}
+                      </>
+                    )}
                   </div>
                   <button
                     className="drawer-expand"
@@ -338,19 +350,27 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
 
                     {/* Criteria */}
                     <div className="drawer-criteria">
-                      {loc.criteria_breakdown.map((c, ci) => (
+                      {loc.criteria_breakdown.map((c, ci) => {
+                        const noData = c.score === null || c.score === undefined;
+                        return (
                         <div key={ci} className="drawer-criterion">
                           <div className="criterion-row">
                             <DirectionIcon direction={c.direction} />
-                            <span className="criterion-name">{c.name}</span>
+                            <span className="criterion-name">{c.name}{(c as any).required && <span title="Required hard constraint" style={{ color: '#dc2626', marginLeft: 3 }}>*</span>}</span>
                             <EvidenceTag basis={c.evidenceBasis} />
-                            <span className="criterion-score">{c.score.toFixed(1)}</span>
+                            <span className="criterion-score">{noData ? '—' : (c.score as number).toFixed(1)}</span>
                           </div>
+                          {noData ? (
+                            <div className="criterion-insufficient" style={{ fontSize: '11px', color: '#991b1b', padding: '2px 0' }}>
+                              Insufficient data to evaluate this {(c as any).required ? 'required constraint' : 'factor'} — excluded from the score.
+                            </div>
+                          ) : (
                           <div className="criterion-bar-track">
-                            <div className={`criterion-bar-fill ${c.direction === 'negative' ? 'bar-negative' : 'bar-positive'}`} style={{ width: `${c.score * 10}%` }} />
+                            <div className={`criterion-bar-fill ${c.direction === 'negative' ? 'bar-negative' : 'bar-positive'}`} style={{ width: `${(c.score as number) * 10}%` }} />
                           </div>
+                          )}
                           <div className="criterion-meta">
-                            <span className="criterion-raw">{c.rawValue} observed</span>
+                            <span className="criterion-raw">{noData ? 'no data' : `${c.rawValue} observed`}</span>
                             <span className="criterion-weight-label">weight: {Math.round(c.weight * 100)}%</span>
                             <input
                               type="range" min="0" max="0.5" step="0.05" value={c.weight}
@@ -360,7 +380,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                           </div>
                           <p className="criterion-justification">{c.justification}</p>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* OSM Signals */}

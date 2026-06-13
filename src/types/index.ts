@@ -62,6 +62,7 @@ export type CriterionDirection = 'positive' | 'negative';
 export type EvidenceBasis =
   | 'osm-observed'        // OSM Overpass returned a positive count
   | 'osm-absent'          // OSM returned 0 — may be genuine absence or coverage gap
+  | 'insufficient-data'   // No data available — layer excluded, NOT scored 0 or 10
   | 'osm-derived'         // Derived/computed from OSM signals
   | 'google-corroborated' // OSM sparse but Google Places confirms activity (score boosted)
   | 'constraint-rule'     // Hard exclusion rule result
@@ -71,9 +72,10 @@ export type EvidenceBasis =
 export interface MCDACriteria {
   name: string;
   weight: number;
-  score: number;
-  rawValue: number;
+  score: number | null;        // null = insufficient data (layer excluded from composite)
+  rawValue: number | null;
   direction: CriterionDirection;
+  required?: boolean;          // hard-constraint layer
   justification: string;
   evidenceBasis: EvidenceBasis;
   osmQuery?: string;
@@ -109,6 +111,7 @@ export interface LocationData {
   osmSignals: Record<string, number>;
   pois: POI[];
   searchRadiusM: number;
+  scoreWithheld?: boolean;     // composite not computable (required data missing)
 }
 
 // ─── Analysis Result ───
