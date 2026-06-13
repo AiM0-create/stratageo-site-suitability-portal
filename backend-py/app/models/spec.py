@@ -99,6 +99,10 @@ class Catchment(BaseModel):
     type: Literal["euclidean", "walk", "drive"]
     meters: Optional[int] = None                  # required for euclidean
     minutes: Optional[int] = None                 # required for walk/drive
+    # Phase 2: count demand reachable within `minutes` of DRIVE in typical traffic
+    # (Google Routes). Only valid for type=drive and DESTINATION businesses —
+    # never for impulse/walk-by (cafe/QSR). Ignored for walk/euclidean.
+    trafficAware: bool = False
 
     @model_validator(mode="after")
     def check_units(self):
@@ -106,6 +110,8 @@ class Catchment(BaseModel):
             raise ValueError("euclidean catchment requires meters")
         if self.type in ("walk", "drive") and not self.minutes:
             raise ValueError(f"{self.type} catchment requires minutes")
+        if self.trafficAware and self.type != "drive":
+            self.trafficAware = False             # only meaningful for driving
         return self
 
 
