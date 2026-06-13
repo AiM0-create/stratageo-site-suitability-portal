@@ -1525,3 +1525,16 @@ body {
 }
 .spec-constraint-hard { background: #fee2e2; color: #991b1b; }
 .spec-constraint-soft { background: #e0f2fe; color: #075985; }
+
+/* ─── Computed network route metrics (v1.0.1.6) ─── */
+.drawer-routes { margin: 8px 0; padding: 8px 10px; background: #eff6ff; border-radius: 8px; }
+.drawer-routes-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #1e40af; margin-bottom: 5px; }
+.route-metric { padding: 5px 7px; margin: 4px 0; border-radius: 6px; background: #fff; border-left: 3px solid #94a3b8; font-size: 11px; }
+.route-metric.route-pass { border-left-color: #16a34a; }
+.route-metric.route-fail { border-left-color: #dc2626; }
+.route-metric.route-unavail { border-left-color: #d97706; }
+.route-metric-head { display: flex; justify-content: space-between; font-weight: 700; color: var(--gray-700, #334155); }
+.route-metric-mode { font-size: 9px; text-transform: uppercase; color: #64748b; background: #f1f5f9; padding: 1px 6px; border-radius: 999px; }
+.route-metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin: 3px 0; color: var(--gray-600, #475569); }
+.route-metric-unavail { color: #92400e; margin: 3px 0; }
+.route-metric-reason { font-size: 10px; color: #64748b; margin-top: 2px; }

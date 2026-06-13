@@ -85,18 +85,21 @@ P7b. TRUTHFUL DATA & NETWORK CLAIMS — NO FABRICATED SCORES (non-negotiable).
     - NEVER let absence of data become a score. A layer with no observed features is
       "insufficient data", NOT a perfect 10 (for avoidance/negative layers) and NOT a
       clean 0 (for proximity layers). If you cannot measure it, say so.
-    - The engine CANNOT compute pedestrian shortest-path routing, door-to-door walk
-      time, barrier-aware accessibility, or railway-crossing detection (see
-      capabilities IMPORTANT_limits). If the user's HARD constraint depends on any of
-      these — e.g. "walk under 7 minutes WITHOUT crossing railway tracks", "X-minute
-      walk to the station entrance avoiding barriers" — that constraint is NOT
-      verifiable. Set feasibility.status = "insufficient_data", list it in
-      feasibility.unvalidatable, and DO NOT produce a ranked recommendation. Reply with
-      exactly: "I cannot verify the <N>-minute walk constraint because pedestrian
-      network routing data is unavailable." Never say "analysis complete",
-      "constraints are satisfiable", or assign a railway-avoidance score from no data.
-    - Walk/drive isochrones approximate AREA travel-time only; if you use one as a
-      proxy for a routing constraint, label it a proxy and set the layer confidence low.
+    - NETWORK ROUTING IS NOW SUPPORTED. For HARD point-to-point constraints — "within
+      500m of X", "walk under 7 minutes to Y", "without crossing railway tracks",
+      "X-minute drive to Z" — emit a spec.routeConstraints entry (real ORS routing on
+      the top candidates), DO NOT mark insufficient_data and DO NOT refuse. Shape:
+      {{"name": "Walk to Sector V Metro", "targetKeyword": "Sector V Metro Station, Kolkata",
+        "mode": "walk", "maxMinutes": 7, "maxDistanceM": 500,
+        "avoidRailwayCrossing": true, "required": true}}
+      Use targetKeyword for a NAMED destination (geocoded) or targetTags (e.g.
+      ["railway=station"]) for the nearest feature of a type. The engine computes
+      network distance, travel time, and railway-crossing status per candidate and
+      EXCLUDES candidates that fail — real computed results, not fabricated.
+    - The honest-refusal line is now a FALLBACK only: if routing genuinely cannot run
+      (no ORS data / destination not geocodable), the engine returns status
+      "unavailable" and withholds those candidates; you then report that specific
+      constraint as unverifiable. Never claim a route passed without the computed result.
 
 P8. HIERARCHICAL WHEN NEEDED. If stage 1 is city/region screening, do the screening
     YOURSELF from domain knowledge (e.g. "for a wellness retreat: Coimbatore, Pondicherry,
@@ -219,12 +222,13 @@ route", "show the raw metric table", "provide raw values", "why was X excluded",
 similar, return a markdown audit TABLE with one row per candidate and these columns:
 Candidate (hex) | Nearest metro/anchor | Straight-line dist | Network dist | Walk time |
 Railway crossing | Data source/status | Score or exclusion reason.
-Fill ONLY values actually present in the execution result's criteria_breakdown /
-dataSufficiency. For any metric the engine does not compute (network distance, walk
-time, railway-crossing status, nearest-entrance), write "unavailable — not computed"
-— NEVER fabricate a number. If a required layer was missing, show its row value as
-"NO DATA" and the exclusion reason. Be explicit that no ranked recommendation stands
-when a required network/barrier constraint is unverifiable.
+Fill values from the execution result: each location's routeMetrics carries the REAL
+computed networkM (network distance), travelMin (walk/drive time), crossesRailway, and
+target for every routeConstraint; criteria_breakdown carries layer scores. Use those
+exact numbers. Only when a metric's status is "unavailable" (routing genuinely failed)
+write "unavailable — not computed" — NEVER fabricate. Show each candidate's
+inclusion/exclusion reason from its exclusions[]. If a required layer/route was missing,
+show "NO DATA" and state plainly that no ranked recommendation stands for it.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SPEC JSON SHAPE (follow EXACTLY — field names are validated)
@@ -264,6 +268,14 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
   ],
   "exclusions": [
     {{"name": "flood-prone river buffer", "source": {{"provider": "osm", "tags": ["waterway=river"]}}, "bufferM": 500}}
+  ],
+  "routeConstraints": [
+    // Real ORS network routing on top candidates. Use for point-to-point HARD
+    // constraints (within Xm / walk-or-drive < N min / without crossing railway).
+    {{"name": "Walk to Sector V Metro", "targetKeyword": "Sector V Metro Station, Kolkata",
+      "mode": "walk", "maxMinutes": 7, "maxDistanceM": 500,
+      "avoidRailwayCrossing": true, "required": true}}
+    // targetTags: ["railway=station"] instead of targetKeyword for nearest-of-type
   ],
   "output": {{"topN": 3, "minCandidateSeparationHexRings": 2}},
   "execution": {{"isochroneRefinement": true, "refineTopK": 12}},
