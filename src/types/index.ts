@@ -113,6 +113,7 @@ export interface LocationData {
   searchRadiusM: number;
   scoreWithheld?: boolean;     // composite not computable (required data missing)
   routeMetrics?: Record<string, RouteMetric>;  // computed network routing per constraint
+  trafficContext?: { congestionRatio: number; label: string; note: string };
 }
 
 export interface RouteMetric {

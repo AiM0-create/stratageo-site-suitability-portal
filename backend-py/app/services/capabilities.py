@@ -46,6 +46,17 @@ def capability_manifest() -> dict:
             "crossing railway tracks'. Note: scoring-LAYER walk/drive catchments remain "
             "calibrated isochrones/proxies; precise point-to-point checks use routeConstraints."
         ),
+        "trafficAwareCatchment": (
+            "A drive scoring-layer may set catchment.trafficAware=true to count demand "
+            "reachable within N minutes of DRIVE in TYPICAL TRAFFIC (Google Routes, "
+            "weekday evening peak) instead of free-flow. This is a CATCHMENT/REACHABILITY "
+            "signal for DESTINATION businesses (preschool, clinic, gym, supermarket, dark "
+            "kitchen, hospital, hotel) — people drive TO them. It is NOT a footfall/pass-by "
+            "signal: NEVER set trafficAware on impulse/walk-by businesses (cafe, QSR, "
+            "kiosk, convenience) — their demand is pedestrian, use walk/foot-traffic layers. "
+            "The engine also surfaces a per-candidate congestion ratio (typical-peak vs "
+            "free-flow) as a LOW-confidence 'area activity' indicator, shown for context."
+        ),
         "scoring": "per-hex weighted sum; percentile (p5–p95) or min-max normalization per layer; "
                    "negative-direction layers inverted; user weights preserved exactly (renormalized to sum 1, never clamped)",
         "exclusions": "hard mask: hex excluded if any exclusion-tag POI within bufferM",

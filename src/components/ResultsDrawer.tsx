@@ -336,6 +336,15 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
 
                 {isExpanded && (
                   <div className="drawer-loc-detail">
+                    {/* Traffic context (typical-peak congestion — low confidence) */}
+                    {loc.trafficContext && (
+                      <div className={`traffic-context traffic-${loc.trafficContext.label}`} title={loc.trafficContext.note}>
+                        <span className="traffic-badge">Traffic: {loc.trafficContext.label}</span>
+                        <span className="traffic-ratio">×{loc.trafficContext.congestionRatio.toFixed(2)} vs free-flow</span>
+                        <span className="traffic-conf">low-confidence area-activity signal</span>
+                      </div>
+                    )}
+
                     {/* Computed network routes (real ORS routing) */}
                     {loc.routeMetrics && Object.keys(loc.routeMetrics).length > 0 && (
                       <div className="drawer-routes">

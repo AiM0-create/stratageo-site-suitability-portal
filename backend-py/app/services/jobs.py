@@ -23,6 +23,7 @@ from ..engine.data_osm import fetch_all_layers
 from ..engine.data_places import fetch_places_pois
 from ..engine.grid import polyfill
 from ..engine.routing import evaluate_route_constraint, fetch_railway_lines
+from ..engine.traffic import traffic_catchment
 from ..engine.sandbox import run_custom_layer
 from ..engine.study_area import geocode, resolve_study_area, reverse_geocode_name
 from . import storage
@@ -246,6 +247,37 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     # keep geometry for map display of the eventual winners
                     iso_polygons[(layer.id, ci)] = poly
 
+    # ── 6a2. Traffic-aware drive catchment (Google Routes, destination biz) ──
+    # For drive layers flagged trafficAware, replace the isochrone count with the
+    # count of this layer's demand POIs reachable within `minutes` in typical
+    # traffic, per candidate. Also collect a per-candidate congestion ratio.
+    traffic_ctx: dict[int, list[float]] = {ci: [] for ci in candidates}
+    traffic_layers = [l for l in spec.layers if l.catchment.type == "drive" and l.catchment.trafficAware]
+    if traffic_layers and s.google_places_api_key:
+        from ..engine.scoring import haversine_m as _hav
+        _update(job, 80, "traffic", f"Traffic-aware drive catchments for top {len(candidates)} candidates...")
+        cand_cells = [hexes[i] for i in candidates]
+        drive_speed = s.drive_speed_m_per_min
+        for layer in traffic_layers:
+            pois = layer_pois.get(layer.id, [])
+            if not pois:
+                continue
+            upper_m = layer.catchment.minutes * drive_speed * 1.4   # straight-line prefilter
+            for ci, cell in zip(candidates, cand_cells):
+                near = [(p["lat"], p["lng"]) for p in pois
+                        if _hav(cell.lat, cell.lng, p["lat"], p["lng"]) <= upper_m]
+                if not near:
+                    scores[layer.id].refined[ci] = 0.0
+                    continue
+                reachable, congestion = await traffic_catchment(
+                    (cell.lat, cell.lng), near, float(layer.catchment.minutes),
+                )
+                if reachable is not None:
+                    scores[layer.id].refined[ci] = float(reachable)
+                    refined_any = True
+                if congestion is not None:
+                    traffic_ctx[ci].append(congestion)
+
     # ── 6b. Network route constraints (real ORS routing, top-K only) ──
     # e.g. "within 500m of Sector V Metro, walk < 7 min, without crossing railway".
     # Per candidate: nearest target, network distance/time, railway-crossing status.
@@ -315,6 +347,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         loc = results_mod.build_location(
             spec, hexes, ci, scores, layer_pois, name or f"Candidate {rank}", rank,
         )
+        # Traffic-context (typical-peak congestion ratio) — informational, low confidence.
+        ratios = traffic_ctx.get(ci, [])
+        if ratios:
+            avg = round(sum(ratios) / len(ratios), 2)
+            loc["trafficContext"] = {
+                "congestionRatio": avg,
+                "label": ("heavy" if avg >= 1.4 else "moderate" if avg >= 1.15 else "light"),
+                "note": f"Typical evening-peak drive times run {round((avg - 1) * 100)}% over free-flow "
+                        f"near this site — a low-confidence indicator of area activity.",
+            }
+
         # Attach computed route metrics + fold route failures into exclusions.
         rmetrics = route_results.get(ci, {})
         if rmetrics:

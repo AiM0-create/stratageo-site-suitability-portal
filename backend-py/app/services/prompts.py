@@ -254,8 +254,11 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
       "source": {{"provider": "osm", "tags": ["amenity=hospital"]}},
         // or {{"provider": "google_places", "types": ["hospital"], "keyword": null}}
         // "provider" is the REQUIRED discriminator key — never "type"
-      "catchment": {{"type": "drive", "minutes": 20}},
+      "catchment": {{"type": "drive", "minutes": 20, "trafficAware": false}},
         // euclidean → {{"type": "euclidean", "meters": 300}}; walk → {{"type": "walk", "minutes": 10}}
+        // trafficAware:true (DRIVE only) = reachable demand within N min in TYPICAL TRAFFIC.
+        // Use ONLY for destination businesses (preschool/clinic/gym/supermarket/dark
+        // kitchen/hospital/hotel). NEVER for cafe/QSR/walk-by (their demand is pedestrian).
       "normalization": {{"method": "percentile", "pLow": 5, "pHigh": 95}},
       "confidence": "high",                    // high | medium | low — honesty about the proxy
       "required": false,                       // true if this encodes a HARD user constraint
@@ -347,6 +350,17 @@ SPEC CONSTRUCTION
   leisure=*, natural=*, tourism=*, power=*). Competition layers → direction=negative.
   Rule of thumb: "would I find this on Google Maps as a pin?" → google_places.
   "Is this a road, a zone, a building footprint, or land cover?" → osm.
+- TRAFFIC-AWARE DRIVE CATCHMENT (destination businesses only): when the business is a
+  DESTINATION people drive to — preschool, clinic, gym, supermarket, dark/cloud kitchen,
+  hospital, hotel — its PRIMARY DEMAND layer (the residential / population / customer-
+  catchment one) MUST be a DRIVE layer with catchment.trafficAware=true and a realistic
+  minutes value (preschool/clinic 8-12, supermarket/gym 10-15, hospital/hotel 15-20) —
+  NOT euclidean. That drive-reachable demand IS the catchment. Example for a preschool:
+  {{"name":"Family residential catchment","source":{{"provider":"osm","tags":["building=residential","building=apartments"]}},
+    "catchment":{{"type":"drive","minutes":10,"trafficAware":true}},"direction":"positive","weight":30}}.
+  For IMPULSE/WALK-BY businesses — cafe, QSR, kiosk, convenience, high-street retail —
+  do NOT use trafficAware or drive demand; their footfall is pedestrian (walk catchments
+  + foot-traffic/Places density). Drive time ≠ footfall; never conflate them.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PRE-FLIGHT CHECKLIST (run silently before EVERY plan reply; fix failures before sending)
