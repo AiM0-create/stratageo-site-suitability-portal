@@ -440,7 +440,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
-    hex_grid = results_mod.build_hex_grid(hexes, composite, excluded)
+    hex_grid = results_mod.build_hex_grid(hexes, composite, excluded, scores)
 
     # ── Catchment outlines for the winners ───────────────────────────
     catchments = results_mod.build_catchments(spec, iso_polygons, finals, locations)
