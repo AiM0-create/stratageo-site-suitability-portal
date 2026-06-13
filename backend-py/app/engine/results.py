@@ -142,24 +142,40 @@ def build_location(
 MAX_HEX_GRID_CELLS = 3000
 
 
-def build_hex_grid(hexes: list[HexCell], composite, excluded) -> list[dict]:
-    """Per-hex suitability surface: boundary polygon + 0-10 score for choropleth.
-    Excluded hexes carry excluded=True so the frontend can hatch/grey them."""
+def build_hex_grid(hexes: list[HexCell], composite, excluded, scores=None) -> list[dict]:
+    """Per-hex suitability surface: boundary + composite 0-10 + per-factor 0-10.
+
+    layerScores values are direction-APPLIED (negative/competition layers already
+    inverted), so on every factor higher = more favourable — the choropleth can
+    use one green=good ramp for all factors, removing the 'red competition looks
+    good' ambiguity. Excluded hexes carry excluded=True for hatching/greying."""
     from .grid import cell_boundary
+    from .scoring import normalize
 
     order = range(len(hexes))
     if len(hexes) > MAX_HEX_GRID_CELLS:
         import numpy as np
         order = np.argsort(-composite)[:MAX_HEX_GRID_CELLS]
+
+    layer_list = [ls for ls in (scores or {}).values() if ls.has_data] if scores else []
+
     out = []
     for i in order:
         i = int(i)
-        out.append({
+        cell = {
             "h3": hexes[i].h3_id,
             "score": round(float(composite[i]) * 10, 2),
             "excluded": bool(excluded[i]),
             "boundary": cell_boundary(hexes[i].h3_id),
-        })
+        }
+        if layer_list:
+            cell["layerScores"] = {
+                ls.layer.name: round(float(
+                    normalize(float(ls.raw[i]), ls.norm_low, ls.norm_high, ls.layer.direction)
+                ) * 10, 1)
+                for ls in layer_list
+            }
+        out.append(cell)
     return out
 
 

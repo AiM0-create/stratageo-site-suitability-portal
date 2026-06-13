@@ -118,10 +118,14 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   }), [locations]);
 
   // Collect unique POI types from locations for heatmap toggles
+  // Factor names that have a real (non-null) score — each becomes a per-hex
+  // suitability choropleth (green = favorable for that factor, direction applied).
   const poiTypes = useMemo(() => {
-    const types = new Set<string>();
-    locations.forEach(loc => loc.pois.forEach(p => types.add(p.type)));
-    return Array.from(types).slice(0, 6);
+    const names = new Set<string>();
+    locations.forEach(loc => loc.criteria_breakdown.forEach(c => {
+      if (c.score !== null && c.score !== undefined) names.add(c.name);
+    }));
+    return Array.from(names).slice(0, 8);
   }, [locations]);
 
   return (
@@ -269,17 +273,23 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           </div>
         )}
 
-        {/* Heatmap layer toggles */}
+        {/* Suitability-by-factor choropleth toggles */}
         {poiTypes.length > 0 && (
           <div className="drawer-layers">
-            <div className="drawer-layers-label">Heatmap Layers</div>
+            <div className="drawer-layers-label">Map view: suitability by factor</div>
+            <button
+              className={`drawer-layer-btn ${!heatmapType ? 'active' : ''}`}
+              onClick={() => onHeatmapChange(null)}
+            >
+              Overall
+            </button>
             {poiTypes.map(t => (
               <button
                 key={t}
                 className={`drawer-layer-btn ${heatmapType === t ? 'active' : ''}`}
                 onClick={() => onHeatmapChange(heatmapType === t ? null : t)}
               >
-                {t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ')}
+                {t}
               </button>
             ))}
           </div>

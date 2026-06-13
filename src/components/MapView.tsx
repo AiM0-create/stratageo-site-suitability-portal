@@ -22,8 +22,8 @@ interface MapViewProps {
   catchments?: CatchmentOutline[];
 }
 
-/** Score 0-10 → red→amber→green ramp for the suitability surface */
-const hexColor = (score: number) => `hsl(${Math.round((Math.max(0, Math.min(10, score)) / 10) * 130)}, 78%, 45%)`;
+/** Normalised 0..1 (0 = least, 1 = most favourable) → red→amber→green ramp. */
+const rampColor = (t: number) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) * 130)}, 80%, 46%)`;
 
 const CATCHMENT_COLORS: Record<string, string> = { walk: '#059669', drive: '#7c3aed' };
 
@@ -59,7 +59,6 @@ export const MapView: React.FC<MapViewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any>(null);
-  const heatRef = useRef<any>(null);
   const userLayerRef = useRef<any>(null);
   const tileLayerRef = useRef<any>(null);
   const hexLayerRef = useRef<any>(null);
@@ -132,10 +131,6 @@ export const MapView: React.FC<MapViewProps> = ({
 
     map.stop();
     markers.clearLayers();
-    if (heatRef.current) {
-      map.removeLayer(heatRef.current);
-      heatRef.current = null;
-    }
 
     if (locations.length === 0) {
       map.flyTo(config.map.defaultCenter, config.map.defaultZoom, { animate: true, duration: 1 });
@@ -143,7 +138,6 @@ export const MapView: React.FC<MapViewProps> = ({
     }
 
     const bounds: [number, number][] = [];
-    const heatPoints: [number, number, number][] = [];
 
     // Sort: non-excluded first by score
     const ranked = [...locations].sort((a, b) => {
@@ -161,17 +155,6 @@ export const MapView: React.FC<MapViewProps> = ({
       const displayRank = loc.excluded ? 0 : visibleRank;
       const isSelected = selectedLocations.some(sl => sl.name === loc.name);
       const icon = getMarkerIcon(displayRank, isSelected, loc.excluded);
-
-      // Heatmap data
-      if (heatmapType && loc.pois) {
-        loc.pois.filter(p => p.type === heatmapType).forEach(p => {
-          const pLat = Number(p.lat);
-          const pLng = Number(p.lng);
-          if (Number.isFinite(pLat) && Number.isFinite(pLng)) {
-            heatPoints.push([pLat, pLng, 1]);
-          }
-        });
-      }
 
       try {
         const marker = L.marker([lat, lng], { icon });
@@ -207,13 +190,6 @@ export const MapView: React.FC<MapViewProps> = ({
       } catch { /* skip */ }
     });
 
-    // Heatmap
-    if (heatPoints.length > 0 && typeof L.heatLayer === 'function') {
-      try {
-        heatRef.current = L.heatLayer(heatPoints, { radius: 25, blur: 15, maxZoom: 15 }).addTo(map);
-      } catch { /* skip */ }
-    }
-
     // Fit bounds
     const selCoords = selectedLocations
       .map(l => [Number(l.lat), Number(l.lng)] as [number, number])
@@ -240,29 +216,49 @@ export const MapView: React.FC<MapViewProps> = ({
     }
     if (!showHexGrid || !hexGrid || hexGrid.length === 0) return;
 
-    // Canvas renderer keeps thousands of polygons smooth
+    // Which value are we colouring? Overall composite, or one factor's per-hex
+    // score (direction already applied → higher = more favourable for every factor).
+    const factor = heatmapType || null;
+    const scoreOf = (cell: HexGridCell): number | undefined =>
+      factor ? cell.layerScores?.[factor] : cell.score;
+
+    // Contrast-stretch across the actual value range so mid-range grids don't
+    // wash out to a single colour (the old "everything looks green" problem).
+    const vals = hexGrid
+      .filter(c => !c.excluded)
+      .map(scoreOf)
+      .filter((v): v is number => typeof v === 'number');
+    const lo = vals.length ? Math.min(...vals) : 0;
+    const hi = vals.length ? Math.max(...vals) : 10;
+    const span = hi - lo > 0.1 ? hi - lo : 1;
+
     const renderer = L.canvas({ padding: 0.3 });
     const group = L.layerGroup();
     for (const cell of hexGrid) {
       if (!Array.isArray(cell.boundary) || cell.boundary.length < 3) continue;
+      const v = scoreOf(cell);
+      const hasVal = typeof v === 'number';
+      const t = hasVal ? Math.max(0, Math.min(1, (v! - lo) / span)) : 0;  // 0=worst .. 1=best in view
       try {
         const poly = L.polygon(cell.boundary, {
           renderer,
           stroke: false,
-          fillColor: cell.excluded ? '#64748b' : hexColor(cell.score),
-          fillOpacity: cell.excluded ? 0.15 : 0.18 + (cell.score / 10) * 0.32,
+          fillColor: cell.excluded || !hasVal ? '#64748b' : rampColor(t),
+          fillOpacity: cell.excluded ? 0.22 : !hasVal ? 0.12 : 0.30 + t * 0.45,
           interactive: true,
         });
-        poly.bindTooltip(
-          cell.excluded ? 'Excluded zone' : `Suitability: ${cell.score.toFixed(1)}/10`,
-          { sticky: true, direction: 'top', className: 'sg-tooltip-container' },
-        );
+        const label = cell.excluded
+          ? 'Excluded zone'
+          : !hasVal
+            ? `${factor}: no data here`
+            : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10`;
+        poly.bindTooltip(label, { sticky: true, direction: 'top', className: 'sg-tooltip-container' });
         group.addLayer(poly);
       } catch { /* skip malformed cell */ }
     }
     group.addTo(map);
     hexLayerRef.current = group;
-  }, [hexGrid, showHexGrid]);
+  }, [hexGrid, showHexGrid, heatmapType]);
 
   // ── Catchment isochrone outlines (v2 engine, selected location) ──
   useEffect(() => {
@@ -425,13 +421,20 @@ export const MapView: React.FC<MapViewProps> = ({
             <>
               <label className="sg-legend-item sg-legend-toggle">
                 <input type="checkbox" checked={showHexGrid} onChange={e => setShowHexGrid(e.target.checked)} />
-                Suitability Grid
+                {heatmapType ? heatmapType : 'Overall suitability'}
               </label>
               {showHexGrid && (
-                <div className="sg-legend-gradient-row">
-                  <span className="sg-legend-gradient" />
-                  <span className="sg-legend-gradient-labels"><span>0</span><span>10</span></span>
-                </div>
+                <>
+                  <div className="sg-legend-gradient-row">
+                    <span className="sg-legend-gradient" />
+                    <span className="sg-legend-gradient-labels"><span>low</span><span>high</span></span>
+                  </div>
+                  <div className="sg-legend-note">
+                    {heatmapType
+                      ? 'Greener = more favourable for this factor (relative to this area).'
+                      : 'Greener = higher overall score (relative to this area).'}
+                  </div>
+                </>
               )}
             </>
           )}

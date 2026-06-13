@@ -140,6 +140,8 @@ export interface HexGridCell {
   score: number;            // 0-10 composite (Pass-A surface)
   excluded: boolean;
   boundary: [number, number][]; // [lat, lng] ring
+  /** Per-factor 0-10, direction already applied (higher = more favorable for all). */
+  layerScores?: Record<string, number>;
 }
 
 export interface CatchmentOutline {
