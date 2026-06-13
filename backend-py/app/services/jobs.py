@@ -173,6 +173,16 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     _update(job, 55, "score_pass_a", f"Scoring {len(hexes)} hexes (Pass A)...")
     composite, scores = scoring.pass_a(spec, hexes, layer_pois)
 
+    # Data-sufficiency gate: layers whose source returned nothing are excluded
+    # from the composite (never scored 0/10 from absence). If a REQUIRED layer is
+    # missing, no candidate can be truthfully validated → withhold the ranking.
+    no_data_layers = [ls.layer.name for ls in scores.values() if not ls.has_data]
+    required_missing = scoring.required_missing_layers(spec, scores)
+    if no_data_layers:
+        fallbacks.append(
+            "Layers with no available data (excluded from scoring): " + ", ".join(no_data_layers)
+        )
+
     # Custom layers (sandbox) — override their Pass-A zeros
     if any(l.source.provider == "custom" for l in spec.layers):
         if s.sandbox_enabled:
@@ -239,7 +249,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     _update(job, 85, "score_pass_b", "Final ranking...")
     finals = sorted(
         candidates,
-        key=lambda ci: scoring.composite_for_hex(spec, scores, ci)[0],
+        key=lambda ci: (scoring.composite_for_hex(spec, scores, ci)[0] or -1.0),
         reverse=True,
     )[: spec.output.topN]
 
@@ -256,7 +266,37 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             ),
         )
 
-    summary, reasonings = await results_mod.write_explanations(spec, locations)
+    # ── Required-data gate: a hard-constraint layer with no data means NO
+    # candidate can be truthfully validated. Withhold the ranking: every
+    # candidate is marked excluded with the honest reason, and the composite
+    # is flagged invalid. The raw audit rows remain so the user can inspect them.
+    if required_missing:
+        reason = ("Required constraint(s) could not be evaluated — no data available for: "
+                  + ", ".join(required_missing))
+        for loc in locations:
+            loc["excluded"] = True
+            loc["scoreWithheld"] = True
+            loc["exclusions"] = loc.get("exclusions", []) + [{
+                "rule": "required_data_present",
+                "passed": False,
+                "detail": reason,
+                "evidenceBasis": "insufficient-data",
+            }]
+
+    data_sufficiency = {
+        "status": "insufficient" if required_missing else ("partial" if no_data_layers else "sufficient"),
+        "noDataLayers": no_data_layers,
+        "requiredMissing": required_missing,
+        "note": (
+            "Insufficient data for required constraint(s): " + ", ".join(required_missing)
+            + ". No ranked recommendation is given."
+        ) if required_missing else (
+            "Some factors had no data and were excluded from scoring: " + ", ".join(no_data_layers)
+            if no_data_layers else "All factors scored from observed data."
+        ),
+    }
+
+    summary, reasonings = await results_mod.write_explanations(spec, locations, data_sufficiency)
     for loc, reasoning in zip(locations, reasonings):
         loc["reasoning"] = reasoning
 
@@ -285,6 +325,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "grounding_sources": [],
         "hexGrid": hex_grid,
         "catchments": catchments,
+        "dataSufficiency": data_sufficiency,
     }
     job.status = "done"
     job.progress = 100

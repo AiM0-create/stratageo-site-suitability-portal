@@ -714,7 +714,7 @@ export async function runLiveAnalysis(
         mcda_score: loc.mcda_score,
         criteria_breakdown: loc.criteria_breakdown.map(c => ({
           name: c.name,
-          score: c.score,
+          score: c.score ?? 0,
           weight: c.weight,
           justification: c.justification,
         })),

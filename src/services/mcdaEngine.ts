@@ -278,7 +278,7 @@ export function computeMCDAScore(criteria: MCDACriteria[]): number {
   let totalWeight = 0;
   for (const c of criteria) {
     if (c.weight <= 0) continue;
-    totalWeighted += c.score * c.weight;
+    totalWeighted += (c.score ?? 0) * c.weight;
     totalWeight += c.weight;
   }
   return totalWeight > 0 ? Math.round((totalWeighted / totalWeight) * 10) / 10 : 0;
@@ -349,7 +349,7 @@ export function recalculateWithWeights(locations: LocationData[], customWeights:
 
     const newCriteria = loc.criteria_breakdown.map(c => {
       const weight = Math.max(0, Math.min(1, customWeights[c.name] ?? c.weight));
-      totalWeighted += c.score * weight;
+      totalWeighted += (c.score ?? 0) * weight;
       totalWeight += weight;
       return { ...c, weight };
     });
@@ -372,19 +372,19 @@ export function generateReasoning(
 
   // Top positive signals
   const positives = criteria
-    .filter(c => c.direction === 'positive' && c.score >= 6)
-    .sort((a, b) => b.score * b.weight - a.score * a.weight);
+    .filter(c => c.direction === 'positive' && (c.score ?? 0) >= 6)
+    .sort((a, b) => (b.score ?? 0) * b.weight - (a.score ?? 0) * a.weight);
 
   if (positives.length > 0) {
     const topSignals = positives.slice(0, 2).map(c =>
-      `${c.name.toLowerCase()} (score ${c.score}/10)`
+      `${c.name.toLowerCase()} (score ${(c.score ?? 0)}/10)`
     ).join(' and ');
     parts.push(`${name} scores well on ${topSignals} within a ${radiusKm}km radius.`);
   }
 
   // Profile alignment issues (land availability, location-type fit)
   const profileConcerns = criteria.filter(c =>
-    (c.name === 'Land availability' || c.name === 'Location-type fit') && c.score <= 3.5
+    (c.name === 'Land availability' || c.name === 'Location-type fit') && (c.score ?? 0) <= 3.5
   );
   for (const concern of profileConcerns) {
     parts.push(concern.justification);
@@ -392,8 +392,8 @@ export function generateReasoning(
 
   // Key negatives
   const negatives = criteria
-    .filter(c => c.direction === 'negative' && c.score <= 4 && c.name !== 'Land availability' && c.name !== 'Location-type fit')
-    .sort((a, b) => a.score - b.score);
+    .filter(c => c.direction === 'negative' && (c.score ?? 0) <= 4 && c.name !== 'Land availability' && c.name !== 'Location-type fit')
+    .sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
 
   if (negatives.length > 0) {
     const concern = negatives[0];

@@ -127,6 +127,11 @@ class Layer(BaseModel):
     confidence: Literal["high", "medium", "low"] = "medium"
     whyItMatters: Optional[str] = None            # one line tying factor → success metric
     proxyWarning: Optional[str] = None            # plain-language weakness for weak proxies
+    # Hard-constraint layer (v1.0.1.5): the user said "must"/"within"/"without".
+    # If a required layer has NO data, candidates can't be validated → excluded
+    # from ranking and the analysis is flagged insufficient_data (never scored 0/10
+    # from missing data).
+    required: bool = False
     notes: Optional[str] = None
 
 

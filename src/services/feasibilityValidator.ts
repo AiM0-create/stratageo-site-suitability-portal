@@ -92,14 +92,14 @@ export function validateFeasibility(
   const landCriteria = nonExcluded[0]?.criteria_breakdown.find(c => c.name === 'Land availability');
   const locationFitCriteria = nonExcluded[0]?.criteria_breakdown.find(c => c.name === 'Location-type fit');
 
-  if (landCriteria && landCriteria.score <= 2.0 && profile.landIntensity === 'high') {
+  if (landCriteria && (landCriteria.score ?? 0) <= 2.0 && profile.landIntensity === 'high') {
     warnings.push(
       `⚠ Site feasibility concern: This ${spec.businessType} requires large open land, but all candidate areas are densely developed. ` +
       `Scores reflect amenity proximity but do not guarantee land availability. Consider periurban or rural locations.`,
     );
   }
 
-  if (locationFitCriteria && locationFitCriteria.score <= 3.0) {
+  if (locationFitCriteria && (locationFitCriteria.score ?? 0) <= 3.0) {
     warnings.push(
       `Location type mismatch: The area's development pattern doesn't align with what a ${spec.businessType} typically needs.`,
     );
@@ -111,8 +111,8 @@ export function validateFeasibility(
 
   // Determine overall quality — profile alignment can override raw scores
   let overallQuality: FeasibilityResult['overallQuality'];
-  const hasLandMismatch = landCriteria && landCriteria.score <= 2.0 && profile.landIntensity === 'high';
-  const hasLocationMismatch = locationFitCriteria && locationFitCriteria.score <= 2.5;
+  const hasLandMismatch = landCriteria && (landCriteria.score ?? 0) <= 2.0 && profile.landIntensity === 'high';
+  const hasLocationMismatch = locationFitCriteria && (locationFitCriteria.score ?? 0) <= 2.5;
 
   if (hasLandMismatch) {
     // Land-intensive business in dense urban = weak regardless of other scores
