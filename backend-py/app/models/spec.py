@@ -141,6 +141,32 @@ class Exclusion(BaseModel):
     bufferM: int = 300
 
 
+class RouteConstraint(BaseModel):
+    """A network-routing constraint evaluated per top-K candidate (v1.0.1.6).
+
+    Routes from each candidate hex to a target (a named place or the nearest
+    feature of a tag-set) and checks distance/time and optional barrier
+    avoidance. Real ORS Directions — not a straight-line proxy.
+    e.g. "within 500m of Sector V Metro, walk < 7 min, without crossing railway".
+    """
+    name: str
+    targetKeyword: Optional[str] = None           # named destination, geocoded ("Sector V Metro Station")
+    targetTags: Optional[list[str]] = None        # or nearest feature of these OSM tags
+    mode: Literal["walk", "drive"] = "walk"
+    maxMinutes: Optional[float] = None             # fail if network travel time exceeds this
+    maxDistanceM: Optional[float] = None           # fail if network distance exceeds this
+    avoidRailwayCrossing: bool = False             # route must not cross railway tracks
+    required: bool = True                          # hard constraint → failing candidates excluded
+
+    @model_validator(mode="after")
+    def check_target(self):
+        if not self.targetKeyword and not self.targetTags:
+            raise ValueError("routeConstraint needs targetKeyword or targetTags")
+        if self.maxMinutes is None and self.maxDistanceM is None and not self.avoidRailwayCrossing:
+            raise ValueError("routeConstraint needs at least one of maxMinutes/maxDistanceM/avoidRailwayCrossing")
+        return self
+
+
 class Output(BaseModel):
     topN: int = 3
     minCandidateSeparationHexRings: int = 2
@@ -226,6 +252,7 @@ class SpecV2(BaseModel):
     grid: Grid = Grid()
     layers: list[Layer] = Field(min_length=1, max_length=MAX_LAYERS)
     exclusions: list[Exclusion] = []
+    routeConstraints: list[RouteConstraint] = []
     output: Output = Output()
     execution: Execution = Execution()
     plan: ConsultantPlan = ConsultantPlan()

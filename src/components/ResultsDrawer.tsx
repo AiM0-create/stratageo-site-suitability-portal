@@ -336,6 +336,32 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
 
                 {isExpanded && (
                   <div className="drawer-loc-detail">
+                    {/* Computed network routes (real ORS routing) */}
+                    {loc.routeMetrics && Object.keys(loc.routeMetrics).length > 0 && (
+                      <div className="drawer-routes">
+                        <div className="drawer-routes-title">Network Routes (computed)</div>
+                        {Object.entries(loc.routeMetrics).map(([cname, m]) => (
+                          <div key={cname} className={`route-metric ${m.passed === true ? 'route-pass' : m.passed === false ? 'route-fail' : 'route-unavail'}`}>
+                            <div className="route-metric-head">
+                              <span>{m.passed === true ? '✓' : m.passed === false ? '✕' : '?'} {cname}</span>
+                              <span className="route-metric-mode">{m.mode}</span>
+                            </div>
+                            {m.status === 'evaluated' ? (
+                              <div className="route-metric-grid">
+                                <span>Network dist: <b>{m.networkM}m</b></span>
+                                <span>Walk time: <b>{m.travelMin} min</b></span>
+                                <span>Straight-line: {m.straightLineM}m</span>
+                                <span>Crosses railway: <b>{m.crossesRailway ? 'YES' : 'no'}</b></span>
+                              </div>
+                            ) : (
+                              <div className="route-metric-unavail">Route unavailable — {m.reason}</div>
+                            )}
+                            <div className="route-metric-reason">{m.reason}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Exclusion checks */}
                     {loc.exclusions.length > 0 && (
                       <div className="drawer-exclusions">

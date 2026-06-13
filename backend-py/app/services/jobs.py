@@ -22,8 +22,9 @@ from ..engine.catchments import count_pois_in_polygon, fetch_isochrones
 from ..engine.data_osm import fetch_all_layers
 from ..engine.data_places import fetch_places_pois
 from ..engine.grid import polyfill
+from ..engine.routing import evaluate_route_constraint, fetch_railway_lines
 from ..engine.sandbox import run_custom_layer
-from ..engine.study_area import resolve_study_area, reverse_geocode_name
+from ..engine.study_area import geocode, resolve_study_area, reverse_geocode_name
 from . import storage
 
 logger = logging.getLogger(__name__)
@@ -245,10 +246,61 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     # keep geometry for map display of the eventual winners
                     iso_polygons[(layer.id, ci)] = poly
 
+    # ── 6b. Network route constraints (real ORS routing, top-K only) ──
+    # e.g. "within 500m of Sector V Metro, walk < 7 min, without crossing railway".
+    # Per candidate: nearest target, network distance/time, railway-crossing status.
+    # route_results[hex_index][constraint_name] = metrics dict.
+    route_results: dict[int, dict[str, dict]] = {ci: {} for ci in candidates}
+    route_unavailable: list[str] = []   # required route constraints that couldn't be computed
+    cand_cells = [hexes[i] for i in candidates]
+    if spec.routeConstraints:
+        _update(job, 78, "routing", f"Routing top {len(candidates)} candidates (network + barriers)...")
+        # Railway geometry once, if any constraint needs crossing checks
+        need_rail = any(rc.avoidRailwayCrossing for rc in spec.routeConstraints)
+        railway_lines = await fetch_railway_lines(overpass_bbox) if need_rail else []
+        for rc in spec.routeConstraints:
+            # Resolve target points: named place (geocode) or nearest of tag-set
+            targets: list[tuple[float, float]] = []
+            if rc.targetKeyword:
+                pt = await geocode(rc.targetKeyword)
+                if pt:
+                    targets = [pt]
+            if not targets and rc.targetTags:
+                pois = fetched.get(f"__route__{rc.name}", []) or \
+                       (await fetch_all_layers({f"__route__{rc.name}": rc.targetTags}, overpass_bbox)).get(f"__route__{rc.name}", [])
+                targets = [(p["lat"], p["lng"]) for p in pois]
+            metrics = await evaluate_route_constraint(rc, cand_cells, targets, railway_lines)
+            any_evaluated = False
+            for idx, ci in enumerate(candidates):
+                m = metrics.get(idx, {"status": "unavailable", "passed": None})
+                route_results[ci][rc.name] = {**m, "mode": rc.mode,
+                                              "avoidRailwayCrossing": rc.avoidRailwayCrossing,
+                                              "maxMinutes": rc.maxMinutes, "maxDistanceM": rc.maxDistanceM,
+                                              "required": rc.required}
+                if m.get("status") == "evaluated":
+                    any_evaluated = True
+            if rc.required and not any_evaluated:
+                route_unavailable.append(rc.name)
+                fallbacks.append(f"Route constraint '{rc.name}' could not be computed (destination or routing unavailable).")
+
+    def passes_required_routes(ci: int) -> bool:
+        # A required route must be PROVEN to pass (passed is True). Unavailable
+        # (passed=None) or failed (passed=False) → not eligible to be a winner.
+        for rc in spec.routeConstraints:
+            if not rc.required:
+                continue
+            m = route_results.get(ci, {}).get(rc.name)
+            if not m or m.get("passed") is not True:
+                return False
+        return True
+
     # ── 7. Re-rank with refined values, take topN ───────────────────
+    # Candidates failing a REQUIRED route constraint are dropped from ranking
+    # (real computed exclusion — not a fabricated score).
     _update(job, 85, "score_pass_b", "Final ranking...")
+    eligible = [ci for ci in candidates if passes_required_routes(ci)] or candidates
     finals = sorted(
-        candidates,
+        eligible,
         key=lambda ci: (scoring.composite_for_hex(spec, scores, ci)[0] or -1.0),
         reverse=True,
     )[: spec.output.topN]
@@ -260,37 +312,72 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     ))
     locations = []
     for rank, (ci, name) in enumerate(zip(finals, names), 1):
-        locations.append(
-            results_mod.build_location(
-                spec, hexes, ci, scores, layer_pois, name or f"Candidate {rank}", rank,
-            ),
+        loc = results_mod.build_location(
+            spec, hexes, ci, scores, layer_pois, name or f"Candidate {rank}", rank,
         )
+        # Attach computed route metrics + fold route failures into exclusions.
+        rmetrics = route_results.get(ci, {})
+        if rmetrics:
+            loc["routeMetrics"] = rmetrics
+            for cname, m in rmetrics.items():
+                if not m.get("required"):
+                    continue
+                if m.get("passed") is True:
+                    loc["exclusions"].append({
+                        "rule": f"route: {cname}", "passed": True,
+                        "detail": m.get("reason", "route constraint met"),
+                        "evidenceBasis": "constraint-rule",
+                    })
+                elif m.get("passed") is False:
+                    loc["excluded"] = True
+                    loc["exclusions"].append({
+                        "rule": f"route: {cname}", "passed": False,
+                        "detail": m.get("reason", "route constraint failed"),
+                        "evidenceBasis": "constraint-rule",
+                    })
+                else:  # status unavailable → cannot validate → exclude
+                    loc["excluded"] = True
+                    loc["exclusions"].append({
+                        "rule": f"route: {cname}", "passed": False,
+                        "detail": "Could not compute this route — " + m.get("reason", "routing unavailable"),
+                        "evidenceBasis": "insufficient-data",
+                    })
+        locations.append(loc)
 
     # ── Required-data gate: a hard-constraint layer with no data means NO
     # candidate can be truthfully validated. Withhold the ranking: every
     # candidate is marked excluded with the honest reason, and the composite
     # is flagged invalid. The raw audit rows remain so the user can inspect them.
-    if required_missing:
-        reason = ("Required constraint(s) could not be evaluated — no data available for: "
-                  + ", ".join(required_missing))
+    all_required_missing = required_missing + route_unavailable
+    if all_required_missing:
+        reason = ("Required constraint(s) could not be evaluated: "
+                  + ", ".join(all_required_missing))
         for loc in locations:
             loc["excluded"] = True
             loc["scoreWithheld"] = True
             loc["exclusions"] = loc.get("exclusions", []) + [{
-                "rule": "required_data_present",
+                "rule": "required_constraint_evaluable",
                 "passed": False,
                 "detail": reason,
                 "evidenceBasis": "insufficient-data",
             }]
 
+    # No candidate satisfied the required route constraints (all computed, all failed)
+    no_eligible = bool(spec.routeConstraints) and not route_unavailable and all(
+        loc.get("excluded") for loc in locations
+    ) and len(locations) > 0
+
     data_sufficiency = {
-        "status": "insufficient" if required_missing else ("partial" if no_data_layers else "sufficient"),
+        "status": "insufficient" if all_required_missing else ("partial" if no_data_layers else "sufficient"),
         "noDataLayers": no_data_layers,
-        "requiredMissing": required_missing,
+        "requiredMissing": all_required_missing,
+        "noEligibleCandidates": no_eligible,
         "note": (
-            "Insufficient data for required constraint(s): " + ", ".join(required_missing)
+            "Insufficient data for required constraint(s): " + ", ".join(all_required_missing)
             + ". No ranked recommendation is given."
-        ) if required_missing else (
+        ) if all_required_missing else (
+            "No candidate site satisfied all required constraints."
+            if no_eligible else
             "Some factors had no data and were excluded from scoring: " + ", ".join(no_data_layers)
             if no_data_layers else "All factors scored from observed data."
         ),

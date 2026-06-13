@@ -112,6 +112,22 @@ export interface LocationData {
   pois: POI[];
   searchRadiusM: number;
   scoreWithheld?: boolean;     // composite not computable (required data missing)
+  routeMetrics?: Record<string, RouteMetric>;  // computed network routing per constraint
+}
+
+export interface RouteMetric {
+  status: 'evaluated' | 'unavailable';
+  target?: [number, number];
+  straightLineM?: number | null;
+  networkM?: number | null;
+  travelMin?: number | null;
+  crossesRailway?: boolean | null;
+  passed?: boolean | null;
+  reason?: string;
+  mode?: 'walk' | 'drive';
+  maxMinutes?: number | null;
+  maxDistanceM?: number | null;
+  required?: boolean;
 }
 
 // ─── Analysis Result ───

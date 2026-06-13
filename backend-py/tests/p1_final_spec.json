@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "objective": "site selection MCDA for a sweets-first QSR format in Kolkata",
+  "objective": "Site selection MCDA for a sweets-first QSR format in Kolkata (₹250–₹400 ATP)",
   "businessType": "sweets-first QSR",
   "studyArea": {
     "type": "places",
@@ -9,8 +9,7 @@
       "Salt Lake, Kolkata",
       "Sector V, Kolkata",
       "Newtown, Kolkata"
-    ],
-    "hullBufferM": 500
+    ]
   },
   "grid": {
     "type": "h3",
@@ -25,8 +24,7 @@
       "source": {
         "provider": "osm",
         "tags": [
-          "building=residential",
-          "landuse=residential"
+          "building=residential"
         ]
       },
       "catchment": {
@@ -38,20 +36,22 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "confidence": "high",
-      "whyItMatters": "Proximity to residential areas increases walk-in traffic."
+      "confidence": "medium",
+      "required": false,
+      "whyItMatters": "Proximity to residential areas increases potential footfall.",
+      "proxyWarning": "OSM residential data may undercount informal settlements."
     },
     {
       "id": "L4",
       "name": "Food Cluster Whitespace & Ecosystem",
       "weight": 17,
-      "direction": "positive",
+      "direction": "negative",
       "source": {
         "provider": "google_places",
         "types": [
-          "restaurant",
-          "cafe"
-        ]
+          "restaurant"
+        ],
+        "keyword": "sweets"
       },
       "catchment": {
         "type": "euclidean",
@@ -62,8 +62,9 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "confidence": "medium",
-      "whyItMatters": "Identifies areas with potential for new food outlets."
+      "confidence": "high",
+      "required": false,
+      "whyItMatters": "Identifies gaps in existing food clusters to target underserved areas."
     },
     {
       "id": "L7",
@@ -73,8 +74,7 @@
       "source": {
         "provider": "osm",
         "tags": [
-          "highway=primary",
-          "highway=secondary"
+          "highway=primary"
         ]
       },
       "catchment": {
@@ -87,6 +87,7 @@
         "pHigh": 95
       },
       "confidence": "high",
+      "required": false,
       "whyItMatters": "High visibility locations attract more customers."
     },
     {
@@ -111,6 +112,7 @@
         "pHigh": 95
       },
       "confidence": "medium",
+      "required": false,
       "whyItMatters": "Proximity to cultural and market areas increases foot traffic."
     },
     {
@@ -121,8 +123,7 @@
       "source": {
         "provider": "osm",
         "tags": [
-          "building=residential",
-          "landuse=residential"
+          "building=residential"
         ]
       },
       "catchment": {
@@ -134,8 +135,9 @@
         "pLow": 5,
         "pHigh": 95
       },
-      "confidence": "high",
-      "whyItMatters": "Larger delivery catchments increase potential revenue."
+      "confidence": "medium",
+      "required": false,
+      "whyItMatters": "Larger delivery catchments increase potential delivery sales."
     },
     {
       "id": "L3",
@@ -145,8 +147,7 @@
       "source": {
         "provider": "osm",
         "tags": [
-          "public_transport=stop_position",
-          "railway=station"
+          "public_transport=stop_position"
         ]
       },
       "catchment": {
@@ -159,7 +160,8 @@
         "pHigh": 95
       },
       "confidence": "high",
-      "whyItMatters": "Proximity to transit nodes increases accessibility."
+      "required": false,
+      "whyItMatters": "Proximity to transit increases accessibility for customers."
     },
     {
       "id": "L6",
@@ -171,7 +173,8 @@
         "types": [
           "office",
           "school"
-        ]
+        ],
+        "keyword": null
       },
       "catchment": {
         "type": "drive",
@@ -183,7 +186,8 @@
         "pHigh": 95
       },
       "confidence": "medium",
-      "whyItMatters": "Daytime population increases potential customer base."
+      "required": false,
+      "whyItMatters": "Nearby offices and schools increase daytime customer base."
     },
     {
       "id": "L8",
@@ -206,10 +210,12 @@
         "pHigh": 95
       },
       "confidence": "medium",
-      "whyItMatters": "Dense apartment clusters indicate potential customer base."
+      "required": false,
+      "whyItMatters": "High apartment density indicates potential customer base."
     }
   ],
   "exclusions": [],
+  "routeConstraints": [],
   "output": {
     "topN": 3,
     "minCandidateSeparationHexRings": 2
@@ -221,7 +227,7 @@
   "constraints": [],
   "feasibility": {
     "status": "feasible",
-    "explanation": "All constraints are satisfiable within the study area.",
+    "explanation": "The study area and methodology constraints are feasible for analysis.",
     "conflicts": [],
     "relaxationOptions": [],
     "unvalidatable": []
@@ -233,11 +239,11 @@
     "assumptions": [
       {
         "assumption": "Study area covers Chinar Park, Salt Lake, Sector V, and Newtown",
-        "basis": "user specification"
+        "basis": "User's bounding box request"
       },
       {
         "assumption": "Grid resolution set to 9",
-        "basis": "default setting"
+        "basis": "Default for detailed urban analysis"
       }
     ],
     "misleadingVariables": [
@@ -255,13 +261,23 @@
         "name": "Balanced",
         "description": "Equal emphasis on all core layers",
         "emphasis": "none"
+      },
+      {
+        "name": "Footfall Focus",
+        "description": "Increased weight on residential and transit proximity",
+        "emphasis": "L1, L3"
+      },
+      {
+        "name": "Delivery Expansion",
+        "description": "Increased weight on delivery catchment density",
+        "emphasis": "L2"
       }
     ],
     "validation": [
-      "compare model scores at locations of established chains (McDonald's, Haldiram's outlets)"
+      "Compare model scores at locations of established chains (McDonald's, Haldiram's outlets)"
     ],
     "modelFailureRisks": [
-      "OSM residential counts may understate informal settlements"
+      "OSM residential data may undercount informal settlements"
     ]
   },
   "meta": {
