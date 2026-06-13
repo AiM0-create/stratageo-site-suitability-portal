@@ -12,11 +12,13 @@ service cloud.firestore {
     function isOwner(uid) {
       return isSignedIn() && request.auth.uid == uid;
     }
-    // Admins are identified by a verified email on the auth token — NOT by a
+    // Admins are identified by the email on the auth token — NOT by a
     // self-writable document field. Keep this list in sync with ADMIN_EMAILS.
+    // (email_verified is NOT required: these are pre-registered accounts and
+    // Firebase enforces email uniqueness, so the allowlist alone is the gate.
+    // Both sign-in methods — Google and email/password — are accepted.)
     function isAdmin() {
       return isSignedIn()
-        && request.auth.token.email_verified == true
         && request.auth.token.email in [
              'abhishek.rawat@stratageo.in',
              'sagar.mysorekar@stratageo.in'
