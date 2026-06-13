@@ -12,7 +12,11 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 MAX_LAYERS = 10
-MAX_PLACES_LAYERS = 3
+# Consumer-business analyses (QSR, retail, clinics) are mostly Google Places
+# layers since Indian OSM undercounts these POIs. 5 covers footfall +
+# competition + 2-3 anchor types; cost is bounded by small study areas +
+# the per-IP rate limiter.
+MAX_PLACES_LAYERS = 5
 # P1-class methodologies legitimately use 5-6 time-based catchments; ORS cost is
 # ceil(topK/5) requests per distinct (mode, minutes) so 6 configs ≈ 30 req/run.
 MAX_ISOCHRONE_LAYERS = 6

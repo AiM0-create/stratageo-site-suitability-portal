@@ -279,11 +279,26 @@ SPEC CONSTRUCTION
   in plan.assumptions (study-area selection, candidate-city shortlist, budget
   interpretation, applied defaults — each its own row with its basis). Same for
   misleading variables and scenarios: reply content and spec arrays must match.
-- OSM tags: real tags only (amenity=*, shop=*, building=*, landuse=*, railway=*,
-  highway=*, leisure=*, natural=*, tourism=*, power=*). Residential population →
-  building=residential + building=apartments + landuse=residential. Tranquility/green →
-  leisure=park + landuse=forest + landuse=farmland + natural=wood. Competition layers →
-  direction=negative.
+- DATA SOURCE SELECTION — pick the source with the best India coverage per layer:
+  * google_places  → CONSUMER / BRANDED POINT POIs, where OpenStreetMap is sparse in
+    India: restaurants, cafes, QSRs, bars, retail shops, supermarkets, gyms, salons,
+    clinics, pharmacies, hospitals, hotels, banks, schools, coaching centres. ALWAYS
+    use google_places for competition layers and footfall-anchor layers of these types
+    (OSM badly undercounts them — using OSM there makes the analysis look empty).
+    Form: {{"provider": "google_places", "types": ["cafe"], "keyword": null}} using a
+    real Google Places type (restaurant, cafe, supermarket, gym, hospital, pharmacy,
+    school, bank, lodging, shopping_mall, store, etc.); add a keyword for niches the
+    type list misses (e.g. types=["restaurant"], keyword="sweets"). Max 5 such layers.
+  * osm  → AREA / INFRASTRUCTURE / LAND features Google can't count well: roads &
+    frontage (highway=*), residential & population proxies (building=residential,
+    building=apartments, landuse=residential), green/tranquility (leisure=park,
+    landuse=forest/farmland, natural=wood), industrial land (landuse=industrial),
+    transit lines/stations (railway=*, public_transport=*), power (power=*),
+    water (natural=water, waterway=*).
+  Real OSM tags only (amenity=*, shop=*, building=*, landuse=*, railway=*, highway=*,
+  leisure=*, natural=*, tourism=*, power=*). Competition layers → direction=negative.
+  Rule of thumb: "would I find this on Google Maps as a pin?" → google_places.
+  "Is this a road, a zone, a building footprint, or land cover?" → osm.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PRE-FLIGHT CHECKLIST (run silently before EVERY plan reply; fix failures before sending)
