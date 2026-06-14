@@ -7,9 +7,29 @@ Node pipeline's Math.min(0.40, ...) clamp flattened 25/17/10/8 to equal).
 """
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Tokens that describe HOW proximity is measured rather than WHICH anchor — stripped
+# before comparing a scoring layer's name to a route constraint's target so that
+# "Delivery drive-time from Ballygunge Phari" matches a constraint targeting
+# "Ballygunge Phari" (a single-anchor proximity factor the engine must not score).
+_PROXIMITY_STOPWORDS = {
+    "drive", "drives", "driving", "walk", "walking", "walkable", "time", "times",
+    "from", "to", "within", "near", "nearby", "proximity", "distance", "minute",
+    "minutes", "min", "mins", "delivery", "route", "access", "accessibility",
+    "reach", "reachable", "travel", "of", "the", "a", "an", "catchment", "in",
+    "and", "or", "for", "station", "metro", "road", "kolkata", "bengaluru",
+}
+
+
+def _proximity_tokens(s: str) -> set[str]:
+    return {
+        t for t in re.split(r"[^a-z0-9]+", (s or "").lower())
+        if t and t not in _PROXIMITY_STOPWORDS
+    }
 
 MAX_LAYERS = 10
 # Consumer-business analyses (QSR, retail, clinics) are mostly Google Places
@@ -271,6 +291,42 @@ class SpecV2(BaseModel):
         ids = [l.id for l in self.layers]
         if len(ids) != len(set(ids)):
             raise ValueError("layer ids must be unique")
+
+        # ── Drop scoring layers that merely re-measure a route constraint ──────
+        # Proximity to ONE named anchor is a PASS/FAIL routeConstraint, not an MCDA
+        # factor. A walk/drive layer whose name matches an existing constraint's
+        # target counts a single point across the grid → normalizes to ~0 and (if it
+        # holds the weight) drags the composite to 0/10 even for sites that PASS the
+        # constraint. Drop it; the constraint already enforces the requirement.
+        constraint_targets = [
+            _proximity_tokens(rc.targetKeyword)
+            for rc in self.routeConstraints if rc.targetKeyword
+        ]
+        if constraint_targets:
+            kept: list[Layer] = []
+            dropped: list[str] = []
+            for l in self.layers:
+                redundant = (
+                    l.catchment.type in ("walk", "drive")
+                    and any(
+                        tgt and tgt <= _proximity_tokens(l.name)
+                        for tgt in constraint_targets
+                    )
+                )
+                (dropped.append(l.name) if redundant else kept.append(l))
+            if dropped and kept:
+                self.layers = kept
+            elif dropped and not kept:
+                # The ONLY scoring dimension duplicates a constraint — the spec has no
+                # genuine differentiator to rank constraint-satisfying sites. Fail with
+                # guidance so the consultant adds real factors (demand/competition/rent).
+                raise ValueError(
+                    "the only scoring layer(s) "
+                    f"({', '.join(dropped)}) just re-measure a route constraint; add at "
+                    "least one genuine differentiator layer (e.g. demand density, "
+                    "competition saturation, rent proxy) that varies across the study "
+                    "area — proximity to the anchor is already enforced as a constraint"
+                )
 
         places_n = sum(1 for l in self.layers if l.source.provider == "google_places")
         if places_n > MAX_PLACES_LAYERS:

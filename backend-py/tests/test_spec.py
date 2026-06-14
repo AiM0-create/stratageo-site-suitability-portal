@@ -102,6 +102,56 @@ class TestValidation:
             SpecV2.model_validate(spec_dict)
 
 
+def named_layer(lid, name, weight, catchment, tags=None):
+    return {
+        "id": lid, "name": name, "weight": weight, "direction": "positive",
+        "source": {"provider": "osm", "tags": tags or ["amenity=restaurant"]},
+        "catchment": catchment,
+    }
+
+
+class TestRedundantAnchorGuard:
+    """A scoring layer that re-measures a route constraint's single anchor must be
+    dropped (it would otherwise normalize to ~0 and tank the composite for sites
+    that actually PASS the constraint — the dark-kitchen / Ballygunge Phari bug)."""
+
+    DRIVE = {"type": "drive", "minutes": 10}
+
+    def _spec_with_constraint(self, layers):
+        d = make_spec(layers)
+        d["routeConstraints"] = [{
+            "name": "Drive to Ballygunge Phari",
+            "targetKeyword": "Ballygunge Phari, Kolkata",
+            "mode": "drive", "maxMinutes": 10, "required": True,
+        }]
+        return d
+
+    def test_redundant_anchor_layer_dropped_when_others_remain(self):
+        spec = SpecV2.model_validate(self._spec_with_constraint([
+            named_layer("L1", "Delivery drive-time from Ballygunge Phari", 60, self.DRIVE),
+            named_layer("L2", "Competing cloud kitchen saturation", 40,
+                        {"type": "euclidean", "meters": 800}),
+        ]))
+        names = [l.name for l in spec.layers]
+        assert "Delivery drive-time from Ballygunge Phari" not in names
+        assert "Competing cloud kitchen saturation" in names
+        # surviving layer carries full weight after renorm
+        assert spec.layers[0].weight == pytest.approx(1.0, abs=0.01)
+
+    def test_spec_rejected_when_anchor_is_only_layer(self):
+        with pytest.raises(Exception):
+            SpecV2.model_validate(self._spec_with_constraint([
+                named_layer("L1", "Delivery drive-time from Ballygunge Phari", 100, self.DRIVE),
+            ]))
+
+    def test_unrelated_drive_layer_is_kept(self):
+        spec = SpecV2.model_validate(self._spec_with_constraint([
+            named_layer("L1", "Residential delivery demand density", 60, self.DRIVE),
+            named_layer("L2", "Competition", 40, {"type": "euclidean", "meters": 800}),
+        ]))
+        assert len(spec.layers) == 2
+
+
 class TestSandboxValidator:
     def test_rejects_disallowed_import(self):
         from app.engine.sandbox import validate_snippet, SandboxValidationError
