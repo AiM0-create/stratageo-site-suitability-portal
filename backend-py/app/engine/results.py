@@ -88,6 +88,8 @@ def build_location(
             else (f" (Euclidean proxy ≈{int(d['proxyRadiusM'])}m)" if layer.catchment.type in ("walk", "drive") else "")
         )
         just = f"{int(raw)} features within {_catchment_label(layer)}{refinement_note}."
+        if d.get("refined") and not d.get("discriminating", True):
+            just += " This factor was effectively constant across the shortlisted sites, so it did not differentiate them (scored neutral)."
         if layer.whyItMatters:
             just += f" {layer.whyItMatters}"
         if layer.proxyWarning:

@@ -326,6 +326,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 return False
         return True
 
+    # ── 6c. Refit refined-layer normalization on candidate scale ────
+    # Pass B / traffic values live on a different scale than the Pass-A Euclidean
+    # grid; refit so they discriminate among candidates instead of flooring to ~0.
+    # Layers that don't vary across candidates carry no information → flagged.
+    non_discriminating = scoring.refit_refined_layers(scores, candidates)
+    if non_discriminating:
+        fallbacks.append(
+            "Factor(s) that did not vary across the shortlisted sites (no effect on "
+            "ranking): " + ", ".join(non_discriminating)
+        )
+
     # ── 7. Re-rank with refined values, take topN ───────────────────
     # Candidates failing a REQUIRED route constraint are dropped from ranking
     # (real computed exclusion — not a fabricated score).
