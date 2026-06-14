@@ -23,7 +23,7 @@ OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",                  # canonical (strict)
 ]
 HTTP_TIMEOUT = 50          # per endpoint; one attempt each → worst case ~2.5 min
-USER_AGENT = "stratageo-engine/1.0.1 (site-suitability analysis; stratageo.in)"
+USER_AGENT = "stratageo-engine/1.0.2 (site-suitability analysis; stratageo.in)"
 FALLBACK_CONCURRENCY = 2   # parallel per-layer fetches if the union query fails
 
 # (bbox_key, tags_key) → (timestamp, pois)

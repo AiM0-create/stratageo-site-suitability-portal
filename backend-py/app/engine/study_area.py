@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
-USER_AGENT = "stratageo-engine/1.0.1 (site-suitability analysis)"
+USER_AGENT = "stratageo-engine/1.0.2 (site-suitability analysis)"
 
 
 def _m_to_deg_lat(m: float) -> float:
