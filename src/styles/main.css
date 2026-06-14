@@ -361,6 +361,23 @@ body {
   padding-bottom: 10px; border-bottom: 1px solid var(--gray-200);
 }
 
+/* Senior-consultant self-critique banner */
+.analyst-review {
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+  border: 1px solid var(--gray-200); background: var(--gray-50);
+}
+.analyst-review.review-reliable { border-color: #86efac; background: #f0fdf4; }
+.analyst-review.review-weak { border-color: #fcd34d; background: #fffbeb; }
+.analyst-review.review-unreliable { border-color: #fca5a5; background: #fef2f2; }
+.review-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.review-badge { font-size: 12px; font-weight: 700; text-transform: capitalize; color: var(--gray-700); }
+.review-conf { font-size: 10px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.4px; }
+.review-headline { font-size: 12px; color: var(--gray-700); line-height: 1.5; margin: 6px 0 4px; font-weight: 500; }
+.review-section { margin-top: 6px; }
+.review-label { font-size: 10px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px; }
+.review-section ul { margin: 0; padding-left: 16px; }
+.review-section li { font-size: 11px; color: var(--gray-600); line-height: 1.5; margin-bottom: 2px; }
+
 /* Heatmap layers */
 .drawer-layers { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; align-items: center; }
 .drawer-layers-label { font-size: 10px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.5px; width: 100%; margin-bottom: 2px; }

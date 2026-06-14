@@ -154,6 +154,24 @@ export interface CatchmentOutline {
   polygon: [number, number][]; // [lat, lng] ring
 }
 
+export interface AnalysisCritique {
+  verdict: 'reliable' | 'weak' | 'unreliable';
+  headline: string;
+  issues: string[];
+  whatWouldStrengthen: string[];
+  confidence: 'high' | 'medium' | 'low';
+  model?: string;
+}
+
+export interface FactorDataQuality {
+  name: string;
+  provider: string;
+  weight: number;
+  featureCount: number;
+  lowCoverage: boolean;
+  nonDiscriminating: boolean;
+}
+
 export interface AnalysisResult {
   summary: string;
   business_type: string;
@@ -165,6 +183,9 @@ export interface AnalysisResult {
   /** Present only for v2 conversational-engine analyses */
   hexGrid?: HexGridCell[];
   catchments?: CatchmentOutline[];
+  /** Senior-consultant self-critique of the computed result (v2 only) */
+  critique?: AnalysisCritique | null;
+  dataQuality?: FactorDataQuality[];
 }
 
 export interface GroundingSource {
