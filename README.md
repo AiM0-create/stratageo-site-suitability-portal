@@ -2,121 +2,110 @@
 
 **Spatial intelligence for smarter site selection.**
 
-Stratageo is building decision-support tools that bring GIS-grade site suitability analysis to businesses, developers, and consultants — without requiring GIS expertise. The Site Suitability Portal is our public-facing demo that showcases this capability: given a business concept and a city, it evaluates candidate locations using real-world spatial data and transparent, explainable scoring.
+Stratageo brings GIS-grade location analysis to businesses, developers, and consultants — without requiring GIS expertise. You describe what you want to build and where, in plain language, and the portal screens the whole area on a fine spatial grid, scores every candidate location against the factors that matter, enforces your hard constraints, and returns a ranked shortlist with the evidence behind each score — then **reviews its own answer** like a senior location consultant before you ever see it.
 
 > **Try it live:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
+
+**Current version: v1.0.2**
 
 ---
 
 ## What It Does
 
-The portal accepts a natural-language business description — *"a mid-size warehouse near Bhiwadi"* or *"premium coworking space in Bengaluru"* — and returns a ranked shortlist of candidate neighborhoods with:
+Tell it something like *"a dark kitchen in South Kolkata within a 10-minute delivery drive of Ballygunge Phari, but outside 1 km of any metro"* or *"a premium cafe in Bengaluru near offices, low competition"*. The portal holds a short consultative conversation to frame the problem, then runs a full spatial analysis and returns:
 
-- **MCDA scores** derived from real OpenStreetMap point-of-interest data
-- **Per-criteria breakdowns** (competitive landscape, transit access, commercial vibrancy, land availability, etc.)
-- **Profile-aware reasoning** that penalizes infeasible matches (e.g., a solar farm in a dense urban core)
-- **Interactive map** with marker clusters and heatmap overlays
-- **AI-generated narrative** that reads like a GIS consultant's brief, not a chatbot response
+- **A ranked shortlist** of the strongest locations, each named and explained
+- **Per-factor scores** with the real evidence behind them (what was observed, from which source, precise vs. proxy)
+- **Hard constraints enforced** — "within X minutes of Y", "outside Z" — as real pass/fail gates, not soft penalties
+- **Real network routing** — drive/walk times on the actual road network, typical traffic, railway-crossing checks
+- **An interactive map** — per-factor suitability heatmaps (greener = better) and travel-time catchments
+- **An automatic "Analyst Review"** — a senior-consultant audit of the result (geographic sanity, meaningful factors, data strength, rule compliance) with a Reliable / Weak / Unreliable verdict
 
-The goal is not to replace a full site selection study — it's to demonstrate that spatial data, structured scoring, and domain reasoning can be combined into an accessible, instant workflow.
+## The Three Layers of Intelligence
+
+The portal is best understood as three cooperating minds:
+
+1. **The conversation — _"what should we measure?"_** A consultative LLM agent understands the brief, picks the business archetype, derives factor weights, identifies proxies, runs a feasibility check, and proposes a transparent methodology you can review and adjust.
+2. **The engine — _"measure it precisely."_** A deterministic Python engine builds the grid, gathers real-world data, scores every cell, computes real routes, and enforces hard rules. No LLM touches the scoring math.
+3. **The critic — _"do I believe this answer?"_** After ranking, a senior-consultant review audits the computed result against the brief and grades it. This is what turns a smart-sounding tool into a trustworthy one.
 
 ## How Scoring Works
 
-Every location is scored using **Multi-Criteria Decision Analysis (MCDA)** — the same framework used in professional GIS suitability studies.
+Scoring uses **Multi-Criteria Decision Analysis (MCDA)** on an **H3 hexagonal grid**, in two passes:
 
-1. **Data collection** — For each candidate neighborhood, we query OpenStreetMap via Overpass API to count relevant features (competitors, transit stops, commercial establishments, residential density, healthcare, education, etc.) within a calibrated search radius.
+1. **Study area & grid** — The area is resolved to real localities (or a point-radius) and tiled with thousands of H3 hex cells.
+2. **Data gathering** — For each factor, features are pulled from **OpenStreetMap (Overpass)** and **Google Places**.
+3. **Pass A — full-grid proxy scoring** — Every cell is scored on each factor (Euclidean catchment counts), normalized, and combined by weight into a composite. Weights are renormalized **preserving ratios** — never clamped.
+4. **Pass B — refinement of top candidates** — The strongest candidates are re-scored with true **OpenRouteService isochrones**, and for destination businesses, **traffic-aware drive catchments** via the Google Routes API.
+5. **Constraints & exclusions** — Network **route constraints** (real ORS Directions, with railway-crossing detection) and **hard exclusion buffers** remove disqualified cells from contention — computed, not fabricated.
+6. **Ranking & explanation** — Surviving sites are ranked; the top few are named and explained with per-factor evidence.
 
-2. **Criteria scoring** — Raw POI counts are mapped to 0–10 scores using continuous linear interpolation against sector-specific benchmarks. Each criterion has a direction: *positive* (more is better, e.g., transit access for retail) or *negative* (more is worse, e.g., competitor saturation).
+**Honesty is enforced, not optional:**
 
-3. **Profile alignment** — The engine infers a **site profile** from the business type: land intensity (does it need open acreage?), urban preference (does it thrive in density or need rural space?), and catchment type. Mismatches between the profile and the observed environment are scored as explicit penalty criteria with dynamic weights — a warehouse in a CBD gets penalized hard, not just footnoted.
-
-4. **Weighted aggregation** — Criteria scores are combined using normalized weights into a single composite score per location.
-
-5. **Feasibility validation** — Before results are presented, a validator checks for dealbreaker mismatches (e.g., land-intensive use in a high-density zone) and flags them as warnings that override raw scores.
-
-Scores are **deterministic and reproducible** — they come from observed spatial data, not LLM generation.
-
-## Supported Capabilities
-
-| Capability | Details |
-|---|---|
-| **25+ business sectors** | Retail, F&B, healthcare, logistics, manufacturing, education, renewable energy, agriculture, and more |
-| **NCR-aware geography** | "Delhi NCR" spans Delhi, Noida, Gurgaon neighborhoods automatically |
-| **Named exclusions** | "not in Koramangala" creates a geocoded exclusion buffer |
-| **Small-town support** | Directional offset fallback for towns without mapped neighborhoods |
-| **Hindi/Hinglish input** | Natural language parsing handles mixed-script prompts |
-| **Coordinate validation** | 100km sanity check rejects geocoding errors |
-| **Dynamic search radius** | Calibrated per-city based on inter-neighborhood distances |
+- A factor with **no data** is marked *insufficient data* and excluded from the composite — never silently scored 0 or 10.
+- A factor that **does not differentiate** the shortlisted sites is flagged and scored neutral, so a meaningless number can't dominate the result.
+- A requirement is a **pass/fail constraint**, never re-encoded as a weighted scoring factor — so a site that *meets* a constraint can't be contradicted by a 0/10 on the same thing.
+- If a required constraint can't be evaluated, the ranking is **withheld** with an honest explanation rather than inventing a winner.
 
 ## Architecture
 
 ```
-User prompt
-    │
-    ▼
-┌─────────────────────┐     ┌──────────────────────┐
-│  Intent Extraction   │────►│  GPT-4o-mini (API)   │
-│  (with local         │◄────│  Structured JSON out  │
-│   parser fallback)   │     └──────────────────────┘
-└─────────┬───────────┘
-          │ sector, city, neighborhoods, profile, exclusions
-          ▼
-┌─────────────────────┐     ┌──────────────────────┐
-│  Spatial Data Layer  │────►│  Nominatim + Overpass │
-│  Geocoding + POI     │◄────│  (OpenStreetMap)      │
-│  collection          │     └──────────────────────┘
-└─────────┬───────────┘
-          │ coordinates, POI counts per neighborhood
-          ▼
-┌─────────────────────┐
-│  MCDA Scoring Engine │  Deterministic, profile-aware
-│  + Feasibility Check │  No AI in the scoring loop
-└─────────┬───────────┘
-          │ ranked locations with breakdowns
-          ▼
-┌─────────────────────┐     ┌──────────────────────┐
-│  Results Layer       │────►│  GPT-4o-mini (API)   │
-│  Map + Charts +      │◄────│  Narrative explanation│
-│  Exportable reports  │     └──────────────────────┘
-└─────────────────────┘
+                          ┌──────────────────────────────────────────┐
+  React + Vite SPA        │  Conversational FastAPI Engine (Cloud Run) │
+  (GitHub Pages)          │                                            │
+        │  POST /api/v2/chat                                           │
+        ├───────────────► │  Consultant LLM (gpt-4o) ─► SpecV2 (method) │
+        │                 │     archetype playbook · feasibility gate   │
+        │  POST /api/v2/analyses (job)                                 │
+        ├───────────────► │  Engine:                                    │
+        │   poll status   │    H3 grid ─► OSM + Google Places fetch      │
+        │                 │    Pass A (Euclidean) ─► Pass B (ORS iso)    │
+        │                 │    route constraints (ORS) · traffic (Routes)│
+        │                 │    exclusion masks · data-aware scoring      │
+        │                 │       │                                      │
+        │                 │       ▼                                      │
+        │                 │  Critic pass (gpt-4o) ─► Analyst Review       │
+        │ ◄───────────────┤  ranked sites + evidence + map layers        │
+                          └──────────────────────────────────────────┘
+
+  Data: OpenStreetMap (Overpass) · Google Places · OpenRouteService · Google Routes
+  Persistence/cache: Google Cloud Storage   Auth: Firebase   Legacy fallback: Vercel /api/analyze
 ```
 
-**Key principle:** AI handles language (parsing prompts, writing narratives) but never controls scoring. The analytical core is deterministic and auditable.
+**Key principle:** AI handles language and judgment (framing the method, reviewing the result); the analytical core that produces scores is deterministic and auditable.
 
 ## Tech Stack
 
-- **Frontend:** React 19, TypeScript, Vite 6 — static SPA deployed on GitHub Pages
-- **Maps:** Leaflet + leaflet.heat (CDN), Recharts for score visualizations
-- **Spatial data:** OpenStreetMap via Nominatim (geocoding) and Overpass API (POI queries)
-- **AI layer:** OpenAI GPT-4o-mini via serverless proxy on Vercel (optional — demo mode works without it)
-- **Scoring:** Custom MCDA engine with continuous interpolation, profile-aware criteria, and dynamic weight scaling
+- **Frontend:** React 19, TypeScript, Vite 6 — static SPA on GitHub Pages; Leaflet maps, Recharts.
+- **Backend:** Python 3 + FastAPI conversational engine on **Google Cloud Run** (`--max-instances 1 --no-cpu-throttling`); job-based async analysis with GCS-persisted snapshots and caches.
+- **Spatial core:** H3 (`h3-py`), Shapely, scikit-learn BallTree, NumPy.
+- **Data:** OpenStreetMap (Overpass), Google Places (Nearby Search), OpenRouteService (isochrones + directions), Google Routes (traffic-aware matrix).
+- **AI:** OpenAI **gpt-4o** (conversation, spec extraction, critic) and **gpt-4o-mini** (result explanations).
+- **Auth & data:** Firebase Auth + Firestore (admin allowlist, append-only usage log).
+- **Security:** API keys in Secret Manager; per-IP + global rate limiting; request-size caps; rotatable `X-App-Token` kill-switch.
+- **CI:** automated backend test suite (pytest) and GitHub Actions deploy to Pages.
 
 ## Versioning
 
-| Version | Status | Highlights |
-|---------|--------|------------|
-| **v0.5.0** | Current | Profile-aware MCDA scoring, NCR support, named exclusions, feasibility validation, professional GIS-grade explanations, Hindi/Hinglish support |
-| **v0.4.0** | — | Continuous linear scoring, geocoding robustness, coordinate validation, search radius calibration |
-| **v0.3.0** | — | LLM-first intent extraction, session memory, guided input flow |
-| **v0.2.0** | — | Dynamic MCDA, CSV spatial constraints, sector classification |
-| **v0.1.0** | — | Initial portal with basic scoring and map visualization |
+| Version | Highlights |
+|---------|------------|
+| **v1.0.2** _(current)_ | Post-execution **self-critique / Analyst Review**; discrimination-aware scoring; constraints no longer double-encoded as scoring factors; hard-exclusion + tight study-area handling; per-factor data-quality reporting |
+| **v1.0.1** | Conversational FastAPI engine on Cloud Run; H3 two-pass MCDA; **network routing** (ORS Directions + railway-crossing); **traffic-aware** drive catchments; data-aware scoring (no fabricated 0/10); feasibility-first gate; archetype playbook; security hardening |
+| **v1.0.0** | Move from single-shot neighborhood scoring to a structured SpecV2 methodology contract |
+| **v0.5.0** | Profile-aware MCDA, NCR support, named exclusions, feasibility validation, Hindi/Hinglish input _(legacy single-shot path, still available as a Vercel fallback)_ |
 
 ## Roadmap
 
-- Custom criteria definition and weight adjustment UI
-- Multi-city comparative reports
-- Traffic and footfall estimation from supplementary data sources
-- Sector-specific scoring templates with editable parameters
-- Saved analyses and user workspaces
-- Richer demo scenarios across more cities and sectors
-- Exportable PDF reports with branded formatting
+- **Richer demand data** — true population / building-density signals so "demand" is a real gradient where OSM is sparse
+- **Self-correcting analysis** — let the Analyst Review auto-rerun once with its own suggested fix when it judges a result unreliable
+- Custom criteria/weights UI and saved workspaces
+- Multi-area comparative reports and branded PDF export
 
 ## Known Limitations
 
-- OpenStreetMap coverage varies by region — less-mapped cities may produce sparse or skewed results
-- Scoring reflects *relative* suitability from available spatial signals, not absolute investment recommendations
-- Heatmap quality depends on POI density in the area
-- Demo scenarios are illustrative; production-grade analysis requires richer and proprietary data sources
+- OpenStreetMap coverage varies by region — sparsely mapped areas can depress or flatten scores independently of real-world suitability (the Analyst Review flags this when it happens).
+- Scoring reflects *relative* suitability from available spatial signals, not an absolute investment recommendation.
+- Network routing and traffic depend on third-party services (ORS, Google); when unavailable the engine falls back to calibrated proxies and says so.
 
 ## License
 
