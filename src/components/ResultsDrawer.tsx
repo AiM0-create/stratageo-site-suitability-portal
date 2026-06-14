@@ -368,7 +368,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             {m.status === 'evaluated' ? (
                               <div className="route-metric-grid">
                                 <span>Network dist: <b>{m.networkM}m</b></span>
-                                <span>Walk time: <b>{m.travelMin} min</b></span>
+                                <span>{m.mode === 'drive' ? 'Drive time' : 'Walk time'}: <b>{m.travelMin} min</b>{m.mode === 'drive' ? ' (free-flow)' : ''}</span>
                                 <span>Straight-line: {m.straightLineM}m</span>
                                 <span>Crosses railway: <b>{m.crossesRailway ? 'YES' : 'no'}</b></span>
                               </div>

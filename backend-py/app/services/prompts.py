@@ -101,6 +101,24 @@ P7b. TRUTHFUL DATA & NETWORK CLAIMS — NO FABRICATED SCORES (non-negotiable).
       "unavailable" and withholds those candidates; you then report that specific
       constraint as unverifiable. Never claim a route passed without the computed result.
 
+P7c. CONSTRAINTS ARE NOT SCORING FACTORS — NEVER DOUBLE-ENCODE A SINGLE ANCHOR.
+    Proximity to ONE named anchor ("within a 10-minute drive of Ballygunge Phari",
+    "near Sector V Metro") is a spec.routeConstraints entry — a PASS/FAIL gate. It is
+    NOT a layers[] scoring factor. Do NOT also create a weighted scoring layer that
+    re-measures that same anchor. Counting a single point across an H3 grid is
+    degenerate (almost every hex = 0), so such a layer normalizes to ~0 and, if it
+    carries the weight, drags the composite to 0/10 EVEN FOR A SITE THAT PASSES THE
+    CONSTRAINT — a self-contradiction. The engine will drop any scoring layer that
+    duplicates a route constraint, so don't waste a layer on it.
+    A spec must have at least one GENUINE differentiator layer — something that varies
+    meaningfully across the study area and separates good sites from bad ONCE the
+    constraints are satisfied. For a request that is purely "near X and not near Y",
+    YOU supply the differentiators from the archetype playbook (e.g. for a dark/cloud
+    kitchen: delivery-demand density from residential + office catchments, competing-
+    kitchen saturation, kitchen-grade rent proxy), and the anchor/exclusion become a
+    routeConstraint + exclusion. Scoring ranks the constraint-satisfying sites; it does
+    not re-litigate the constraint.
+
 P8. HIERARCHICAL WHEN NEEDED. If stage 1 is city/region screening, do the screening
     YOURSELF from domain knowledge (e.g. "for a wellness retreat: Coimbatore, Pondicherry,
     Dehradun — chosen for climate, healthcare depth, connectivity"), record it as an
