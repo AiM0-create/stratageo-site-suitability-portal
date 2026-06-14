@@ -31,6 +31,14 @@ class LayerScores:
     proxy_radius_m: float = 0.0
     has_data: bool = True                # False when the layer's source returned nothing
     refined: dict[int, float] = field(default_factory=dict)  # hex_index → refined raw value (Pass B)
+    # Normalization refit on the REFINED candidate values. Pass B/traffic values
+    # live on a different scale than the Pass-A Euclidean grid (e.g. traffic
+    # reachable-count is capped at MAX_DEMAND_SAMPLE while Euclidean counts run to
+    # the hundreds) — normalizing them against Pass-A params floors them to ~0. When
+    # set, candidates are scored with these instead so the layer can discriminate.
+    refined_low: float | None = None
+    refined_high: float | None = None
+    discriminating: bool = True          # False if values are ~constant across candidates
 
 
 def proxy_radius_m(layer: Layer) -> float:
@@ -156,6 +164,46 @@ def select_candidates(
     return chosen
 
 
+def refit_refined_layers(scores: dict[str, "LayerScores"], candidates: list[int]) -> list[str]:
+    """After Pass B / traffic refinement, refit each refined layer's normalization on
+    its REFINED candidate values (not the Pass-A Euclidean grid) so the values can
+    discriminate among candidates. Returns the names of layers that DID NOT vary
+    across candidates (no discriminating power) — the caller surfaces these honestly
+    and they contribute a neutral 0.5, never a fabricated 0 that tanks the composite.
+    """
+    non_discriminating: list[str] = []
+    for ls in scores.values():
+        if not ls.refined:
+            continue
+        vals = np.array([ls.refined[ci] for ci in candidates if ci in ls.refined], dtype=float)
+        if vals.size == 0:
+            continue
+        lo, hi = float(vals.min()), float(vals.max())
+        if hi <= lo:
+            # Constant across candidates → carries no information for ranking.
+            ls.discriminating = False
+            non_discriminating.append(ls.layer.name)
+            ls.refined_low, ls.refined_high = lo, lo + 1.0
+        else:
+            ls.refined_low, ls.refined_high = lo, hi
+    return non_discriminating
+
+
+def _layer_norm_for_hex(ls: "LayerScores", hex_index: int) -> float:
+    """Normalized 0-1 score for one hex, using refined-scale params when the hex was
+    refined (and the refit succeeded), else Pass-A params. A non-discriminating
+    refined layer returns a neutral 0.5 so it neither rewards nor punishes."""
+    if hex_index in ls.refined:
+        raw = ls.refined[hex_index]
+        if not ls.discriminating:
+            return 0.5
+        lo = ls.refined_low if ls.refined_low is not None else ls.norm_low
+        hi = ls.refined_high if ls.refined_high is not None else ls.norm_high
+        return float(normalize(raw, lo, hi, ls.layer.direction))
+    raw = float(ls.raw[hex_index])
+    return float(normalize(raw, ls.norm_low, ls.norm_high, ls.layer.direction))
+
+
 def composite_for_hex(
     spec: SpecV2,
     scores: dict[str, LayerScores],
@@ -178,11 +226,12 @@ def composite_for_hex(
             }
             continue
         raw = ls.refined.get(hex_index, float(ls.raw[hex_index]))
-        norm = float(normalize(raw, ls.norm_low, ls.norm_high, ls.layer.direction))
+        norm = _layer_norm_for_hex(ls, hex_index)
         total += ls.layer.weight * norm
         detail[lid] = {
             "raw": raw, "normScore": norm, "hasData": True,
             "refined": hex_index in ls.refined,
+            "discriminating": ls.discriminating,
             "proxyRadiusM": ls.proxy_radius_m,
         }
     pw = present_weight(scores)

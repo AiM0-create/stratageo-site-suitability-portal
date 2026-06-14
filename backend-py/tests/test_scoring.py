@@ -95,6 +95,37 @@ class TestRequiredMissingBlocksRanking:
         assert scoring.required_missing_layers(spec, scores) == []
 
 
+class TestRefinedNormalizationDiscrimination:
+    """Refined (Pass B / traffic) values must be normalized on the candidate scale,
+    not the Pass-A Euclidean range — the dark-kitchen 'residential demand = 0.0
+    everywhere' bug (capped traffic counts floored against a p95 of hundreds)."""
+
+    def test_refined_values_refit_to_discriminate(self):
+        spec = make_spec([layer("L1", weight=100, meters=4000)])
+        # Pass-A raw is huge (Euclidean count); refined traffic counts are small (<=20)
+        _, scores = scoring.pass_a(spec, HEXES, {"L1": POI_NEAR})
+        ls = scores["L1"]
+        ls.norm_low, ls.norm_high = 50.0, 300.0      # Pass-A Euclidean scale
+        ls.refined = {0: 5.0, 1: 18.0}               # capped traffic reachable-counts
+        non_disc = scoring.refit_refined_layers(scores, [0, 1])
+        assert non_disc == []                        # they DO vary → discriminating
+        s_hi, _ = scoring.composite_for_hex(spec, scores, 1)   # 18 → top of refined range
+        s_lo, _ = scoring.composite_for_hex(spec, scores, 0)   # 5  → bottom
+        assert s_hi == pytest.approx(1.0, abs=0.01)  # not floored to ~0
+        assert s_lo < s_hi
+
+    def test_constant_refined_layer_scores_neutral_not_zero(self):
+        spec = make_spec([layer("L1", weight=100, meters=4000)])
+        _, scores = scoring.pass_a(spec, HEXES, {"L1": POI_NEAR})
+        scores["L1"].norm_low, scores["L1"].norm_high = 50.0, 300.0
+        scores["L1"].refined = {0: 7.0, 1: 7.0}      # identical across candidates
+        non_disc = scoring.refit_refined_layers(scores, [0, 1])
+        assert non_disc == ["Layer L1"]              # flagged as non-discriminating
+        score, detail = scoring.composite_for_hex(spec, scores, 0)
+        assert detail["L1"]["normScore"] == pytest.approx(0.5)  # neutral, not 0
+        assert score == pytest.approx(0.5)
+
+
 class TestBuildLocationRendersInsufficientData:
     def test_no_data_layer_score_is_null_with_message(self):
         spec = make_spec([

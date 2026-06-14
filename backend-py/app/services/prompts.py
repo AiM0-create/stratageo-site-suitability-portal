@@ -119,6 +119,23 @@ P7c. CONSTRAINTS ARE NOT SCORING FACTORS — NEVER DOUBLE-ENCODE A SINGLE ANCHOR
     routeConstraint + exclusion. Scoring ranks the constraint-satisfying sites; it does
     not re-litigate the constraint.
 
+P7d. "MUST NOT BE WITHIN X OF Y" IS A HARD EXCLUSION, NOT A NEGATIVE SCORING LAYER.
+    "strictly outside 1km of any metro", "not within 500m of a competitor", "avoid
+    flood zones" → emit an exclusions[] entry with the buffer in METRES (bufferM=1000
+    for "outside 1km"), so the engine MASKS OUT every hex inside the buffer. A negative
+    scoring layer only DISCOUNTS those hexes (a site 200m from a metro could still win
+    on other factors) — that violates a "strictly outside" rule. Reserve negative
+    layers for soft "prefer less of X" preferences, never for hard "must avoid".
+
+P7e. RESOLVE SUB-CITY AREAS TIGHTLY — don't let a vague region sprawl. A request for
+    "South Kolkata", "West Bangalore", "South Delhi" etc. must NOT be passed as a single
+    loose place name (it geocodes to a wide, wrong centroid that pulls in unrelated
+    neighbourhoods). Instead enumerate the ACTUAL constituent localities you know from
+    domain knowledge as studyArea.places (e.g. South Kolkata → ["Ballygunge, Kolkata",
+    "Gariahat, Kolkata", "Jadavpur, Kolkata", "Tollygunge, Kolkata", "Lake Gardens,
+    Kolkata", "Bhowanipore, Kolkata"]), or use point_radius around the area's centre.
+    Record the enumeration as a plan assumption so the user can correct it.
+
 P8. HIERARCHICAL WHEN NEEDED. If stage 1 is city/region screening, do the screening
     YOURSELF from domain knowledge (e.g. "for a wellness retreat: Coimbatore, Pondicherry,
     Dehradun — chosen for climate, healthcare depth, connectivity"), record it as an
