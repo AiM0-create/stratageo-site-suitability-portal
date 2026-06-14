@@ -27,6 +27,7 @@ from ..engine.traffic import traffic_catchment
 from ..engine.sandbox import run_custom_layer
 from ..engine.study_area import geocode, resolve_study_area, reverse_geocode_name
 from . import storage
+from .critic import critique_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,25 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     for loc, reasoning in zip(locations, reasonings):
         loc["reasoning"] = reasoning
 
+    # ── Data quality per factor (feeds the critic + UI transparency) ────────
+    data_quality = []
+    for layer in spec.layers:
+        n = len(layer_pois.get(layer.id, []))
+        ls = scores.get(layer.id)
+        data_quality.append({
+            "name": layer.name,
+            "provider": layer.source.provider,
+            "weight": layer.weight,
+            "featureCount": n,
+            "lowCoverage": n < 15 and layer.weight >= 0.20,
+            "nonDiscriminating": bool(ls and not ls.discriminating),
+        })
+
+    # ── Senior-consultant self-critique of the COMPUTED result ──────────────
+    # Geographic sanity, dead factors, thin data, constraint satisfaction.
+    # Fail-soft: returns None and the analysis ships without it.
+    critique = await critique_analysis(spec, locations, data_quality, data_sufficiency)
+
     target_location = ""
     if spec.studyArea.type == "places" and spec.studyArea.places:
         target_location = spec.studyArea.places[0].split(",")[-1].strip()
@@ -467,6 +487,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "hexGrid": hex_grid,
         "catchments": catchments,
         "dataSufficiency": data_sufficiency,
+        "dataQuality": data_quality,
+        "critique": critique,
     }
     job.status = "done"
     job.progress = 100

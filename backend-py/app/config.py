@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     sandbox_enabled: bool = False
     chat_model: str = "gpt-4o"
     explain_model: str = "gpt-4o-mini"
+    # Post-execution self-critique: a senior-consultant review of the COMPUTED result
+    # (geographic sanity, dead factors, thin data, constraint satisfaction). One extra
+    # gpt-4o call per analysis; the single biggest lever on perceived intelligence.
+    critic_enabled: bool = True
+    critic_model: str = "gpt-4o"
 
     # ── Abuse / cost protection (the backend is a public endpoint that spends
     #    money on every chat turn, so these are the primary cost guardrails) ──

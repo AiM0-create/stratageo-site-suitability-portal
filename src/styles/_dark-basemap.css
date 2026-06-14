@@ -54,6 +54,13 @@
 [data-theme="dark"] .drawer-title { color: #f1f5f9; }
 [data-theme="dark"] .drawer-subtitle { color: #94a3b8; }
 [data-theme="dark"] .drawer-summary { color: #94a3b8; }
+[data-theme="dark"] .analyst-review { background: #0f172a; border-color: #334155; }
+[data-theme="dark"] .analyst-review.review-reliable { background: #052e1a; border-color: #166534; }
+[data-theme="dark"] .analyst-review.review-weak { background: #2e2406; border-color: #92670a; }
+[data-theme="dark"] .analyst-review.review-unreliable { background: #2e0d0d; border-color: #991b1b; }
+[data-theme="dark"] .review-badge,
+[data-theme="dark"] .review-headline { color: #e2e8f0; }
+[data-theme="dark"] .review-section li { color: #cbd5e1; }
 [data-theme="dark"] .drawer-criterion {
   background: #0f172a;
   border-color: #334155;

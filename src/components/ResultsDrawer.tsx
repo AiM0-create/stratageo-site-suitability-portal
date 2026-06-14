@@ -146,6 +146,32 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         {/* Summary */}
         <p className="drawer-summary">{result.summary}</p>
 
+        {/* Senior-consultant self-critique of the computed result */}
+        {result.critique && (
+          <div className={`analyst-review review-${result.critique.verdict}`}>
+            <div className="review-head">
+              <span className="review-badge">
+                {result.critique.verdict === 'reliable' ? '✅' : result.critique.verdict === 'unreliable' ? '❌' : '⚠️'}{' '}
+                Analyst review — {result.critique.verdict}
+              </span>
+              <span className="review-conf">confidence: {result.critique.confidence}</span>
+            </div>
+            <p className="review-headline">{result.critique.headline}</p>
+            {result.critique.issues.length > 0 && (
+              <div className="review-section">
+                <div className="review-label">Issues</div>
+                <ul>{result.critique.issues.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {result.critique.whatWouldStrengthen.length > 0 && (
+              <div className="review-section">
+                <div className="review-label">What would make this stronger</div>
+                <ul>{result.critique.whatWouldStrengthen.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Benchmark comparison */}
         {spec && ranked[0] && !ranked[0].excluded && (() => {
           const bench = compareToBenchmark(ranked[0].mcda_score, spec.sectorId, spec.geography?.city);
