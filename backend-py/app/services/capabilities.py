@@ -60,6 +60,14 @@ def capability_manifest() -> dict:
         "scoring": "per-hex weighted sum; percentile (p5–p95) or min-max normalization per layer; "
                    "negative-direction layers inverted; user weights preserved exactly (renormalized to sum 1, never clamped)",
         "exclusions": "hard mask: hex excluded if any exclusion-tag POI within bufferM",
+        "corridors": (
+            "LINEAR-feature proximity gate: real way GEOMETRY (highway/arterial/river/"
+            "coast/rail) is fetched and each hex is masked by TRUE distance-to-nearest-"
+            "line. mode=include keeps hexes within maxDistanceM of the line ('within 5km "
+            "of NH-48'); mode=exclude masks hexes within maxDistanceM ('away from the "
+            "river'). Use this for 'within X of a road/river/coast' — NOT a POI-count "
+            "scoring layer (a line reduces to a centroid when counted and floors to 0)."
+        ),
         "output": "top-N hexes (spatially deduplicated), reverse-geocoded names, per-layer score breakdown, POIs for heatmaps",
         "notSupported": [
             "demographics / census / income data",
@@ -69,6 +77,7 @@ def capability_manifest() -> dict:
             "real-time or historical time-series data",
             "arbitrary file or external-API ingestion",
             "live/current traffic conditions (Phase 2 will add typical traffic-aware drive times)",
-            "barrier avoidance for rivers/walls/fences (only railway corridors are modeled)",
+            "ROUTE barrier avoidance for rivers/walls/fences (only railway corridors are "
+            "modeled; note distance-to-river/coast IS available as a corridor gate)",
         ],
     }

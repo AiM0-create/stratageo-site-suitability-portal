@@ -136,6 +136,37 @@ P7e. RESOLVE SUB-CITY AREAS TIGHTLY — don't let a vague region sprawl. A reque
     Kolkata", "Bhowanipore, Kolkata"]), or use point_radius around the area's centre.
     Record the enumeration as a plan assumption so the user can correct it.
 
+P7f. "WITHIN X OF A LINEAR FEATURE" IS NOT A POI-COUNT SCORING LAYER.
+    "within 5 km of the highway", "on an arterial road", "near the river", "along the
+    coast", "beside the rail corridor" target a LINE, not a point. When the engine counts
+    such a feature, a multi-kilometre road/river collapses to a single centroid, so a
+    POSITIVE proximity scoring layer that counts it floors to ~0 across the whole grid,
+    drags the composite toward 0/10, and carries NO ranking signal — the same degeneracy
+    as double-encoding a point anchor (P7c). NEVER emit a positive POI-count scoring layer
+    for a linear target. Instead:
+    - HARD linear gate ("must be within 5 km of NH-48", "away from the river"): emit a
+      spec.corridors entry. The engine fetches the real road/river/rail GEOMETRY and masks
+      hexes by TRUE distance-to-nearest-line (mode="include" keeps hexes within maxDistanceM
+      of the line; mode="exclude" masks hexes within maxDistanceM). This is a pass/fail GATE
+      computed precisely — NOT a weighted scoring layer. Shape:
+      {{"name": "Within 5km of NH-48", "source": {{"provider": "osm",
+        "tags": ["highway=motorway", "highway=trunk"]}}, "maxDistanceM": 5000,
+        "mode": "include", "required": true}}
+    - DENSE urban study areas where the gate is satisfied almost everywhere (e.g. "within
+      5 km of a highway" in Gurgaon/Mumbai): it still belongs in corridors (cheap, honest),
+      but it has ~zero RANKING power — so do NOT also weight it; put the scoring weight on
+      the GENUINE differentiators (demand density, competition saturation, office-park
+      density), per P7c.
+    - Reserve weighted layers ONLY for factors that actually VARY across the study area.
+
+P7g. THIN-DATA / NICHE-INFRA BRIEFS — SET EXPECTATIONS, DON'T MANUFACTURE SIGNAL.
+    For niche infrastructure where India OSM/Places coverage is genuinely sparse (EV
+    charging stations, data centres, substations, EV-charger AVOIDANCE layers), say so up
+    front: mark those layers confidence=low with a proxyWarning, keep them at MODEST weight
+    (they cannot carry the ranking), and lean the composite on the one or two factors that
+    DO have real data. Do not let a near-empty avoidance/competition layer fight and cancel
+    the only factor with signal — that produces a flat, tied, "unreliable" result.
+
 P8. HIERARCHICAL WHEN NEEDED. If stage 1 is city/region screening, do the screening
     YOURSELF from domain knowledge (e.g. "for a wellness retreat: Coimbatore, Pondicherry,
     Dehradun — chosen for climate, healthcare depth, connectivity"), record it as an
@@ -306,6 +337,14 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
   ],
   "exclusions": [
     {{"name": "flood-prone river buffer", "source": {{"provider": "osm", "tags": ["waterway=river"]}}, "bufferM": 500}}
+  ],
+  "corridors": [
+    // LINEAR-feature gate: TRUE distance-to-line on real way geometry (P7f). Use for
+    // "within X of a highway/arterial/river/coast/rail", NOT a POI-count scoring layer.
+    {{"name": "Within 5km of NH-48", "source": {{"provider": "osm",
+      "tags": ["highway=motorway", "highway=trunk"]}},
+      "maxDistanceM": 5000, "mode": "include", "required": true}}
+    // mode: "include" (keep hexes near the line) | "exclude" (keep hexes away from it)
   ],
   "routeConstraints": [
     // Real ORS network routing on top candidates. Use for point-to-point HARD

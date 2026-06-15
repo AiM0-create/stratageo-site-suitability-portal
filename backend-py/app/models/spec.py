@@ -167,6 +167,27 @@ class Exclusion(BaseModel):
     bufferM: int = 300
 
 
+class Corridor(BaseModel):
+    """A LINEAR-feature proximity gate (v1.0.2).
+
+    "within 5 km of the highway", "away from the river", "along the rail corridor"
+    target a LINE, not a point. Counting a road/river as POI centroids floors a
+    scoring layer to ~0; instead the engine fetches the real way GEOMETRY
+    (LineStrings via Overpass `out geom`), projects to a local metric frame, and
+    masks hexes by TRUE distance-to-nearest-line.
+
+      mode="include" → keep only hexes WITHIN maxDistanceM of the line (gate "must
+                       be within X of the highway"); hexes farther are masked out.
+      mode="exclude" → mask out hexes WITHIN maxDistanceM of the line (e.g. "away
+                       from the river / off the noisy arterial").
+    """
+    name: str
+    source: OsmSource                              # e.g. tags=["highway=motorway","highway=trunk"]
+    maxDistanceM: int = 5000                        # hex kept iff within this of nearest line (include)
+    mode: Literal["include", "exclude"] = "include"
+    required: bool = True                           # informational; gate is enforced when geometry is available
+
+
 class RouteConstraint(BaseModel):
     """A network-routing constraint evaluated per top-K candidate (v1.0.1.6).
 
@@ -278,6 +299,7 @@ class SpecV2(BaseModel):
     grid: Grid = Grid()
     layers: list[Layer] = Field(min_length=1, max_length=MAX_LAYERS)
     exclusions: list[Exclusion] = []
+    corridors: list[Corridor] = []
     routeConstraints: list[RouteConstraint] = []
     output: Output = Output()
     execution: Execution = Execution()
