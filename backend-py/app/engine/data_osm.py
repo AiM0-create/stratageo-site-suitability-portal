@@ -86,6 +86,77 @@ async def fetch_all_layers(
     return out
 
 
+def _build_geom_query(tags: list[str], bbox: tuple[float, float, float, float]) -> str:
+    """Way geometry (full polylines, not centroids) for linear-feature corridors."""
+    s, w, n, e = bbox
+    parts = []
+    for tag in tags:
+        k, v = tag.split("=", 1)
+        sel = f'["{k}"]' if v == "*" else f'["{k}"="{v}"]'
+        parts.append(f"way{sel}({s},{w},{n},{e});")
+    body = "".join(parts)
+    return f"[out:json][timeout:45];({body});out geom;"
+
+
+async def fetch_line_geometries(
+    tags: list[str],
+    bbox: tuple[float, float, float, float],
+) -> list[dict]:
+    """Returns [{geometry: [{lat,lng}, ...], tags}] for ways matching any tag.
+
+    Unlike fetch_layer_pois (which uses `out center` → one centroid per way),
+    this uses `out geom` to recover the full polyline so corridors can measure
+    TRUE distance-to-line. Same endpoint failover + GCS cache as the POI fetch.
+    """
+    key = (("geom",) + tuple(round(x, 3) for x in bbox), tuple(sorted(tags)))
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_TTL:
+        return hit[1]
+
+    from ..services import storage
+    gcs_key = f"overpass/{storage.cache_key(key)}.json"
+    if storage.enabled():
+        cached = await storage.get_json(gcs_key)
+        if cached is not None and time.time() - cached.get("ts", 0) < CACHE_TTL:
+            ways = cached["ways"]
+            _cache[key] = (time.time(), ways)
+            logger.info("Overpass geom cache hit (GCS): %d ways for %d tag(s)", len(ways), len(tags))
+            return ways
+
+    query = _build_geom_query(tags, bbox)
+    last_err: Exception | None = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            async with httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT,
+                headers={"User-Agent": USER_AGENT},
+            ) as client:
+                r = await client.post(endpoint, data={"data": query})
+                r.raise_for_status()
+                data = r.json()
+            ways = []
+            for el in data.get("elements", []):
+                if el.get("type") != "way":
+                    continue
+                geom = [
+                    {"lat": g["lat"], "lng": g["lon"]}
+                    for g in el.get("geometry", [])
+                    if g.get("lat") is not None and g.get("lon") is not None
+                ]
+                if len(geom) >= 2:
+                    ways.append({"geometry": geom, "tags": el.get("tags", {})})
+            _cache[key] = (time.time(), ways)
+            if storage.enabled():
+                await storage.put_json(gcs_key, {"ts": time.time(), "ways": ways})
+            logger.info("Overpass geom: %d ways for %d tag(s) via %s", len(ways), len(tags), endpoint)
+            return ways
+        except Exception as e:
+            last_err = e
+            logger.warning("Overpass geom attempt failed (%s): %s", endpoint, e)
+            await asyncio.sleep(1)
+    raise RuntimeError(f"Overpass geom fetch failed for tags={tags}: {last_err}")
+
+
 async def fetch_layer_pois(
     tags: list[str],
     bbox: tuple[float, float, float, float],

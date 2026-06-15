@@ -16,10 +16,11 @@ import numpy as np
 
 from ..config import get_settings
 from ..models.spec import SpecV2
+from ..engine import corridors
 from ..engine import results as results_mod
 from ..engine import scoring
 from ..engine.catchments import count_pois_in_polygon, fetch_isochrones
-from ..engine.data_osm import fetch_all_layers
+from ..engine.data_osm import fetch_all_layers, fetch_line_geometries
 from ..engine.data_places import fetch_places_pois
 from ..engine.grid import polyfill
 from ..engine.routing import evaluate_route_constraint, fetch_railway_lines
@@ -212,6 +213,38 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     excluded = scoring.exclusion_mask(
         hexes, exclusion_pois, {e.name: e.bufferM for e in spec.exclusions},
     )
+
+    # ── 4c. Linear-feature corridor gates (distance-to-LINE, real geometry) ──
+    # "within 5 km of the highway" / "away from the river" target a LINE, not a
+    # point. Fetch the real way geometry, measure true distance-to-nearest-line,
+    # and mask hexes that violate the gate. When geometry is unavailable the gate
+    # is skipped (never nuke every candidate) and reported honestly.
+    if spec.corridors:
+        _update(job, 60, "corridors", f"Applying {len(spec.corridors)} linear-feature gate(s)...")
+        cen = polygon.centroid
+        lat0, lng0 = cen.y, cen.x
+        for c in spec.corridors:
+            try:
+                ways = await fetch_line_geometries(c.source.tags, overpass_bbox)
+            except Exception as e:
+                fallbacks.append(
+                    f"Corridor '{c.name}': could not fetch line geometry — gate not enforced ({e})."
+                )
+                continue
+            if not ways:
+                fallbacks.append(
+                    f"Corridor '{c.name}': no matching line features found in the study area — "
+                    "gate not enforced (all candidates kept)."
+                )
+                continue
+            dists = corridors.distance_to_lines_m(hexes, ways, lat0, lng0)
+            cmask = corridors.corridor_mask(dists, float(c.maxDistanceM), c.mode)
+            excluded |= cmask
+            verb = "beyond" if c.mode == "include" else "within"
+            notes.append(
+                f"Corridor '{c.name}': masked {int(cmask.sum())} hex(es) {verb} "
+                f"{c.maxDistanceM} m of {len(ways)} line feature(s)."
+            )
 
     # ── 5. Candidate selection ──────────────────────────────────────
     top_k = min(spec.execution.refineTopK, s.refine_top_k)
