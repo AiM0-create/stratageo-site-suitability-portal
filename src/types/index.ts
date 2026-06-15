@@ -186,6 +186,9 @@ export interface AnalysisResult {
   /** Senior-consultant self-critique of the computed result (v2 only) */
   critique?: AnalysisCritique | null;
   dataQuality?: FactorDataQuality[];
+  /** True when the critic judged the ranking unreliable → the UI withholds the
+   * recommendation and shows the critic's reasons instead of a confident list. */
+  recommendationWithheld?: boolean;
 }
 
 export interface GroundingSource {

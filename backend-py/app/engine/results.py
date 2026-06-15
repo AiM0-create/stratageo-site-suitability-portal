@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
+from collections import defaultdict
 
 from openai import AsyncOpenAI
 
@@ -19,6 +21,33 @@ from .scoring import LayerScores, composite_for_hex, normalize
 logger = logging.getLogger(__name__)
 
 MAX_POIS_PER_LOCATION = 100
+
+_COMPASS = ["north", "north-east", "east", "south-east",
+            "south", "south-west", "west", "north-west"]
+
+
+def _bearing_label(dlat: float, dlng: float) -> str:
+    """Compass label for an offset from a reference point (0°=N, 90°=E)."""
+    ang = math.degrees(math.atan2(dlng, dlat)) % 360
+    return _COMPASS[int((ang + 22.5) // 45) % 8]
+
+
+def disambiguate_names(names: list[str | None], cells: list[HexCell]) -> list[str]:
+    """Two winning hexes can reverse-geocode to the SAME locality ("Ruby Park"
+    twice). Append a compass qualifier relative to the colliding group's centroid
+    so every ranked site has a distinct, truthful label ("Ruby Park (north)")."""
+    out = [n or f"Candidate {i + 1}" for i, n in enumerate(names)]
+    groups: dict[str, list[int]] = defaultdict(list)
+    for i, n in enumerate(out):
+        groups[n].append(i)
+    for name, idxs in groups.items():
+        if len(idxs) < 2:
+            continue
+        clat = sum(cells[i].lat for i in idxs) / len(idxs)
+        clng = sum(cells[i].lng for i in idxs) / len(idxs)
+        for i in idxs:
+            out[i] = f"{name} ({_bearing_label(cells[i].lat - clat, cells[i].lng - clng)})"
+    return out
 
 
 def _signal_key(name: str) -> str:
@@ -307,7 +336,12 @@ async def write_explanations(
         'Return JSON: {"summary": "3-4 sentence executive summary", '
         '"reasonings": ["2-3 sentence assessment for each candidate, in order"]}. '
         "Be specific about which layers drive each score. NEVER invent data not shown above. "
-        "A layer marked NO DATA was not measured — never describe it as good, perfect, or satisfied."
+        "A layer marked NO DATA was not measured — never describe it as good, perfect, or satisfied.\n"
+        "CRITICAL — NUMBERS ARE EXACT: when you cite any composite or factor score, reproduce "
+        "the digits EXACTLY as given above (e.g. if a site is 'composite 6.3/10', write 6.3 — "
+        "never 6.2 or 'about 6'). Refer to each site by the EXACT name shown — do not rename, "
+        "abbreviate, or substitute a different locality. Any number or name you write must "
+        "appear verbatim in the candidate list above."
     )
     try:
         res = await client.chat.completions.create(

@@ -19,6 +19,7 @@ from ..models.spec import SpecV2
 from ..engine import corridors
 from ..engine import results as results_mod
 from ..engine import scoring
+from ..engine import water
 from ..engine.catchments import count_pois_in_polygon, fetch_isochrones
 from ..engine.data_osm import fetch_all_layers, fetch_line_geometries
 from ..engine.data_places import fetch_places_pois
@@ -246,6 +247,27 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 f"{c.maxDistanceM} m of {len(ways)} line feature(s)."
             )
 
+    # ── 4d. Water mask — no candidate can sit inside a river/lake/pond ──
+    # H3 fills the whole polygon, water surface included. Mask hexes whose
+    # centroid lies inside a water body so the engine never ranks a site in
+    # the middle of a river (the Hooghly-riverside failure case).
+    try:
+        water_ways = await fetch_line_geometries(
+            ["natural=water", "waterway=riverbank", "water=*"], overpass_bbox,
+        )
+    except Exception as e:
+        water_ways = []
+        fallbacks.append(f"Water-body check skipped (geometry fetch failed: {e}).")
+    if water_ways:
+        wmask = water.water_mask(hexes, water_ways)
+        n_water = int(wmask.sum())
+        if n_water:
+            excluded |= wmask
+            notes.append(
+                f"Water mask: removed {n_water} hex(es) whose centre falls inside a "
+                f"water body (river/lake/pond) from {len(water_ways)} water feature(s)."
+            )
+
     # ── 5. Candidate selection ──────────────────────────────────────
     top_k = min(spec.execution.refineTopK, s.refine_top_k)
     candidates = scoring.select_candidates(
@@ -387,6 +409,9 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     names = await asyncio.gather(*(
         reverse_geocode_name(hexes[ci].lat, hexes[ci].lng) for ci in finals
     ))
+    # Two winners can reverse-geocode to the same locality → disambiguate with a
+    # compass qualifier so no two ranked sites share an identical name.
+    names = results_mod.disambiguate_names(list(names), [hexes[ci] for ci in finals])
     locations = []
     for rank, (ci, name) in enumerate(zip(finals, names), 1):
         loc = results_mod.build_location(
@@ -494,6 +519,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # Fail-soft: returns None and the analysis ships without it.
     critique = await critique_analysis(spec, locations, data_quality, data_sufficiency)
 
+    # Withhold the ranking when the critic judges it unreliable (product rule): an
+    # "unreliable" verdict means the computed ranking cannot be trusted as a
+    # recommendation, so the UI shows the critic's reasons instead of a confident list.
+    recommendation_withheld = bool(critique and critique.get("verdict") == "unreliable")
+
     target_location = ""
     if spec.studyArea.type == "places" and spec.studyArea.places:
         target_location = spec.studyArea.places[0].split(",")[-1].strip()
@@ -522,6 +552,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "dataSufficiency": data_sufficiency,
         "dataQuality": data_quality,
         "critique": critique,
+        "recommendationWithheld": recommendation_withheld,
     }
     job.status = "done"
     job.progress = 100
