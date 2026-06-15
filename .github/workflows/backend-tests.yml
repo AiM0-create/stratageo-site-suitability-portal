@@ -26,6 +26,8 @@ jobs:
 
       - run: pip install -r requirements.txt pytest
 
-      # Unit tests only — the live LLM regression test (p1_chat_test.py) is a
-      # script run manually against a running server, not collected by pytest.
-      - run: pytest tests/test_spec.py -q
+      # `python -m pytest` (not bare `pytest`) puts backend-py on sys.path so
+      # `import app` resolves; run the WHOLE unit suite. The live LLM regression
+      # test (p1_chat_test.py) is a manual script, not collected by pytest. The
+      # critic tests are fail-soft / get_settings-stubbed → no live API call here.
+      - run: python -m pytest -q
