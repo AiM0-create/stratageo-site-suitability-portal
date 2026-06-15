@@ -233,6 +233,25 @@ async def chat_turn(
     # A not_feasible plan can NEVER execute, even on an explicit go signal —
     # the model's reply explains conflicts/relaxations instead of ranking.
     feasibility = (new_spec or {}).get("feasibility") if isinstance(new_spec, dict) else None
+
+    # An unvalidatable HARD constraint is a caveat, not a clean pass: downgrade a
+    # "feasible" verdict to "tradeoffs" so the UI shows "⚠️ Feasible with caveats"
+    # rather than "✅ Feasible" (server-side, prompt-independent — issue #7).
+    if isinstance(new_spec, dict) and isinstance(feasibility, dict):
+        constraints = new_spec.get("constraints") or []
+        unval_hard = [
+            c for c in constraints
+            if isinstance(c, dict) and c.get("type") == "hard" and c.get("status") == "unvalidatable"
+        ]
+        if (unval_hard or feasibility.get("unvalidatable")) and feasibility.get("status") == "feasible":
+            feasibility["status"] = "tradeoffs"
+            named = [c.get("constraint", "a hard constraint") for c in unval_hard] \
+                or [str(x) for x in (feasibility.get("unvalidatable") or ["a hard constraint"])]
+            caveat = ("Cannot be validated from available data (flagged for site visit): "
+                      + ", ".join(named) + ".")
+            feasibility["explanation"] = (feasibility.get("explanation", "") + " " + caveat).strip()
+            new_spec["feasibility"] = feasibility
+
     if feasibility and feasibility.get("status") == "not_feasible":
         ready = False
         if stage == "ready":

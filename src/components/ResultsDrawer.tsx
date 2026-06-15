@@ -112,6 +112,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
 }) => {
   const [expandedLoc, setExpandedLoc] = useState<string | null>(locations[0]?.name ?? null);
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+  // The critic judged this ranking untrustworthy → withhold the recommendation
+  // (show the reasons, not a confident list). Raw candidates stay behind an opt-in.
+  const withheld = (result as any).recommendationWithheld === true;
   const ranked = useMemo(() => [...locations].sort((a, b) => {
     if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;
     return b.mcda_score - a.mcda_score;
@@ -143,8 +147,20 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
       </div>
 
       <div className="drawer-body">
-        {/* Summary */}
-        <p className="drawer-summary">{result.summary}</p>
+        {/* Summary — suppressed when withheld (it may assert a winner the critic rejected) */}
+        {!withheld && <p className="drawer-summary">{result.summary}</p>}
+
+        {/* Ranking withheld — the critic judged the result unreliable */}
+        {withheld && (
+          <div className="withheld-notice">
+            <div className="withheld-head">❌ No reliable recommendation</div>
+            <p className="withheld-body">
+              The analyst review flagged this result as <b>unreliable</b>, so no ranked
+              recommendation is shown. The reasons — and what would make a reliable
+              analysis possible — are below.
+            </p>
+          </div>
+        )}
 
         {/* Senior-consultant self-critique of the computed result */}
         {result.critique && (
@@ -173,7 +189,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         )}
 
         {/* Benchmark comparison */}
-        {spec && ranked[0] && !ranked[0].excluded && (() => {
+        {!withheld && spec && ranked[0] && !ranked[0].excluded && (() => {
           const bench = compareToBenchmark(ranked[0].mcda_score, spec.sectorId, spec.geography?.city);
           if (!bench) return null;
           const deltaClass = bench.delta > 0.5 ? 'above' : bench.delta < -0.5 ? 'below' : 'at';
@@ -321,6 +337,17 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           </div>
         )}
 
+        {/* When withheld, the chart + ranked cards are hidden behind an explicit opt-in */}
+        {withheld && (
+          <button className="assumptions-toggle withheld-raw-toggle" onClick={() => setShowRaw(!showRaw)}>
+            <span>{showRaw ? 'Hide raw candidates' : 'View raw candidates (not a recommendation)'}</span>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showRaw ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+        )}
+        {(!withheld || showRaw) && (
+        <>
         {/* Comparison chart */}
         {selectedLocations.length >= 1
           ? <ComparisonChart locations={selectedLocations} />
@@ -473,6 +500,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             );
           })}
         </div>
+        </>
+        )}
       </div>
     </div>
   );

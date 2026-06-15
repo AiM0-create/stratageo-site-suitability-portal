@@ -61,6 +61,9 @@
 [data-theme="dark"] .review-badge,
 [data-theme="dark"] .review-headline { color: #e2e8f0; }
 [data-theme="dark"] .review-section li { color: #cbd5e1; }
+[data-theme="dark"] .withheld-notice { background: #2e0d0d; border-color: #991b1b; }
+[data-theme="dark"] .withheld-head { color: #fca5a5; }
+[data-theme="dark"] .withheld-body { color: #fecaca; }
 [data-theme="dark"] .drawer-criterion {
   background: #0f172a;
   border-color: #334155;
