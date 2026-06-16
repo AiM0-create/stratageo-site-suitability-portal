@@ -67,52 +67,52 @@ function GuideTab({ onStartTour }: { onStartTour: () => void }) {
         <div className="guide-item">
           <div className="guide-num">1</div>
           <div>
-            <strong>Describe your site need</strong>
-            <p>Type a natural-language query in the input bar. Be as specific as you want — business type, city, neighborhoods, constraints, even Hindi/Hinglish works.</p>
-            <p className="guide-example">"Cold storage warehouse near Gurgaon with truck access, away from residential"</p>
+            <strong>Describe your site need — in plain language</strong>
+            <p>Tell the assistant what you want to build and where. Business type, city or sub-area, hard constraints ("within 10 min of X", "outside 1 km of metro", "along the river") — even Hindi/Hinglish. You're talking to a location consultant, not filling a form.</p>
+            <p className="guide-example">"Dark kitchen in South Kolkata within a 10-minute delivery drive of Ballygunge Phari, outside 1 km of any metro"</p>
           </div>
         </div>
 
         <div className="guide-item">
           <div className="guide-num">2</div>
           <div>
-            <strong>Review the results</strong>
-            <p>The <strong>left panel</strong> shows ranked locations with an AI-generated summary explaining why each scored the way it did. Scroll down to see the <strong>criteria bar chart</strong> comparing all locations side by side.</p>
+            <strong>Review the proposed framework</strong>
+            <p>The assistant replies with a <strong>methodology</strong>: a feasibility check, the factors it will score with weights, and the hard constraints it will enforce. Adjust anything you disagree with, then say <strong>"run"</strong> to hand it to the engine. Nothing is scored until you approve.</p>
           </div>
         </div>
 
         <div className="guide-item">
           <div className="guide-num">3</div>
           <div>
-            <strong>Explore heatmaps</strong>
-            <p>Click the <strong>heatmap layer buttons</strong> (e.g. "Nearby industrial zones", "Transit access") below the summary to visualize spatial data on the map. Each layer shows intensity around your candidate locations.</p>
+            <strong>Read the ranked results — and the Analyst Review</strong>
+            <p>The <strong>left panel</strong> ranks the strongest sites, each with per-factor evidence (what was observed, from which source). At the top, the <strong>Analyst Review</strong> is a senior-consultant audit of the result — <em>Reliable / Weak / Unreliable</em> — flagging thin data or dead factors. If it judges the result untrustworthy, the ranking is withheld rather than shown as a fake recommendation.</p>
           </div>
         </div>
 
         <div className="guide-item">
           <div className="guide-num">4</div>
           <div>
-            <strong>Interact with the map</strong>
-            <p>Click any <strong>numbered marker</strong> on the map to see that location's score and details. The map auto-zooms to fit all candidate locations.</p>
+            <strong>Explore the map</strong>
+            <p>Toggle the <strong>per-factor suitability heatmaps</strong> (green = better, direction-correct for every factor). Numbered markers show each ranked site; click one for its score and computed <strong>network routes</strong> (real drive/walk times). Greyed hexes are masked out — outside a constraint, inside a buffer, or in water.</p>
           </div>
         </div>
 
         <div className="guide-item">
           <div className="guide-num">5</div>
           <div>
-            <strong>Export & share</strong>
-            <p>Click the <strong>download icon</strong> in the top bar to export a PDF report with scores, criteria breakdowns, and map snapshot — ready to share with stakeholders.</p>
+            <strong>Export, save & share</strong>
+            <p>Export a <strong>PDF report</strong> from the top bar, or open <strong>My Analyses</strong> to revisit past runs and copy a shareable link.</p>
           </div>
         </div>
       </div>
 
       <h3>Quick Tips</h3>
       <ul className="guide-tips">
-        <li><strong>Quick-start buttons</strong> — Use "Cafe in Bengaluru", "EV Charging in Delhi" etc. to try a preset query instantly</li>
-        <li><strong>Results count</strong> — Change the dropdown (default: 3) to analyze up to 5 locations</li>
-        <li><strong>Analysis Assumptions</strong> — Expand this section in the results panel to see what the AI understood from your query</li>
-        <li><strong>New analysis</strong> — Click the <strong>+</strong> button in the top bar to start fresh without losing your current results</li>
-        <li><strong>Session history</strong> — The clock icon lets you switch between past analyses in this session</li>
+        <li><strong>State your hard constraints explicitly</strong> — "must", "within", "outside", "without" become real pass/fail gates, not soft preferences</li>
+        <li><strong>Trust the Analyst Review</strong> — a "Weak/Unreliable" verdict means the data couldn't support a confident ranking; it tells you what would make it reliable</li>
+        <li><strong>Results count</strong> — change the dropdown (default: 3) to rank more locations</li>
+        <li><strong>Analysis Assumptions</strong> — expand this in the results panel to see exactly what the consultant assumed and which factors carried weight</li>
+        <li><strong>New analysis</strong> — the <strong>+</strong> button starts fresh; the clock icon switches between past analyses in this session</li>
       </ul>
     </>
   );
@@ -121,42 +121,50 @@ function GuideTab({ onStartTour }: { onStartTour: () => void }) {
 function MethodologyTab() {
   return (
     <>
-      <h3>How the analysis works</h3>
+      <h3>Three cooperating layers of intelligence</h3>
+      <p className="dialog-note">The portal isn't a single AI guessing answers. It's three distinct layers — language and judgment are kept separate from the analytical maths.</p>
       <ol className="dialog-steps">
-        <li><strong>Intent parsing</strong> — Your query is analyzed by AI to extract the business type, location, constraints, and a site-seeking profile (land intensity, urban preference, access needs, environmental sensitivity).</li>
-        <li><strong>Candidate identification</strong> — 3-5 neighborhoods are selected for the target city using curated local knowledge or AI-extracted locations from your query.</li>
-        <li><strong>Spatial data collection</strong> — Real-world POI data is gathered from Google Places API for commercial features (restaurants, transit, hospitals, shopping) and supplemented by OpenStreetMap for infrastructure signals (road networks, industrial zones, land use, residential density) — within a dynamically calculated search radius.</li>
-        <li><strong>MCDA scoring</strong> — Each location is scored using Multi-Criteria Decision Analysis with continuous linear interpolation. Criteria and weights are dynamically generated per business type — a warehouse is scored on road access and industrial proximity, while a cafe is scored on foot traffic and competition.</li>
-        <li><strong>Profile alignment</strong> — Scores are adjusted for site-profile fit. A solar farm in an urban core gets penalized for land unavailability. A retail store in a rural area gets flagged for low foot traffic. This prevents high scores for physically infeasible locations.</li>
-        <li><strong>AI explanation</strong> — A GIS-aware AI generates a business-readable narrative explaining the rankings, flagging concerns, and contextualizing the scores.</li>
+        <li><strong>The conversation — "what should we measure?"</strong> A senior-consultant LLM (GPT-4o) frames the brief: classifies the business archetype, runs a feasibility check, derives factor weights from business logic, flags misleading variables, and proposes a transparent methodology you approve before anything runs.</li>
+        <li><strong>The engine — "measure it precisely."</strong> A deterministic Python engine builds the grid, gathers real-world data, computes routes, enforces hard rules, and scores every cell. <em>No LLM touches the scoring maths</em> — the numbers are auditable and reproducible.</li>
+        <li><strong>The critic — "do I believe this answer?"</strong> After ranking, a second senior-consultant pass (GPT-4o) audits the computed result for geographic sanity, dead/non-discriminating factors, thin data, and constraint satisfaction, returning the Analyst Review verdict.</li>
       </ol>
 
-      <h3>Dynamic scoring criteria</h3>
-      <p className="dialog-note">Unlike static scorecards, criteria are generated per query. A cold storage warehouse analysis might use:</p>
+      <h3>How the engine scores a site</h3>
+      <ol className="dialog-steps">
+        <li><strong>Feasibility gate</strong> — Hard constraints are checked for joint satisfiability first. A contradictory or unvalidatable brief is flagged (or blocked) before any ranking — no fake "top 3" for an impossible spec.</li>
+        <li><strong>Study area &amp; H3 grid</strong> — The area resolves to real localities (or a point-radius) and is tiled with thousands of H3 hexagonal cells. Cells inside water bodies are masked out.</li>
+        <li><strong>Data gathering</strong> — Per factor, features come from <strong>OpenStreetMap</strong> (Overpass) for land/infrastructure and <strong>Google Places</strong> for consumer POIs and competition (OSM undercounts these in India).</li>
+        <li><strong>Two-pass MCDA</strong> — Pass A scores every cell with calibrated Euclidean catchments; Pass B re-scores the top candidates with <strong>true OpenRouteService isochrones</strong>, and for destination businesses, <strong>traffic-aware drive catchments</strong>. Weights are renormalized preserving ratios — never clamped.</li>
+        <li><strong>Constraints, corridors &amp; exclusions</strong> — Point-to-point rules ("within 7-min walk of the metro, without crossing a railway") run real network routing; "within X of a highway/river" runs true distance-to-line on real geometry; "outside 1 km of Y" masks hexes. These are computed pass/fail gates, not soft penalties.</li>
+        <li><strong>Discrimination-aware ranking</strong> — A factor that doesn't vary across the shortlist carries no ranking information and is scored neutral, never a fabricated extreme. Surviving sites are ranked and named; the explanation cites the real evidence behind each score.</li>
+      </ol>
+
+      <h3>Honesty is enforced, not optional</h3>
       <table className="dialog-table">
         <thead>
-          <tr><th>Example Criteria</th><th>Direction</th><th>Source</th></tr>
+          <tr><th>Situation</th><th>What the engine does</th></tr>
         </thead>
         <tbody>
-          <tr><td>Proximity to major roads</td><td>Positive</td><td>OSM road network</td></tr>
-          <tr><td>Nearby industrial zones</td><td>Positive</td><td>OSM landuse data</td></tr>
-          <tr><td>Access to utilities</td><td>Positive</td><td>OSM infrastructure</td></tr>
-          <tr><td>Distance from residential</td><td>Negative</td><td>OSM building data</td></tr>
-          <tr><td>Land availability</td><td>Profile-based</td><td>Total POI density vs. land need</td></tr>
+          <tr><td>A factor has no data</td><td>Marked <em>insufficient data</em> and excluded — never silently scored 0 or 10</td></tr>
+          <tr><td>A factor doesn't separate the sites</td><td>Flagged and scored neutral, so a meaningless number can't dominate</td></tr>
+          <tr><td>A requirement is stated</td><td>Enforced as a pass/fail constraint — never re-encoded as a weighted factor that contradicts it</td></tr>
+          <tr><td>The critic judges the result unreliable</td><td>The ranking is <em>withheld</em>; you see the reasons and what would make it reliable</td></tr>
+          <tr><td>A hard constraint can't be validated (e.g. rent)</td><td>Shown as "Feasible with caveats — flag for site visit", never a clean pass</td></tr>
         </tbody>
       </table>
-      <p className="dialog-note">For a cafe, the criteria would instead include foot traffic, competitor density, transit access, and commercial vibrancy — each with appropriate weights.</p>
 
       <h3>Data sources</h3>
       <ul className="guide-tips">
-        <li><strong>Google Places API</strong> — Accurate POI data for commercial features (restaurants, transit, hospitals, shopping, banks)</li>
-        <li><strong>OpenStreetMap</strong> — Infrastructure and land-use data via Overpass API (road networks, industrial zones, residential density)</li>
-        <li><strong>Nominatim</strong> — Geocoding for cities and neighborhoods</li>
-        <li><strong>AI models</strong> — GPT-4o-mini for intent parsing and explanation generation</li>
+        <li><strong>OpenStreetMap (Overpass)</strong> — roads, land use, buildings, transit, water and infrastructure geometry</li>
+        <li><strong>Google Places</strong> — consumer POIs and competition (restaurants, retail, clinics, gyms, hotels)</li>
+        <li><strong>OpenRouteService</strong> — true walk/drive isochrones and network routing (with railway-crossing detection)</li>
+        <li><strong>Google Routes</strong> — traffic-aware drive catchments for destination businesses</li>
+        <li><strong>Nominatim</strong> — geocoding and locality naming</li>
+        <li><strong>AI models</strong> — GPT-4o for the consultant conversation and the Analyst Review; GPT-4o-mini for result explanations</li>
       </ul>
 
       <h3>Limitations</h3>
-      <p>This is a screening-level tool using Google Places and OpenStreetMap data. Scores indicate relative suitability based on observable spatial signals. Full site suitability studies by Stratageo incorporate proprietary datasets, satellite imagery, demographic analysis, and on-ground validation for production-grade recommendations.</p>
+      <p>This is a screening-level tool built on open and commodity spatial data. Scores indicate <em>relative</em> suitability from observable signals — OSM coverage varies by area, and the Analyst Review flags when that depresses a result. Full site-suitability studies by Stratageo add proprietary datasets, satellite imagery, demographic analysis, and on-ground validation for production-grade recommendations.</p>
     </>
   );
 }

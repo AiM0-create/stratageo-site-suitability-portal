@@ -11,14 +11,14 @@ interface TourStep {
 const TOUR_STEPS: TourStep[] = [
   {
     selector: '.assistant',
-    title: 'Site Suitability Assistant',
-    description: 'This is your main interaction panel. Type your site need here in natural language — business type, city, constraints, even Hindi works.',
+    title: 'Your location consultant',
+    description: 'This is a consultative assistant, not a search box. Describe your site need in plain language; it proposes a methodology (factors, weights, hard constraints) that you approve before anything is scored. Hindi/Hinglish works too.',
     position: 'left',
   },
   {
     selector: 'input[placeholder*="Cafe"]',
-    title: 'Query Input',
-    description: 'Describe what you\'re looking for. Example: "Cold storage warehouse near Gurgaon with truck access" or "Cafe in Koramangala, Bengaluru near metro".',
+    title: 'Describe the brief',
+    description: 'Say what you want and where, with any hard constraints. Example: "Dark kitchen in South Kolkata within a 10-min drive of Ballygunge Phari, outside 1 km of any metro". Then review the framework and say "run".',
     position: 'top',
   },
   {
@@ -42,15 +42,22 @@ const TOUR_STEPS: TourStep[] = [
     fallbackSelector: '.topbar-right',
   },
   {
+    selector: '.analyst-review',
+    title: 'Analyst Review',
+    description: 'A senior-consultant audit of the computed result — Reliable, Weak, or Unreliable — flagging thin data or factors that did not separate the sites. If it judges the result untrustworthy, the ranking is withheld instead of shown as a fake recommendation.',
+    position: 'right',
+    fallbackSelector: '.drawer',
+  },
+  {
     selector: '.leaflet-container',
     title: 'Interactive Map',
-    description: 'After analysis, the map shows numbered markers for each candidate location. Click any marker to see its score and details. Zoom and pan freely.',
+    description: 'After analysis, the map shows numbered markers for each ranked site. Click any marker for its score and computed network routes. Greyed hexes are masked out — outside a constraint, inside a buffer, or in water.',
     position: 'right',
   },
   {
     selector: '.drawer-layers',
-    title: 'Heatmap Layers',
-    description: 'Toggle spatial data overlays on the map — like "Nearby industrial zones", "Transit access", or "Residential density". Each layer visualizes real OSM data around your candidate locations.',
+    title: 'Suitability heatmaps',
+    description: 'Toggle a per-factor suitability surface on the map — green is always more favourable (direction-correct for every factor, including competition). "Overall" shows the combined composite score.',
     position: 'right',
     fallbackSelector: '.drawer',
   },
@@ -80,7 +87,7 @@ export const GuidedTour: React.FC<GuidedTourProps> = ({ active, onEnd, hasResult
   // Filter steps based on what's visible
   const availableSteps = TOUR_STEPS.filter(s => {
     // Skip results-only steps if no results
-    if (!hasResults && (s.selector === '.drawer-layers' || s.selector === '.drawer-chart' || s.selector === 'button[title="Export PDF"]')) {
+    if (!hasResults && (s.selector === '.drawer-layers' || s.selector === '.drawer-chart' || s.selector === '.analyst-review' || s.selector === 'button[title="Export PDF"]')) {
       return false;
     }
     const el = document.querySelector(s.selector) || (s.fallbackSelector ? document.querySelector(s.fallbackSelector) : null);

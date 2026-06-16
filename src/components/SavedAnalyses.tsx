@@ -41,7 +41,10 @@ const SavedAnalyses: React.FC<SavedAnalysesProps> = ({ open, onClose, onLoadAnal
     setError(null);
     fetchUserAnalyses(user.uid)
       .then(setAnalyses)
-      .catch(() => setError('Failed to load analyses.'))
+      .catch((e) => {
+        console.error('fetchUserAnalyses failed:', e);   // real Firestore error → console
+        setError('Failed to load analyses.');
+      })
       .finally(() => setLoading(false));
   }, [open, user?.uid]);
 
