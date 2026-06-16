@@ -3,7 +3,7 @@
  * Powers "My Analyses" and shareable links.
  */
 
-import { collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, limit as fbLimit, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, getDoc, getDocs, query, where, limit as fbLimit, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { nanoid } from 'nanoid';
 import type { AnalysisResult, AnalysisSpec } from '../types';
@@ -60,11 +60,15 @@ export async function saveAnalysis(
  * Fetch all saved analyses for a user (most recent first, max 20).
  */
 export async function fetchUserAnalyses(userId: string): Promise<SavedAnalysis[]> {
+  // NOTE: intentionally NO orderBy. `where(userId==) + orderBy(createdAt desc)` needs a
+  // composite Firestore index that was never provisioned for this project, so the whole
+  // query failed with failed-precondition — surfacing as "Failed to load analyses". Each
+  // user has at most a few dozen analyses (10-prompt quota), so we fetch by userId
+  // (single-field index, auto-created) and sort client-side. Index-free and correct.
   const q = query(
     collection(db, 'analyses'),
     where('userId', '==', userId),
-    orderBy('createdAt', 'desc'),
-    fbLimit(20),
+    fbLimit(50),
   );
   const snap = await getDocs(q);
   const analyses: SavedAnalysis[] = [];
@@ -91,7 +95,9 @@ export async function fetchUserAnalyses(userId: string): Promise<SavedAnalysis[]
     }
   });
 
-  return analyses;
+  // Most-recent first, then cap (done client-side since the query has no orderBy).
+  analyses.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+  return analyses.slice(0, 20);
 }
 
 /**

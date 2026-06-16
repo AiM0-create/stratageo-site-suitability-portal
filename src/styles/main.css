@@ -1236,7 +1236,14 @@ body {
 .sg-admin-table td { padding: 8px 10px; border-bottom: 1px solid var(--gray-100); color: var(--gray-700); }
 .sg-admin-row-limit { background: #fef3c7; }
 .sg-admin-cell-email { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-admin-cell-prompt { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-admin-cell-prompt { max-width: 340px; vertical-align: top; }
+.sg-admin-prompt-text { word-break: break-word; }
+.sg-admin-copy-btn {
+  margin-left: 6px; padding: 1px 7px; border: 1px solid var(--gray-200); border-radius: 4px;
+  background: var(--gray-50); font-size: 10px; font-weight: 600; cursor: pointer;
+  color: var(--gray-600); vertical-align: middle; white-space: nowrap;
+}
+.sg-admin-copy-btn:hover { background: var(--gray-100); border-color: var(--gray-300); }
 .sg-admin-prompt-badge {
   padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
   background: var(--green-100); color: var(--green-700);

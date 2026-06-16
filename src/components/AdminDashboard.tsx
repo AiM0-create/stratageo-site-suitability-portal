@@ -13,6 +13,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'users' | 'prompts'>('overview');
+  const [expandedPrompts, setExpandedPrompts] = useState<Record<string, boolean>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyText = useCallback(async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+    } catch {
+      // clipboard blocked (e.g. insecure context) — no-op
+    }
+  }, []);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -218,11 +230,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
 
             {tab === 'prompts' && (
               <div className="sg-admin-prompts">
-                {selectedUser && (
-                  <button className="sg-admin-btn-sm" onClick={() => setSelectedUser(null)} style={{ marginBottom: 8 }}>
-                    Show all prompts
-                  </button>
-                )}
+                <div className="sg-admin-prompts-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                  {selectedUser && (
+                    <button className="sg-admin-btn-sm" onClick={() => setSelectedUser(null)}>
+                      Show all prompts
+                    </button>
+                  )}
+                  {filteredPrompts.length > 0 && (
+                    <button
+                      className="sg-admin-btn-sm"
+                      onClick={() => copyText(
+                        'all',
+                        filteredPrompts.map(p => `[${p.email}] ${p.prompt}`).join('\n\n'),
+                      )}
+                      title="Copy every prompt shown (one per line, with email)"
+                    >
+                      {copiedId === 'all' ? '✓ Copied' : `Copy all (${filteredPrompts.length})`}
+                    </button>
+                  )}
+                </div>
                 <table className="sg-admin-table">
                   <thead>
                     <tr>
@@ -243,9 +269,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                     {filteredPrompts.map(p => (
                       <tr key={p.id}>
                         <td className="sg-admin-cell-email">{p.email}</td>
-                        <td className="sg-admin-cell-prompt" title={p.prompt}>
+                        <td className="sg-admin-cell-prompt">
                           {p.isFollowUp && <span className="sg-admin-badge-followup">F/U</span>}
-                          {p.prompt.length > 50 ? p.prompt.slice(0, 50) + '...' : p.prompt}
+                          <span
+                            className="sg-admin-prompt-text"
+                            onClick={() => setExpandedPrompts(e => ({ ...e, [p.id]: !e[p.id] }))}
+                            title={expandedPrompts[p.id] ? 'Click to collapse' : 'Click to expand full prompt'}
+                            style={{ cursor: p.prompt.length > 50 ? 'pointer' : 'default', whiteSpace: expandedPrompts[p.id] ? 'pre-wrap' : 'nowrap' }}
+                          >
+                            {expandedPrompts[p.id] || p.prompt.length <= 50 ? p.prompt : p.prompt.slice(0, 50) + '…'}
+                          </span>
+                          <button
+                            className="sg-admin-copy-btn"
+                            onClick={(e) => { e.stopPropagation(); copyText(p.id, p.prompt); }}
+                            title="Copy full prompt"
+                          >
+                            {copiedId === p.id ? '✓' : 'Copy'}
+                          </button>
                         </td>
                         <td>{p.sector}</td>
                         <td>{p.city}</td>
