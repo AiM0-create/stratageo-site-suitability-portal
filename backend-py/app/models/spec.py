@@ -31,6 +31,28 @@ def _proximity_tokens(s: str) -> set[str]:
         if t and t not in _PROXIMITY_STOPWORDS
     }
 
+
+# A brief that is intrinsically waterfront: "riverside restaurant", "along the
+# Hooghly", "waterfront", "seafront". These reference a LINEAR water EDGE (P7f) —
+# the engine enforces them as a corridor gate, never a (dead) scoring layer.
+_WATERFRONT_RE = re.compile(
+    r"river\s?side|water\s?front|river\s?front|lake\s?side|lake\s?front|sea\s?front"
+    r"|beach\s?front|water\s?front|\briverbank\b|\bghat\b"
+    r"|along the\b.{0,40}\b(river|hooghly|ganga|creek|canal|lake|sea|coast)",
+    re.I,
+)
+# A SCORING layer that merely re-measures that water edge — drop it; the corridor
+# (+ water mask) already enforces "riverside", and as a POI count it returns ~0.
+_WATERFRONT_LAYER_RE = re.compile(
+    r"river\s?side|water\s?front|river\s?front|riverbank|hooghly"
+    r"|(river|water|waterway|coast|sea|lake)\s*(proximity|access|edge|adjacency|frontage)",
+    re.I,
+)
+
+
+def _is_water_tag(t: str) -> bool:
+    return t.startswith(("waterway", "natural=water", "water=", "natural=coastline"))
+
 MAX_LAYERS = 10
 # Consumer-business analyses (QSR, retail, clinics) are mostly Google Places
 # layers since Indian OSM undercounts these POIs. 5 covers footfall +
@@ -349,6 +371,31 @@ class SpecV2(BaseModel):
                     "competition saturation, rent proxy) that varies across the study "
                     "area — proximity to the anchor is already enforced as a constraint"
                 )
+
+        # ── Waterfront briefs → enforce as a corridor, not a dead scoring layer ──
+        # "riverside restaurant", "along the Hooghly", "waterfront" reference a LINEAR
+        # water edge (P7f). The LLM often models this as a scoring layer instead, which
+        # returns ~no data and can't actually constrain candidates to the bank — so the
+        # winners aren't riverside. Deterministically: inject a water-edge corridor (so
+        # candidates are clipped to within 500m of the bank; the water mask then drops
+        # in-water hexes) and drop the redundant waterfront scoring layer.
+        text = f"{self.objective} {self.businessType}".lower()
+        if _WATERFRONT_RE.search(text):
+            has_water_corridor = any(
+                any(_is_water_tag(t) for t in c.source.tags) for c in self.corridors
+            )
+            if not has_water_corridor:
+                self.corridors.append(Corridor(
+                    name="Waterfront proximity",
+                    source=OsmSource(tags=[
+                        "natural=water", "waterway=riverbank", "waterway=river",
+                        "water=river", "natural=coastline",
+                    ]),
+                    maxDistanceM=500, mode="include", required=True,
+                ))
+            kept_wf = [l for l in self.layers if not _WATERFRONT_LAYER_RE.search(l.name)]
+            if kept_wf and len(kept_wf) < len(self.layers):
+                self.layers = kept_wf   # keep ≥1 genuine differentiator
 
         places_n = sum(1 for l in self.layers if l.source.provider == "google_places")
         if places_n > MAX_PLACES_LAYERS:
