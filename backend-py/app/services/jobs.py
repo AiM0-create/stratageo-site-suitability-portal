@@ -22,7 +22,7 @@ from ..engine import results as results_mod
 from ..engine import scoring
 from ..engine import water
 from ..engine.catchments import count_pois_in_polygon, fetch_isochrones
-from ..engine.data_osm import fetch_all_layers, fetch_line_geometries
+from ..engine.data_osm import fetch_all_layers, fetch_area_geometries, fetch_line_geometries
 from ..engine.data_places import fetch_places_pois
 from ..engine.grid import polyfill
 from ..engine.routing import evaluate_route_constraint, fetch_railway_lines
@@ -289,7 +289,9 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # centroid lies inside a water body so the engine never ranks a site in
     # the middle of a river (the Hooghly-riverside failure case).
     try:
-        water_ways = await fetch_line_geometries(
+        # area fetch (ways + relation members) so big rivers/lakes mapped as
+        # multipolygon relations are recovered, not just standalone water ways.
+        water_ways = await fetch_area_geometries(
             ["natural=water", "waterway=riverbank", "water=*"], overpass_bbox,
         )
     except Exception as e:

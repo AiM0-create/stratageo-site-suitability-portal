@@ -2,12 +2,23 @@
 from app.engine import water
 from app.engine.grid import HexCell
 
-# A square water body ~ lng 88.34–88.35, lat 22.55–22.56
+# A square water body ~ lng 88.34–88.35, lat 22.55–22.56 (closed way: first==last,
+# as OSM `out geom` returns closed ways).
 SQUARE = {"geometry": [
     {"lat": 22.55, "lng": 88.34},
     {"lat": 22.55, "lng": 88.35},
     {"lat": 22.56, "lng": 88.35},
     {"lat": 22.56, "lng": 88.34},
+    {"lat": 22.55, "lng": 88.34},
+]}
+
+# The SAME square split into two OPEN fragments (as a multipolygon relation's
+# member ways arrive) — must be reassembled into a polygon via polygonize.
+FRAG_A = {"geometry": [
+    {"lat": 22.55, "lng": 88.34}, {"lat": 22.55, "lng": 88.35}, {"lat": 22.56, "lng": 88.35},
+]}
+FRAG_B = {"geometry": [
+    {"lat": 22.56, "lng": 88.35}, {"lat": 22.56, "lng": 88.34}, {"lat": 22.55, "lng": 88.34},
 ]}
 
 
@@ -33,3 +44,14 @@ def test_no_water_features_means_no_mask():
 
 def test_degenerate_geometry_ignored():
     assert water.build_water_polygons([{"geometry": [{"lat": 1, "lng": 1}]}]) == []
+
+
+def test_relation_fragments_are_assembled_into_a_polygon():
+    # two open member ways forming a closed ring (the river-as-relation case)
+    polys = water.build_water_polygons([FRAG_A, FRAG_B])
+    assert len(polys) == 1 and polys[0].area > 0
+
+
+def test_hex_inside_relation_assembled_water_is_masked():
+    mask = water.water_mask([_hx(22.555, 88.345), _hx(22.60, 88.40)], [FRAG_A, FRAG_B])
+    assert mask.tolist() == [True, False]
