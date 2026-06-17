@@ -308,7 +308,9 @@ async def write_explanations(
     def crit_str(c: dict) -> str:
         if c.get("score") is None or c.get("rawValue") is None:
             return f"{c['name']}: NO DATA (excluded — {c.get('justification', 'insufficient data')})"
-        return f"{c['name']}: {c['score']}/10 ({int(c['rawValue'])} observed, weight {c['weight']:.0%})"
+        dir_note = (" [less-is-better, score PRE-INVERTED: a LOW score = MORE of it nearby = worse]"
+                    if c.get("direction") == "negative" else "")
+        return f"{c['name']}: {c['score']}/10{dir_note} ({int(c['rawValue'])} observed, weight {c['weight']:.0%})"
 
     loc_lines = []
     for i, loc in enumerate(locations):
@@ -341,7 +343,13 @@ async def write_explanations(
         "the digits EXACTLY as given above (e.g. if a site is 'composite 6.3/10', write 6.3 — "
         "never 6.2 or 'about 6'). Refer to each site by the EXACT name shown — do not rename, "
         "abbreviate, or substitute a different locality. Any number or name you write must "
-        "appear verbatim in the candidate list above."
+        "appear verbatim in the candidate list above.\n"
+        "DIRECTION — scores are normalized so HIGHER IS ALWAYS BETTER, for every factor. A "
+        "factor tagged 'less-is-better' (e.g. competitor saturation) is ALREADY inverted: a "
+        "LOW score there means there is MORE of it nearby (worse), a HIGH score means less of "
+        "it (better). NEVER describe a low competitor-saturation score as 'low/lack of "
+        "competition' — a 0/10 there means HEAVY competition (cross-check the observed count: "
+        "many observed = saturated). Describe each factor in the real-world direction it implies."
     )
     try:
         res = await client.chat.completions.create(

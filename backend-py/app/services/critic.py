@@ -37,6 +37,12 @@ _SYSTEM = (
     "(common in OSM for Indian cities) can depress or flatten scores independently of reality.\n"
     "4. CONSTRAINT SATISFACTION — were the hard constraints actually enforced and met?\n"
     "5. TRUSTWORTHINESS — overall, would you put your name on this recommendation?\n\n"
+    "HOW TO READ THE SCORES: every factor score is direction-normalized so HIGHER IS ALWAYS "
+    "BETTER. Factors tagged '↓inv' are 'less is better' (e.g. competition) and already "
+    "inverted — a LOW score there means MORE of it nearby (worse). A weighted-sum composite "
+    "TIE between two sites with DIFFERENT factor profiles is normal MCDA arithmetic, NOT a "
+    "bug — never report it as a 'scoring issue'; at most note the top sites are hard to "
+    "separate. Only call a scoring issue when a number is genuinely impossible given the inputs.\n\n"
     "Return STRICT JSON: {\n"
     '  "verdict": "reliable" | "weak" | "unreliable",\n'
     '  "headline": "one blunt sentence — your bottom line",\n'
@@ -59,7 +65,8 @@ def _winner_lines(locations: list[dict]) -> str:
             if c.get("score") is None:
                 facs.append(f"{c['name']}=NO-DATA(w{c['weight']:.0%})")
             else:
-                facs.append(f"{c['name']}={c['score']}/10(w{c['weight']:.0%})")
+                inv = "↓inv" if c.get("direction") == "negative" else ""
+                facs.append(f"{c['name']}={c['score']}/10{inv}(w{c['weight']:.0%})")
         routes = []
         for rn, m in (loc.get("routeMetrics") or {}).items():
             routes.append(f"{rn}:{'PASS' if m.get('passed') else 'FAIL/NA'}({m.get('travelMin')}min,{m.get('mode')})")
