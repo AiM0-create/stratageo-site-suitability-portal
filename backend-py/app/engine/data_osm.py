@@ -157,6 +157,88 @@ async def fetch_line_geometries(
     raise RuntimeError(f"Overpass geom fetch failed for tags={tags}: {last_err}")
 
 
+def _build_area_query(tags: list[str], bbox: tuple[float, float, float, float]) -> str:
+    """Ways AND relations (multipolygons) for area features — water bodies are
+    often relations (a big river is one relation, not a tagged way)."""
+    s, w, n, e = bbox
+    parts = []
+    for tag in tags:
+        k, v = tag.split("=", 1)
+        sel = f'["{k}"]' if v == "*" else f'["{k}"="{v}"]'
+        parts.append(f"way{sel}({s},{w},{n},{e});")
+        parts.append(f"relation{sel}({s},{w},{n},{e});")
+    body = "".join(parts)
+    return f"[out:json][timeout:45];({body});out geom;"
+
+
+async def fetch_area_geometries(
+    tags: list[str],
+    bbox: tuple[float, float, float, float],
+) -> list[dict]:
+    """Returns [{geometry: [{lat,lng}, ...], tags}] for AREA features, including
+    relation members. Unlike fetch_line_geometries (ways only), this also returns
+    the member ways of matching multipolygon RELATIONS — so a river/lake mapped as
+    a relation (not a tagged way) is recovered and can be polygonized. Same
+    endpoint-failover + GCS cache as the other geometry fetch.
+    """
+    key = (("area",) + tuple(round(x, 3) for x in bbox), tuple(sorted(tags)))
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_TTL:
+        return hit[1]
+
+    from ..services import storage
+    gcs_key = f"overpass/{storage.cache_key(key)}.json"
+    if storage.enabled():
+        cached = await storage.get_json(gcs_key)
+        if cached is not None and time.time() - cached.get("ts", 0) < CACHE_TTL:
+            feats = cached["feats"]
+            _cache[key] = (time.time(), feats)
+            logger.info("Overpass area cache hit (GCS): %d features", len(feats))
+            return feats
+
+    def _coords(geom):
+        return [
+            {"lat": g["lat"], "lng": g["lon"]}
+            for g in (geom or [])
+            if g.get("lat") is not None and g.get("lon") is not None
+        ]
+
+    query = _build_area_query(tags, bbox)
+    last_err: Exception | None = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            async with httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT,
+                headers={"User-Agent": USER_AGENT},
+            ) as client:
+                r = await client.post(endpoint, data={"data": query})
+                r.raise_for_status()
+                data = r.json()
+            feats = []
+            for el in data.get("elements", []):
+                if el.get("type") == "way":
+                    geom = _coords(el.get("geometry"))
+                    if len(geom) >= 2:
+                        feats.append({"geometry": geom, "tags": el.get("tags", {})})
+                elif el.get("type") == "relation":
+                    for m in el.get("members", []):
+                        if m.get("type") != "way":
+                            continue
+                        geom = _coords(m.get("geometry"))
+                        if len(geom) >= 2:
+                            feats.append({"geometry": geom, "tags": el.get("tags", {}), "role": m.get("role")})
+            _cache[key] = (time.time(), feats)
+            if storage.enabled():
+                await storage.put_json(gcs_key, {"ts": time.time(), "feats": feats})
+            logger.info("Overpass area: %d features for %d tag(s) via %s", len(feats), len(tags), endpoint)
+            return feats
+        except Exception as e:
+            last_err = e
+            logger.warning("Overpass area attempt failed (%s): %s", endpoint, e)
+            await asyncio.sleep(1)
+    raise RuntimeError(f"Overpass area fetch failed for tags={tags}: {last_err}")
+
+
 async def fetch_layer_pois(
     tags: list[str],
     bbox: tuple[float, float, float, float],
