@@ -17,6 +17,7 @@ import numpy as np
 from ..config import get_settings
 from ..models.spec import SpecV2
 from ..engine import corridors
+from ..engine import poi_merge
 from ..engine import results as results_mod
 from ..engine import scoring
 from ..engine import water
@@ -143,30 +144,66 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     notes.append(f"H3 grid: {len(hexes)} hexes at resolution {res}")
 
     # ── 3. Data fetch — ALL OSM layers + exclusions in one union query ──
+    # Consumer-POI layers (cafés, shops, clinics…) are sourced from BOTH OSM and
+    # Google Places and merged with spatial dedup: the two providers overlap only
+    # on this category, so merging back-stops a sparse result in either one and
+    # kills the "competitor saturation: no data" failure regardless of which
+    # source the consultant picked. Infra/land/water/transit stay single-source.
     layer_pois: dict[str, list[dict]] = {}
     osm_tag_sets = {
         l.id: l.source.tags for l in spec.layers if l.source.provider == "osm"
     }
     exc_tag_sets = {f"__exc__{e.name}": e.source.tags for e in spec.exclusions}
+    # Near-free OSM supplement for each Google-Places (consumer) layer — folded
+    # into the same batched union query.
+    sup_tag_sets = {
+        f"__sup__{l.id}": poi_merge.osm_tags_for_places(l.source.types)
+        for l in spec.layers
+        if l.source.provider == "google_places" and poi_merge.osm_tags_for_places(l.source.types)
+    }
 
-    _update(job, 20, "fetch", f"Fetching OSM data ({len(osm_tag_sets)} layers, 1 combined query)...")
+    _update(job, 20, "fetch", f"Fetching OSM data ({len(osm_tag_sets)} layers + {len(sup_tag_sets)} supplements, 1 combined query)...")
     fetched: dict[str, list[dict]] = {}
-    if osm_tag_sets or exc_tag_sets:
+    if osm_tag_sets or exc_tag_sets or sup_tag_sets:
         try:
-            fetched = await fetch_all_layers({**osm_tag_sets, **exc_tag_sets}, overpass_bbox)
+            fetched = await fetch_all_layers({**osm_tag_sets, **exc_tag_sets, **sup_tag_sets}, overpass_bbox)
         except Exception as e:
             fallbacks.append(f"OSM fetch failed entirely — OSM layers scored as zero ({e}).")
 
+    places_fetches = 0   # Places is paid + tiled → bound total fetches
+    PLACES_FETCH_CAP = 6
+
     for layer in spec.layers:
         if layer.source.provider == "osm":
-            layer_pois[layer.id] = fetched.get(layer.id, [])
+            osm_pois = fetched.get(layer.id, [])
+            # Consumer OSM layer (e.g. competition/footfall the consultant put on
+            # OSM): also pull Google Places and merge, so it isn't left empty.
+            ptype = poi_merge.places_type_for_osm(layer.source.tags)
+            if ptype and s.google_places_api_key and places_fetches < PLACES_FETCH_CAP:
+                _update(job, 40, "fetch", f"Google Places back-up for: {layer.name}...")
+                places_pois = await fetch_places_pois([ptype], None, overpass_bbox)
+                places_fetches += 1
+                merged = poi_merge.merge_pois(places_pois, osm_pois)   # Places primary
+                if places_pois and osm_pois:
+                    notes.append(f"Layer '{layer.name}': merged {len(places_pois)} Places + {len(osm_pois)} OSM → {len(merged)} (deduped).")
+                layer_pois[layer.id] = merged
+            else:
+                layer_pois[layer.id] = osm_pois
             if not layer_pois[layer.id]:
-                fallbacks.append(f"No OSM features found for layer '{layer.name}' in the study area.")
+                fallbacks.append(f"No features found for layer '{layer.name}' in the study area.")
         elif layer.source.provider == "google_places":
             _update(job, 40, "fetch", f"Fetching Google Places for: {layer.name}...")
-            layer_pois[layer.id] = await fetch_places_pois(
+            places_pois = await fetch_places_pois(
                 layer.source.types, layer.source.keyword, overpass_bbox,
             )
+            places_fetches += 1
+            osm_sup = fetched.get(f"__sup__{layer.id}", [])
+            merged = poi_merge.merge_pois(places_pois, osm_sup)   # Places primary + OSM supplement
+            if places_pois and osm_sup:
+                notes.append(f"Layer '{layer.name}': merged {len(places_pois)} Places + {len(osm_sup)} OSM → {len(merged)} (deduped).")
+            layer_pois[layer.id] = merged
+            if not merged:
+                fallbacks.append(f"No features found for layer '{layer.name}' in the study area.")
         else:  # custom — uses other layers' POIs; no fetch
             layer_pois[layer.id] = []
 

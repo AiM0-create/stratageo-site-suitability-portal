@@ -430,6 +430,10 @@ SPEC CONSTRUCTION
     clinics, pharmacies, hospitals, hotels, banks, schools, coaching centres. ALWAYS
     use google_places for competition layers and footfall-anchor layers of these types
     (OSM badly undercounts them — using OSM there makes the analysis look empty).
+    NOTE: for consumer-POI layers the engine now AUTO-MERGES both providers (Places +
+    OSM, spatial-deduped) regardless of which you pick, so a consumer layer is never
+    left empty by a single-source gap. Still prefer google_places here — the merge is a
+    safety net, not a reason to omit the right source.
     Form: {{"provider": "google_places", "types": ["cafe"], "keyword": null}} using a
     real Google Places type (restaurant, cafe, supermarket, gym, hospital, pharmacy,
     school, bank, lodging, shopping_mall, store, etc.); add a keyword for niches the
