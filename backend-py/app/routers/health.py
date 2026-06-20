@@ -10,7 +10,7 @@ async def health():
     s = get_settings()
     return {
         "ok": True,
-        "version": "1.0.2",
+        "version": "1.0.3",
         "chatModel": s.chat_model,
         "sandbox": s.sandbox_enabled,
         "hasOpenAIKey": bool(s.openai_api_key),

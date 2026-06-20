@@ -61,9 +61,12 @@ _WATERFRONT_KEYWORDS_RE = re.compile(
     r"|along\s+the\b.{0,40}\b(river|hooghly|ganga|creek|canal|lake|sea|coast)",
     re.I,
 )
-# "strict" cues → tightest band; explicit user permission for ~500 m → broad band.
+# "strict" cues → tightest band (250 m); explicit user permission for ~500 m → broad.
+# v1.0.3.1: "riverside"/"riverbank"/"exactly"/"only"/"must be along" also force strict —
+# these phrasings mean the user wants the site ON the bank, not merely near the water.
 _WATERFRONT_STRICT_RE = re.compile(
-    r"\bstrict(ly)?\b|along\s+(the\s+)?river|\briverbank\b|right\s+on\s+the\s+(river|water)"
+    r"\bstrict(ly)?\b|\bexactly\b|\bonly\b|along\s+(the\s+)?river|must\s+be\s+along"
+    r"|river\s?side|\briverbank\b|right\s+on\s+the\s+(river|water)"
     r"|on\s+the\s+water\s?front|directly\s+on\s+the\b",
     re.I,
 )
