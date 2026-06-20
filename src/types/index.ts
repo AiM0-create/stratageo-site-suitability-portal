@@ -114,6 +114,13 @@ export interface LocationData {
   scoreWithheld?: boolean;     // composite not computable (required data missing)
   routeMetrics?: Record<string, RouteMetric>;  // computed network routing per constraint
   trafficContext?: { congestionRatio: number; label: string; note: string };
+  // Spatial Reliability Upgrade v1.0.3 — deterministic geographic checks (optional)
+  recommended?: boolean;           // passed hard constraints AND min viable score
+  riverDistanceM?: number | null;  // metres to nearest water edge
+  inWaterfrontCorridor?: boolean | null;
+  buildabilityStatus?: 'viable' | 'weak' | 'excluded' | string;
+  exclusionReasons?: string[];
+  hardConstraintPass?: boolean;
 }
 
 export interface RouteMetric {
@@ -189,6 +196,18 @@ export interface AnalysisResult {
   /** True when the critic judged the ranking unreliable → the UI withholds the
    * recommendation and shows the critic's reasons instead of a confident list. */
   recommendationWithheld?: boolean;
+  // Spatial Reliability Upgrade v1.0.3 — new optional fields (frontend-safe)
+  analysisStatus?: 'reliable' | 'weak' | 'unreliable' | 'insufficient_viable_land' | string;
+  suggestions?: string[];                       // relaxations when viable land is insufficient
+  maskStats?: Record<string, number>;           // how many hexes each safeguard removed
+  studyAreaBoundary?: [number, number][];       // [lat,lng] ring for the AOI outline
+  waterfront?: {
+    isWaterfront: boolean;
+    strictness?: string | null;
+    corridorWidthM?: number | null;
+    corridorSource?: string | null;
+    clampedFromM?: number | null;
+  } | null;
 }
 
 export interface GroundingSource {

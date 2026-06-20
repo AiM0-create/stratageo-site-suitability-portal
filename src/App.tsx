@@ -1136,6 +1136,8 @@ const App: React.FC = () => {
         bufferRadiusM={spec?.userPointConstraints?.[0]?.radiusM}
         hexGrid={result?.hexGrid}
         catchments={result?.catchments}
+        recommendationWithheld={result?.recommendationWithheld}
+        studyAreaBoundary={result?.studyAreaBoundary}
       />
 
       <TopBar
@@ -1206,6 +1208,13 @@ const App: React.FC = () => {
           showBuffers={showBuffers}
           onToggleBuffers={() => setShowBuffers(prev => !prev)}
           csvPointCount={userPoints.length}
+          onWidenCorridor={() => {
+            setDrawerOpen(false);
+            handleChatTurn(
+              'Widen the riverfront band to 500 m and re-run, but keep the area strictly ' +
+              'between the same landmarks. Relax the riverfront corridor only, not the geography.'
+            );
+          }}
         />
       )}
 

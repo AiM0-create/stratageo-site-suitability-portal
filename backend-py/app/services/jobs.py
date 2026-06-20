@@ -16,15 +16,21 @@ import numpy as np
 
 from ..config import get_settings
 from ..models.spec import SpecV2
+from ..engine import buildability
 from ..engine import corridors
 from ..engine import poi_merge
 from ..engine import results as results_mod
 from ..engine import scoring
 from ..engine import water
 from ..engine.catchments import count_pois_in_polygon, fetch_isochrones
-from ..engine.data_osm import fetch_all_layers, fetch_area_geometries, fetch_line_geometries
+from ..engine.data_osm import (
+    fetch_all_layers,
+    fetch_area_geometries,
+    fetch_line_geometries,
+    fetch_named_features,
+)
 from ..engine.data_places import fetch_places_pois
-from ..engine.grid import polyfill
+from ..engine.grid import cell_boundary as grid_cell_boundary, polyfill
 from ..engine.routing import evaluate_route_constraint, fetch_railway_lines
 from ..engine.traffic import traffic_catchment
 from ..engine.sandbox import run_custom_layer
@@ -33,6 +39,99 @@ from . import storage
 from .critic import critique_analysis
 
 logger = logging.getLogger(__name__)
+
+import re as _re  # noqa: E402  (local helper regexes)
+
+# Commercial / footfall briefs where no-build land (rail/ghat/heritage/open-space)
+# should be hard-excluded — a restaurant/shop cannot sit on a railway yard or in a
+# graveyard. Kept deliberately broad but evidence-gated (we only mask where OSM
+# positively marks no-build land).
+_COMMERCIAL_RE = _re.compile(
+    r"restaurant|cafe|café|coffee|qsr|quick.?service|retail|shop|store|outlet|mall"
+    r"|showroom|kiosk|bar\b|pub\b|brewery|food|f&b|dining|hotel|resort|lodg|hospitality"
+    r"|supermarket|grocery|bakery|clinic|salon|gym|bank|pharmacy",
+    _re.I,
+)
+_AVOID_RAIL_RE = _re.compile(
+    r"avoid\s+railway|railway\s+land|away\s+from\s+(the\s+)?railway|not\s+(on|near)\s+railway"
+    r"|no\s+railway|exclude\s+railway",
+    _re.I,
+)
+_PARK_USE_RE = _re.compile(
+    r"park\s+kiosk|open.?air|in\s+the\s+park|park\s+caf|promenade\s+kiosk|garden\s+caf",
+    _re.I,
+)
+
+
+def _buildability_flags(spec) -> dict:
+    """Decide which deterministic no-build masks apply to this brief (v1.0.3).
+
+    Returns flags for railway / ghat / protected-open-space / commercial-proxy.
+    Applies to WATERFRONT and COMMERCIAL briefs (a restaurant cannot be built on
+    rail land / a ghat / in a park); railway also when the user explicitly says to
+    avoid it. A park-use brief (park kiosk / open-air cafe) suppresses open-space
+    exclusion. Non-commercial, non-waterfront briefs are left untouched.
+    """
+    text = f"{spec.objective} {spec.businessType}".lower()
+    is_wf = bool(spec.waterfront and spec.waterfront.isWaterfront)
+    is_commercial = bool(_COMMERCIAL_RE.search(text))
+    avoid_rail = bool(_AVOID_RAIL_RE.search(text))
+    base = is_wf or is_commercial
+    return {
+        "railway": base or avoid_rail,
+        "ghat": base,
+        "protected": base,
+        "park_exception": bool(_PARK_USE_RE.search(text)),
+        "commercial_proxy": is_commercial or is_wf,
+    }
+
+
+_PREMIUM_RE = _re.compile(r"premium|luxury|high.?end|upscale|fine.?dining|flagship|5.?star|boutique", _re.I)
+
+
+def _boundary_ring(polygon) -> list[list[float]]:
+    """Study-area polygon → simplified [[lat,lng],...] exterior ring for the map
+    (so the user can SEE the AOI and judge whether the spatial area is wrong)."""
+    try:
+        geom = polygon.simplify(0.0008, preserve_topology=True)
+        ext = geom.exterior if hasattr(geom, "exterior") else geom.convex_hull.exterior
+        return [[round(lat, 5), round(lng, 5)] for lng, lat in ext.coords]
+    except Exception:
+        return []
+
+
+def _min_viable_score(spec) -> float:
+    """Minimum composite (0–10) a candidate must reach to be RECOMMENDED (v1.0.3).
+
+    Default 4.5; premium/commercial 5.0; strict waterfront corridor 5.0. Below this
+    a candidate may still appear as a 'raw candidate' but is not a recommendation.
+    """
+    text = f"{spec.objective} {spec.businessType}".lower()
+    strict_corridor = bool(spec.waterfront and spec.waterfront.isWaterfront
+                           and spec.waterfront.strictness == "strict")
+    if strict_corridor or _PREMIUM_RE.search(text) or _COMMERCIAL_RE.search(text):
+        return 5.0
+    return 4.5
+
+
+def _viability_suggestions(spec) -> list[str]:
+    """Concrete relaxations when too few viable sites remain — NEVER widening the
+    user's geographic hard constraint (we stay between the named landmarks)."""
+    out: list[str] = []
+    wf = spec.waterfront
+    if wf and wf.isWaterfront:
+        cur = wf.corridorWidthM or 250
+        wider = 500 if cur < 500 else max(cur, 750)
+        out.append(f"Increase the riverfront band from {cur} m to {wider} m (keeps the same area between the named landmarks).")
+        out.append("Allow BOTH riverbanks if the brief implied only one.")
+    if _PREMIUM_RE.search(f"{spec.objective} {spec.businessType}".lower()):
+        out.append("Relax the premium co-tenancy / affluence requirement so well-located but less-affluent frontage qualifies.")
+    out.append("Consider converting existing restaurant / heritage buildings on the bank instead of requiring new construction.")
+    # Keep the geographic constraint explicit in the guidance.
+    if spec.studyArea.type == "places" and spec.studyArea.places and len(spec.studyArea.places) >= 2:
+        a, b = spec.studyArea.places[0].split(",")[0], spec.studyArea.places[-1].split(",")[0]
+        out.append(f"Keep the area strictly between {a} and {b}, but widen the candidate band as above.")
+    return out
 
 
 @dataclass
@@ -252,15 +351,24 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         hexes, exclusion_pois, {e.name: e.bufferM for e in spec.exclusions},
     )
 
+    # Spatial Reliability Upgrade v1.0.3 — per-mask transparency counters surfaced
+    # to the UI (how many hexes each safeguard removed) + a shared local projection
+    # centre reused by corridors, buildability, and the deterministic critic.
+    mask_stats: dict[str, int] = {}
+    cen = polygon.centroid
+    lat0, lng0 = cen.y, cen.x
+
     # ── 4c. Linear-feature corridor gates (distance-to-LINE, real geometry) ──
     # "within 5 km of the highway" / "away from the river" target a LINE, not a
     # point. Fetch the real way geometry, measure true distance-to-nearest-line,
     # and mask hexes that violate the gate. When geometry is unavailable the gate
     # is skipped (never nuke every candidate) and reported honestly.
+    # For WATERFRONT briefs the water corridor is a hard riverfront band, already
+    # clamped to ≤500 m in SpecV2 (root cause #2/#3 fix).
+    n_before_corridor = int((~excluded).sum())
+    corridor_widths: list[int] = []
     if spec.corridors:
         _update(job, 60, "corridors", f"Applying {len(spec.corridors)} linear-feature gate(s)...")
-        cen = polygon.centroid
-        lat0, lng0 = cen.y, cen.x
         for c in spec.corridors:
             try:
                 ways = await fetch_line_geometries(c.source.tags, overpass_bbox)
@@ -278,10 +386,31 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             dists = corridors.distance_to_lines_m(hexes, ways, lat0, lng0)
             cmask = corridors.corridor_mask(dists, float(c.maxDistanceM), c.mode)
             excluded |= cmask
+            corridor_widths.append(int(c.maxDistanceM))
             verb = "beyond" if c.mode == "include" else "within"
             notes.append(
                 f"Corridor '{c.name}': masked {int(cmask.sum())} hex(es) {verb} "
                 f"{c.maxDistanceM} m of {len(ways)} line feature(s)."
+            )
+
+    # Waterfront transparency: width, source (LLM/clamped/injected), before/after.
+    n_after_corridor = int((~excluded).sum())
+    if spec.waterfront and spec.waterfront.isWaterfront:
+        wf = spec.waterfront
+        mask_stats["corridorRemoved"] = n_before_corridor - n_after_corridor
+        src_txt = {
+            "injected": "system-injected (LLM gave no water corridor)",
+            "clamped": f"system-clamped from {wf.clampedFromM} m (LLM corridor too loose)",
+            "llm": "LLM-provided (already tight enough)",
+        }.get(wf.corridorSource or "", wf.corridorSource or "")
+        notes.append(
+            f"Waterfront brief ({wf.strictness}): riverfront band = {wf.corridorWidthM} m, {src_txt}. "
+            f"Candidate hexes {n_before_corridor} → {n_after_corridor} after the riverfront corridor."
+        )
+        if wf.corridorSource == "clamped" and wf.clampedFromM:
+            notes.append(
+                f"Waterfront corridor clamped from {wf.clampedFromM} m to {wf.corridorWidthM} m "
+                "for strict riverfront feasibility."
             )
 
     # ── 4d. Water mask — no candidate can sit inside a river/lake/pond ──
@@ -306,6 +435,83 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 f"Water mask: removed {n_water} hex(es) whose centre falls inside a "
                 f"water body (river/lake/pond) from {len(water_ways)} water feature(s)."
             )
+        # v1.0.3 — area-overlap mask: drop hexes that are mostly water even if the
+        # centre is on the bank (centroid test alone keeps half-in-river cells).
+        boundaries = [grid_cell_boundary(h.h3_id) for h in hexes]
+        omask = water.water_overlap_mask(hexes, water_ways, boundaries, ratio=0.30)
+        omask &= ~wmask                       # count only the NEW ones
+        n_overlap = int(omask.sum())
+        if n_overlap:
+            excluded |= omask
+            mask_stats["waterOverlapRemoved"] = n_overlap
+            notes.append(
+                f"Water overlap mask removed {n_overlap} hex(es) with >30% water area."
+            )
+
+    # ── 4e. Buildability / no-construction masks (v1.0.3) ─────────────
+    # Hard-exclude obvious no-build land for waterfront + commercial briefs:
+    # railway land, ghats, heritage/protected/sacred, open space. OSM is incomplete
+    # in India, so absence of a mask means "unknown" not "buildable" — we only mask
+    # where OSM positively says no-build, and we report every removal.
+    bflags = _buildability_flags(spec)
+    road_lines: list[dict] = []
+    if any(bflags.values()):
+        _update(job, 64, "buildability", "Applying buildability / no-construction masks...")
+
+        async def _safe_area(tags):
+            try:
+                return await fetch_area_geometries(tags, overpass_bbox)
+            except Exception as ex:
+                fallbacks.append(f"Buildability fetch skipped ({tags[:1]}…): {ex}")
+                return []
+
+        async def _safe_line(tags):
+            try:
+                return await fetch_line_geometries(tags, overpass_bbox)
+            except Exception as ex:
+                fallbacks.append(f"Buildability line fetch skipped ({tags[:1]}…): {ex}")
+                return []
+
+        if bflags.get("railway"):
+            rail_area = await _safe_area(buildability.RAILWAY_AREA_TAGS)
+            rail_lines = await _safe_line(buildability.RAILWAY_LINE_TAGS)
+            rmask = buildability.centroid_in_polygon_mask(hexes, rail_area)
+            rmask |= buildability.line_buffer_mask(hexes, rail_lines, 40.0, lat0, lng0)
+            rmask &= ~excluded
+            n = int(rmask.sum())
+            if n:
+                excluded |= rmask
+                mask_stats["railwayRemoved"] = n
+                notes.append(f"Railway exclusion removed {n} hex(es) (rail land + 40 m track buffer).")
+
+        if bflags.get("ghat"):
+            ghats = await fetch_named_features("[Gg]hat", overpass_bbox)
+            gmask = buildability.point_buffer_mask(hexes, ghats, 50.0)
+            gmask &= ~excluded
+            n = int(gmask.sum())
+            if n:
+                excluded |= gmask
+                mask_stats["ghatRemoved"] = n
+                notes.append(f"Ghat exclusion removed {n} hex(es) (50 m around {len(ghats)} ghat feature(s)).")
+
+        if bflags.get("protected"):
+            tags = list(buildability.PROTECTED_AREA_TAGS)
+            if bflags.get("park_exception"):
+                tags = [t for t in tags if not t.startswith(("leisure=park", "landuse=grass", "landuse=recreation"))]
+            prot = await _safe_area(tags)
+            pmask = buildability.centroid_in_polygon_mask(hexes, prot)
+            pmask &= ~excluded
+            n = int(pmask.sum())
+            if n:
+                excluded |= pmask
+                mask_stats["protectedOpenSpaceRemoved"] = n
+                notes.append(
+                    f"Heritage/protected/open-space exclusion removed {n} hex(es) "
+                    "(parks, sacred, graveyard, heritage land)."
+                )
+
+        if bflags.get("commercial_proxy"):
+            road_lines = await _safe_line(buildability.ROAD_LINE_TAGS)
 
     # ── 5. Candidate selection ──────────────────────────────────────
     top_k = min(spec.execution.refineTopK, s.refine_top_k)
@@ -313,7 +519,46 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         composite, hexes, excluded, top_k, spec.output.minCandidateSeparationHexRings,
     )
     if not candidates:
-        raise ValueError("no candidate hexes survived exclusion masking")
+        # v1.0.3 — graceful "insufficient viable land": every hex was removed by the
+        # water / corridor / buildability masks. Do NOT crash and do NOT fabricate
+        # weak sites — return the honest status + relaxation suggestions (which never
+        # widen the user's geographic hard constraint).
+        notes.extend(fallbacks)
+        target_location = ""
+        if spec.studyArea.type == "places" and spec.studyArea.places:
+            target_location = spec.studyArea.places[0].split(",")[-1].strip()
+        wf_band = (f"{spec.waterfront.corridorWidthM} m riverfront band and the "
+                   if (spec.waterfront and spec.waterfront.isWaterfront) else "")
+        ds = {
+            "status": "insufficient_viable_land",
+            "noDataLayers": no_data_layers, "requiredMissing": [], "noEligibleCandidates": True,
+            "note": ("No buildable candidate survived the " + wf_band
+                     + "water / railway / ghat / heritage / open-space masks."),
+        }
+        job.result = {
+            "summary": ("No reliable recommendation: no buildable site remained after the "
+                        + wf_band + "water, railway, ghat, heritage and open-space masks were applied."),
+            "business_type": spec.businessType,
+            "target_location": target_location,
+            "methodology": results_mod.build_methodology(spec, len(hexes), res, False, fallbacks),
+            "spec": results_mod.build_legacy_spec(spec, notes, len(hexes), res),
+            "locations": [],
+            "grounding_sources": [],
+            "hexGrid": results_mod.build_hex_grid(hexes, composite, excluded, scores),
+            "catchments": [],
+            "dataSufficiency": ds,
+            "dataQuality": [],
+            "critique": None,
+            "recommendationWithheld": True,
+            "analysisStatus": "insufficient_viable_land",
+            "suggestions": _viability_suggestions(spec),
+            "maskStats": mask_stats,
+            "studyAreaBoundary": _boundary_ring(polygon),
+            "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
+        }
+        job.status = "done"; job.progress = 100; job.phase = "done"
+        job.message = "Analysis complete — no viable site in the strict corridor"
+        return
 
     # ── 6. Pass B — isochrone refinement (all layers fetched in parallel) ──
     iso_layers = [l for l in spec.layers if l.catchment.type in ("walk", "drive")]
@@ -496,6 +741,43 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     })
         locations.append(loc)
 
+    # ── 8b. Deterministic geographic critic (v1.0.3) ─────────────────
+    # Compute hard GIS facts per final candidate — NOT LLM judgement — and attach
+    # them. Enforce them: a waterfront candidate outside the riverfront band is
+    # excluded here even if it slipped through (belt-and-suspenders vs the corridor
+    # mask, which used the LLM's water tags; this uses the actual water geometry).
+    cand_cells_final = [hexes[ci] for ci in finals]
+    river_dists = (
+        corridors.distance_to_lines_m(cand_cells_final, water_ways, lat0, lng0)
+        if water_ways else [float("inf")] * len(finals)
+    )
+    all_poi_points = [p for pl in layer_pois.values() for p in pl]
+    build_status = (
+        buildability.commercial_viability(hexes, finals, road_lines, all_poi_points, lat0, lng0)
+        if bflags.get("commercial_proxy") else {}
+    )
+    wf_width = (spec.waterfront.corridorWidthM if spec.waterfront and spec.waterfront.isWaterfront else None)
+    for pos, (ci, loc) in enumerate(zip(finals, locations)):
+        rd = float(river_dists[pos]) if pos < len(river_dists) else float("inf")
+        loc["riverDistanceM"] = (round(rd, 1) if rd != float("inf") else None)
+        in_corridor = (wf_width is None) or (rd <= wf_width)
+        loc["inWaterfrontCorridor"] = bool(in_corridor) if wf_width is not None else None
+        loc["buildabilityStatus"] = ("excluded" if loc.get("excluded")
+                                     else build_status.get(ci, "viable" if not bflags.get("commercial_proxy") else "weak"))
+        reasons = [e["detail"] for e in loc.get("exclusions", []) if e.get("passed") is False]
+        # Hard deterministic gate: waterfront site outside the band.
+        if wf_width is not None and not in_corridor:
+            loc["excluded"] = True
+            reasons.append(f"{round(rd)} m from the water edge — outside the {wf_width} m riverfront band.")
+            loc["exclusions"].append({
+                "rule": "waterfront_corridor", "passed": False,
+                "detail": reasons[-1], "evidenceBasis": "constraint-rule",
+            })
+        loc["exclusionReasons"] = reasons
+        loc["hardConstraintPass"] = bool(
+            not loc.get("excluded") and not loc.get("scoreWithheld") and in_corridor
+        )
+
     # ── Required-data gate: a hard-constraint layer with no data means NO
     # candidate can be truthfully validated. Withhold the ranking: every
     # candidate is marked excluded with the honest reason, and the composite
@@ -558,10 +840,48 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # Fail-soft: returns None and the analysis ships without it.
     critique = await critique_analysis(spec, locations, data_quality, data_sufficiency)
 
-    # Withhold the ranking when the critic judges it unreliable (product rule): an
-    # "unreliable" verdict means the computed ranking cannot be trusted as a
-    # recommendation, so the UI shows the critic's reasons instead of a confident list.
-    recommendation_withheld = bool(critique and critique.get("verdict") == "unreliable")
+    # ── Viability gate (v1.0.3) — minimum score + minimum viable candidates ──
+    # A candidate is RECOMMENDED only if it passes hard constraints AND clears the
+    # minimum composite (default 4.5; premium/commercial/strict-corridor 5.0). Weak
+    # sites stay visible as "raw candidates" but are never presented as a confident
+    # recommendation. For WATERFRONT/strict briefs, too few viable sites →
+    # insufficient_viable_land (with relaxation suggestions) instead of forcing weak
+    # picks. Normal (non-waterfront) briefs keep their prior behaviour: we annotate
+    # `recommended` but do not newly withhold on score alone (so normal use cases
+    # like "cafe in Salt Lake" are not broken).
+    min_score = _min_viable_score(spec)
+    is_wf = bool(spec.waterfront and spec.waterfront.isWaterfront)
+    topN = spec.output.topN
+    for l in locations:
+        l["recommended"] = bool(
+            not l.get("excluded") and not l.get("scoreWithheld")
+            and l.get("hardConstraintPass", True)
+            and (l.get("mcda_score") or 0) >= min_score
+        )
+    n_viable = sum(1 for l in locations if l["recommended"])
+
+    critic_verdict = critique.get("verdict") if critique else None
+    if all_required_missing or no_eligible:
+        analysis_status = "unreliable"
+    elif is_wf and n_viable < topN:
+        analysis_status = "insufficient_viable_land"
+    elif critic_verdict == "unreliable":
+        analysis_status = "unreliable"
+    elif critic_verdict == "weak" or n_viable == 0:
+        analysis_status = "weak"
+    else:
+        analysis_status = "reliable"
+
+    # Withhold the confident ranking when unreliable OR not enough viable land.
+    recommendation_withheld = analysis_status in ("unreliable", "insufficient_viable_land")
+    suggestions = _viability_suggestions(spec) if analysis_status == "insufficient_viable_land" else []
+    if analysis_status == "insufficient_viable_land":
+        notes.append(
+            f"Viability gate: only {n_viable}/{topN} site(s) cleared the {min_score}/10 "
+            "minimum inside the strict riverfront corridor — recommendation withheld; see suggestions."
+        )
+    mask_stats["minViableScore"] = min_score
+    mask_stats["viableCandidates"] = n_viable
 
     target_location = ""
     if spec.studyArea.type == "places" and spec.studyArea.places:
@@ -592,6 +912,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "dataQuality": data_quality,
         "critique": critique,
         "recommendationWithheld": recommendation_withheld,
+        # Spatial Reliability Upgrade v1.0.3 — new optional fields (frontend-safe)
+        "analysisStatus": analysis_status,
+        "suggestions": suggestions,
+        "maskStats": mask_stats,
+        "studyAreaBoundary": _boundary_ring(polygon),
+        "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
     }
     job.status = "done"
     job.progress = 100

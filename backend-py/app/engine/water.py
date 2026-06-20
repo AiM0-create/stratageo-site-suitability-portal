@@ -72,3 +72,35 @@ def water_mask(hexes: list[HexCell], ways: list[dict]) -> np.ndarray:
         if merged.contains(Point(h.lng, h.lat)):
             mask[i] = True
     return mask
+
+
+def water_overlap_mask(
+    hexes: list[HexCell], ways: list[dict], boundaries: list, ratio: float = 0.30
+) -> np.ndarray:
+    """Spatial Reliability Upgrade v1.0.3 — area-overlap water mask.
+
+    The centroid test (water_mask) keeps a hex that is e.g. 45% river as long as its
+    CENTRE is on the bank. This catches those: a hex is masked when more than `ratio`
+    of its AREA is water. `boundaries[i]` is the hex ring as [[lat,lng],...] (from
+    grid.cell_boundary); we build the hex polygon in lng/lat to match the water polys.
+    Returns a mask to be OR-ed with the centroid mask (both are hard exclusions).
+    """
+    mask = np.zeros(len(hexes), dtype=bool)
+    polys = build_water_polygons(ways)
+    if not polys or not boundaries:
+        return mask
+    merged = unary_union(polys)
+    for i in range(len(hexes)):
+        ring = boundaries[i] if i < len(boundaries) else None
+        if not ring or len(ring) < 3:
+            continue
+        try:
+            hexpoly = Polygon([(lng, lat) for lat, lng in ring])  # boundary is [lat,lng]
+            if hexpoly.area <= 0:
+                continue
+            inter = hexpoly.intersection(merged)
+            if not inter.is_empty and (inter.area / hexpoly.area) > ratio:
+                mask[i] = True
+        except Exception:
+            continue
+    return mask

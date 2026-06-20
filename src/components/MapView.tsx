@@ -20,6 +20,9 @@ interface MapViewProps {
   /** v2 engine layers (conversational analyses) */
   hexGrid?: HexGridCell[];
   catchments?: CatchmentOutline[];
+  /** Spatial Reliability Upgrade v1.0.3 */
+  recommendationWithheld?: boolean;             // grey out pins, label as raw candidates
+  studyAreaBoundary?: [number, number][];        // [lat,lng] ring of the AOI
 }
 
 /** Normalised 0..1 (0 = least, 1 = most favourable) → red→amber→green ramp. */
@@ -27,14 +30,17 @@ const rampColor = (t: number) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) *
 
 const CATCHMENT_COLORS: Record<string, string> = { walk: '#059669', drive: '#7c3aed' };
 
-const getMarkerIcon = (rank: number, isSelected: boolean, excluded: boolean) => {
-  const color = excluded ? '#94a3b8' : isSelected ? '#1d4ed8' : '#059669';
-  const bgColor = excluded ? '#f1f5f9' : isSelected ? '#dbeafe' : '#d1fae5';
+const getMarkerIcon = (rank: number, isSelected: boolean, excluded: boolean, raw = false) => {
+  // raw = recommendation withheld → render as a neutral "raw candidate", never a
+  // green recommendation pin (v1.0.3 UI fix: pins must not contradict the banner).
+  const color = excluded ? '#94a3b8' : raw ? '#64748b' : isSelected ? '#1d4ed8' : '#059669';
+  const bgColor = excluded ? '#f1f5f9' : raw ? '#e2e8f0' : isSelected ? '#dbeafe' : '#d1fae5';
+  const glyph = excluded ? '✕' : raw ? '?' : rank;
 
   return L.divIcon({
     className: 'sg-marker',
     html: `<div class="sg-marker-pin" style="--marker-color: ${color}; --marker-bg: ${bgColor}">
-      <span class="sg-marker-rank">${excluded ? '✕' : rank}</span>
+      <span class="sg-marker-rank">${glyph}</span>
     </div>`,
     iconSize: [36, 44],
     iconAnchor: [18, 44],
@@ -55,6 +61,8 @@ export const MapView: React.FC<MapViewProps> = ({
   onBasemapChange,
   hexGrid,
   catchments,
+  recommendationWithheld = false,
+  studyAreaBoundary,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -63,6 +71,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const tileLayerRef = useRef<any>(null);
   const hexLayerRef = useRef<any>(null);
   const catchmentLayerRef = useRef<any>(null);
+  const aoiLayerRef = useRef<any>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showHexGrid, setShowHexGrid] = useState(true);
   const [showCatchments, setShowCatchments] = useState(true);
@@ -154,13 +163,17 @@ export const MapView: React.FC<MapViewProps> = ({
       if (!loc.excluded) visibleRank++;
       const displayRank = loc.excluded ? 0 : visibleRank;
       const isSelected = selectedLocations.some(sl => sl.name === loc.name);
-      const icon = getMarkerIcon(displayRank, isSelected, loc.excluded);
+      const raw = recommendationWithheld && !loc.excluded;
+      const icon = getMarkerIcon(displayRank, isSelected, loc.excluded, raw);
 
       try {
         const marker = L.marker([lat, lng], { icon });
-        const excludedLabel = loc.excluded ? ' <span style="color:#ef4444;font-size:9px">[EXCLUDED]</span>' : '';
+        const excludedLabel = loc.excluded
+          ? ' <span style="color:#ef4444;font-size:9px">[EXCLUDED]</span>'
+          : raw ? ' <span style="color:#64748b;font-size:9px">[RAW — NOT RECOMMENDED]</span>' : '';
+        const headGlyph = loc.excluded ? '✕' : raw ? '?' : `#${displayRank}`;
         marker.bindTooltip(
-          `<div class="sg-tooltip"><strong>#${loc.excluded ? '✕' : displayRank}</strong> ${loc.name}${excludedLabel}<br/><span class="sg-tooltip-score">${loc.mcda_score}/10</span></div>`,
+          `<div class="sg-tooltip"><strong>${headGlyph}</strong> ${loc.name}${excludedLabel}<br/><span class="sg-tooltip-score">${loc.mcda_score}/10</span></div>`,
           { permanent: true, direction: 'top', className: 'sg-tooltip-container', offset: [0, -44] }
         );
         marker.on('click', (e: any) => {
@@ -204,7 +217,33 @@ export const MapView: React.FC<MapViewProps> = ({
     } else if (bounds.length > 1) {
       map.flyToBounds(bounds, { padding: [60, 60], animate: true, duration: 1.2 });
     }
-  }, [locations, selectedLocations, onSelectLocation, heatmapType]);
+  }, [locations, selectedLocations, onSelectLocation, heatmapType, recommendationWithheld]);
+
+  // ── Study-area (AOI) boundary outline (v1.0.3) ──
+  // Draw the resolved study area so the user can SEE whether the spatial area is
+  // wrong (e.g. a buffered chord across both riverbanks). Excluded water/rail/ghat
+  // cells are already greyed in the hex layer below.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (aoiLayerRef.current) {
+      map.removeLayer(aoiLayerRef.current);
+      aoiLayerRef.current = null;
+    }
+    if (!studyAreaBoundary || studyAreaBoundary.length < 3) return;
+    try {
+      const poly = L.polygon(studyAreaBoundary, {
+        color: '#475569',
+        weight: 1.5,
+        dashArray: '5 5',
+        fill: false,
+        interactive: false,
+      });
+      poly.bindTooltip('Study area (AOI)', { sticky: true, className: 'sg-tooltip-container' });
+      poly.addTo(map);
+      aoiLayerRef.current = poly;
+    } catch { /* skip */ }
+  }, [studyAreaBoundary]);
 
   // ── Hex suitability surface (v2 engine choropleth) ──
   useEffect(() => {

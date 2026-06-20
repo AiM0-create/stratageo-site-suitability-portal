@@ -18,6 +18,8 @@ interface ResultsDrawerProps {
   showBuffers?: boolean;
   onToggleBuffers?: () => void;
   csvPointCount?: number;
+  /** v1.0.3 — re-run the analysis with a wider riverfront band (same area). */
+  onWidenCorridor?: () => void;
 }
 
 const ComparisonChart: React.FC<{ locations: LocationData[] }> = ({ locations }) => {
@@ -109,6 +111,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   showBuffers,
   onToggleBuffers,
   csvPointCount = 0,
+  onWidenCorridor,
 }) => {
   const [expandedLoc, setExpandedLoc] = useState<string | null>(locations[0]?.name ?? null);
   const [showAssumptions, setShowAssumptions] = useState(false);
@@ -116,6 +119,18 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   // The critic judged this ranking untrustworthy → withhold the recommendation
   // (show the reasons, not a confident list). Raw candidates stay behind an opt-in.
   const withheld = (result as any).recommendationWithheld === true;
+  // Spatial Reliability Upgrade v1.0.3 — viability gate surfacing.
+  const analysisStatus: string | undefined = (result as any).analysisStatus;
+  const insufficient = analysisStatus === 'insufficient_viable_land';
+  const suggestions: string[] = (result as any).suggestions || [];
+  const maskStats: Record<string, number> = (result as any).maskStats || {};
+  const MASK_LABELS: Record<string, string> = {
+    corridorRemoved: 'Outside riverfront corridor',
+    waterOverlapRemoved: 'Mostly water (>30% area)',
+    railwayRemoved: 'Railway land / track buffer',
+    ghatRemoved: 'Ghat (access/sacred) buffer',
+    protectedOpenSpaceRemoved: 'Heritage / protected / open-space',
+  };
   const ranked = useMemo(() => [...locations].sort((a, b) => {
     if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;
     return b.mcda_score - a.mcda_score;
@@ -150,15 +165,53 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         {/* Summary — suppressed when withheld (it may assert a winner the critic rejected) */}
         {!withheld && <p className="drawer-summary">{result.summary}</p>}
 
-        {/* Ranking withheld — the critic judged the result unreliable */}
+        {/* Ranking withheld — critic unreliable OR insufficient viable land */}
         {withheld && (
           <div className="withheld-notice">
-            <div className="withheld-head">❌ No reliable recommendation</div>
+            <div className="withheld-head">
+              {insufficient ? '❌ No viable site in the strict corridor' : '❌ No reliable recommendation'}
+            </div>
             <p className="withheld-body">
-              The analyst review flagged this result as <b>unreliable</b>, so no ranked
-              recommendation is shown. The reasons — and what would make a reliable
-              analysis possible — are below.
+              {insufficient ? (
+                <>No buildable site remained inside the strict riverfront corridor after removing
+                water, railway, ghat, heritage and open-space land. Raw candidates (if any) are not
+                a recommendation. You can relax the analysis as suggested below — the geographic area
+                stays the same.</>
+              ) : (
+                <>The analyst review flagged this result as <b>unreliable</b>, so no ranked
+                recommendation is shown. The reasons — and what would make a reliable analysis
+                possible — are below.</>
+              )}
             </p>
+          </div>
+        )}
+
+        {/* Why hexes were removed (per-mask transparency) */}
+        {withheld && Object.keys(maskStats).some(k => MASK_LABELS[k] && maskStats[k] > 0) && (
+          <div className="withheld-masks">
+            <div className="review-label">Hexes removed by safeguard</div>
+            <ul>
+              {Object.entries(maskStats)
+                .filter(([k, v]) => MASK_LABELS[k] && v > 0)
+                .map(([k, v]) => <li key={k}>{MASK_LABELS[k]}: <b>{v}</b></li>)}
+            </ul>
+          </div>
+        )}
+
+        {/* What to relax next — never widens the geographic hard constraint */}
+        {withheld && suggestions.length > 0 && (
+          <div className="withheld-suggestions">
+            <div className="review-label">What to relax next</div>
+            <ul>{suggestions.map((sug, i) => <li key={i}>{sug}</li>)}</ul>
+            {onWidenCorridor && ((result as any).waterfront?.corridorWidthM ?? 0) < 500 && (
+              <button
+                className="assumptions-toggle"
+                onClick={onWidenCorridor}
+                title="Re-run keeping the same area, wider riverfront band"
+              >
+                <span>Try widening riverfront corridor to 500 m</span>
+              </button>
+            )}
           </div>
         )}
 

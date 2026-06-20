@@ -239,6 +239,68 @@ async def fetch_area_geometries(
     raise RuntimeError(f"Overpass area fetch failed for tags={tags}: {last_err}")
 
 
+async def fetch_named_features(
+    name_regex: str,
+    bbox: tuple[float, float, float, float],
+) -> list[dict]:
+    """Nodes + ways whose `name` matches a case-insensitive regex (e.g. "ghat").
+
+    Returns [{lat, lng, name}] using centroids. Used by the buildability ghat mask:
+    ghats are tagged inconsistently (tourism/amenity/leisure/place), so a name match
+    is the reliable signal. Same failover + caching as the other fetches.
+    """
+    key = (("named",) + tuple(round(x, 3) for x in bbox), (name_regex,))
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_TTL:
+        return hit[1]
+
+    from ..services import storage
+    gcs_key = f"overpass/{storage.cache_key(key)}.json"
+    if storage.enabled():
+        cached = await storage.get_json(gcs_key)
+        if cached is not None and time.time() - cached.get("ts", 0) < CACHE_TTL:
+            feats = cached["feats"]
+            _cache[key] = (time.time(), feats)
+            return feats
+
+    s, w, n, e = bbox
+    sel = f'["name"~"{name_regex}",i]'
+    query = (
+        f"[out:json][timeout:45];"
+        f"(node{sel}({s},{w},{n},{e});way{sel}({s},{w},{n},{e}););out center;"
+    )
+    last_err: Exception | None = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            async with httpx.AsyncClient(
+                timeout=HTTP_TIMEOUT, headers={"User-Agent": USER_AGENT},
+            ) as client:
+                r = await client.post(endpoint, data={"data": query})
+                r.raise_for_status()
+                data = r.json()
+            feats = []
+            for el in data.get("elements", []):
+                if el.get("type") == "node":
+                    lat, lng = el.get("lat"), el.get("lon")
+                else:
+                    c = el.get("center") or {}
+                    lat, lng = c.get("lat"), c.get("lon")
+                if lat is None or lng is None:
+                    continue
+                feats.append({"lat": lat, "lng": lng, "name": el.get("tags", {}).get("name", "")})
+            _cache[key] = (time.time(), feats)
+            if storage.enabled():
+                await storage.put_json(gcs_key, {"ts": time.time(), "feats": feats})
+            logger.info("Overpass named(%r): %d features via %s", name_regex, len(feats), endpoint)
+            return feats
+        except Exception as ex:
+            last_err = ex
+            logger.warning("Overpass named fetch failed (%s): %s", endpoint, ex)
+            await asyncio.sleep(1)
+    logger.warning("Overpass named fetch failed for %r: %s", name_regex, last_err)
+    return []   # buildability is best-effort — never hard-fail the analysis
+
+
 async def fetch_layer_pois(
     tags: list[str],
     bbox: tuple[float, float, float, float],
