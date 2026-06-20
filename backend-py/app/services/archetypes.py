@@ -31,6 +31,38 @@ ARCHETYPE_PLAYBOOK = {
         "weakProxyWarnings": ["OSM has no income data — affluence proxies are MEDIUM confidence at best, validate locally"],
         "validation": "scores at existing premium anchors (Tanishq, Starbucks) should rank top-quartile",
     },
+    "riverfront_fnb": {
+        "label": "Riverfront / waterfront F&B (restaurant, café, lounge)",
+        "primarySuccessMetric": "destination dining demand from genuine, buildable riverfront frontage",
+        "spatialScale": "micro_market",
+        "methodology": "STRICT-CORRIDOR micro-market scoring: the engine first hard-gates candidates to a tight riverfront band (≤500 m of the water edge) and removes water/railway/ghat/heritage/open-space land; ONLY THEN does it rank the surviving buildable frontage. Affluence is a supporting factor, NEVER the lead — a high-affluence inland block is not a riverfront site.",
+        "positiveDrivers": [
+            "true riverbank adjacency/visibility (close to the water EDGE but not in it)",
+            "commercial frontage + road/parking access on the bank",
+            "F&B ecosystem (existing restaurants/hotels/cafes) nearby",
+            "premium demand (luxury retail, premium hotels, banks) — supporting only",
+            "tourist/leisure footfall (ferry ghats, promenades, attractions) as a DEMAND signal nearby",
+        ],
+        "negativeDrivers": [
+            "inland blocks scored high on affluence alone (positioning trap)",
+            "competing-restaurant saturation in a small radius",
+            "railway land / ghats / heritage-protected / open-space (NOT buildable — hard-excluded)",
+        ],
+        "misleadingVariables": [
+            "affluence/luxury co-tenancy AS THE LEAD factor (it picks inland premium areas, not the bank)",
+            "raw footfall (a ghat draws crowds but is not a buildable plot)",
+        ],
+        "strongProxies": [
+            "distance-to-water-edge inside the corridor for riverfront adjacency",
+            "road + commercial-building density within 150-250 m for frontage/buildability",
+            "restaurant/hotel density for F&B ecosystem; competitor count for saturation",
+        ],
+        "weakProxyWarnings": [
+            "OSM under-maps Indian commercial frontage and parcel availability — frontage is a MEDIUM-confidence proxy, flag for site visit",
+            "a nearby ghat/attraction is a demand signal, but the ghat itself is excluded as a building site",
+        ],
+        "validation": "successful riverfront venues should sit inside the corridor on buildable frontage; if no buildable bank remains in the strict band, WIDEN the band rather than recommending inland affluence",
+    },
     "healthcare_facility": {
         "label": "Healthcare facility (clinic / hospital)",
         "primarySuccessMetric": "patient catchment coverage within travel-time threshold",

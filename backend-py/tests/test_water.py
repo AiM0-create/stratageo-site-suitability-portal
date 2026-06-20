@@ -55,3 +55,13 @@ def test_relation_fragments_are_assembled_into_a_polygon():
 def test_hex_inside_relation_assembled_water_is_masked():
     mask = water.water_mask([_hx(22.555, 88.345), _hx(22.60, 88.40)], [FRAG_A, FRAG_B])
     assert mask.tolist() == [True, False]
+
+
+def test_water_overlap_mask_flags_mostly_water_hex():
+    # v1.0.3 — a hex whose AREA is mostly inside the water polygon is masked even if
+    # its centroid sits on the bank. boundaries are [[lat,lng],...] rings.
+    inside = [[22.553, 88.343], [22.553, 88.347], [22.557, 88.347], [22.557, 88.343]]
+    outside = [[22.60, 88.40], [22.60, 88.41], [22.61, 88.41], [22.61, 88.40]]
+    hexes = [_hx(22.555, 88.345), _hx(22.605, 88.405)]
+    mask = water.water_overlap_mask(hexes, [SQUARE], [inside, outside], ratio=0.30)
+    assert mask.tolist() == [True, False]

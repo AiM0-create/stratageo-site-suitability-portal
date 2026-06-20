@@ -49,6 +49,51 @@ _WATERFRONT_LAYER_RE = re.compile(
     re.I,
 )
 
+# ── Spatial Reliability Upgrade v1.0.3 — deterministic waterfront detection ──
+# A superset of _WATERFRONT_RE that also catches named Indian rivers and explicit
+# "lakefront/seafront/beachside" cues. Used to (a) decide a brief is waterfront and
+# (b) clamp/inject a TIGHT water corridor so "riverside" is actually enforced —
+# the audit's root cause #2/#3 (a 5000 m corridor that masked nothing).
+_WATERFRONT_KEYWORDS_RE = re.compile(
+    r"river\s?side|river\s?front|water\s?front|lake\s?front|lake\s?side|sea\s?front"
+    r"|beach\s?side|beach\s?front|\briverbank\b|\bghat\b|along\s+(the\s+)?river"
+    r"|\bhooghly\b|\bganga\b|\bganges\b|\byamuna\b"
+    r"|along\s+the\b.{0,40}\b(river|hooghly|ganga|creek|canal|lake|sea|coast)",
+    re.I,
+)
+# "strict" cues → tightest band; explicit user permission for ~500 m → broad band.
+_WATERFRONT_STRICT_RE = re.compile(
+    r"\bstrict(ly)?\b|along\s+(the\s+)?river|\briverbank\b|right\s+on\s+the\s+(river|water)"
+    r"|on\s+the\s+water\s?front|directly\s+on\s+the\b",
+    re.I,
+)
+_WATERFRONT_BROAD_RE = re.compile(
+    r"\b(up\s?to|upto|within)\s*5\s?0?0\s?m|\b500\s?m\b|half\s*a?\s*(?:km|kilometre|kilometer)|0\.5\s*km",
+    re.I,
+)
+# Deterministic corridor widths (metres) by strictness tier.
+WATERFRONT_WIDTHS = {"strict": 250, "normal": 350, "broad": 500}
+
+
+def detect_waterfront(text: str) -> dict:
+    """Classify a brief as waterfront and pick a strict riverfront-band width.
+
+    Returns {isWaterfront, strictness in {strict,normal,broad}|None, targetWidthM}.
+    The width is the MAX a water corridor may use for this brief (it can be tighter
+    if the LLM/user asked for less). 'broad' fires only when the user explicitly
+    permits ~500 m; 'strict' on "strictly"/"along the river"; else 'normal'.
+    """
+    t = (text or "").lower()
+    if not _WATERFRONT_KEYWORDS_RE.search(t):
+        return {"isWaterfront": False, "strictness": None, "targetWidthM": None}
+    if _WATERFRONT_BROAD_RE.search(t):
+        strictness = "broad"
+    elif _WATERFRONT_STRICT_RE.search(t):
+        strictness = "strict"
+    else:
+        strictness = "normal"
+    return {"isWaterfront": True, "strictness": strictness, "targetWidthM": WATERFRONT_WIDTHS[strictness]}
+
 
 def _is_water_tag(t: str) -> bool:
     return t.startswith(("waterway", "natural=water", "water=", "natural=coastline"))
@@ -313,6 +358,16 @@ class SpecMeta(BaseModel):
     clarificationsResolved: list[str] = []
 
 
+class WaterfrontMeta(BaseModel):
+    """Set deterministically by validate_layers when a brief is waterfront (v1.0.3).
+    Lets the engine + UI explain the enforced riverfront band and how it was set."""
+    isWaterfront: bool = False
+    strictness: Optional[str] = None        # strict | normal | broad
+    corridorWidthM: Optional[int] = None     # effective enforced band (metres)
+    corridorSource: Optional[str] = None     # injected | clamped | llm
+    clampedFromM: Optional[int] = None        # widest original water-corridor width, if clamped
+
+
 class SpecV2(BaseModel):
     version: Literal["2.0"] = "2.0"
     objective: str
@@ -329,6 +384,7 @@ class SpecV2(BaseModel):
     constraints: list[ConstraintItem] = []
     feasibility: FeasibilityCheck = FeasibilityCheck()
     meta: SpecMeta = SpecMeta()
+    waterfront: Optional[WaterfrontMeta] = None   # set by validate_layers (v1.0.3)
 
     @model_validator(mode="after")
     def validate_layers(self):
@@ -379,23 +435,53 @@ class SpecV2(BaseModel):
         # winners aren't riverside. Deterministically: inject a water-edge corridor (so
         # candidates are clipped to within 500m of the bank; the water mask then drops
         # in-water hexes) and drop the redundant waterfront scoring layer.
+        # NOTE: detection uses the broader v1.0.3 keyword set (named rivers, etc.).
         text = f"{self.objective} {self.businessType}".lower()
-        if _WATERFRONT_RE.search(text):
-            has_water_corridor = any(
-                any(_is_water_tag(t) for t in c.source.tags) for c in self.corridors
-            )
-            if not has_water_corridor:
+        wf = detect_waterfront(text)
+        if wf["isWaterfront"]:
+            target = int(wf["targetWidthM"])
+            water_corridors = [
+                c for c in self.corridors if any(_is_water_tag(t) for t in c.source.tags)
+            ]
+            source: str
+            clamped_from: int | None = None
+            if not water_corridors:
+                # No corridor at all → inject a tight one so "riverside" is enforced.
                 self.corridors.append(Corridor(
                     name="Waterfront proximity",
                     source=OsmSource(tags=[
                         "natural=water", "waterway=riverbank", "waterway=river",
                         "water=river", "natural=coastline",
                     ]),
-                    maxDistanceM=500, mode="include", required=True,
+                    maxDistanceM=target, mode="include", required=True,
                 ))
+                source = "injected"
+                effective = target
+            else:
+                # CLAMP every water corridor to ≤ target (root cause #3 fix: the old
+                # guard skipped when ANY water corridor existed, so a loose LLM
+                # corridor — e.g. 5000 m — survived and masked nothing). Never loosen
+                # a corridor the LLM/user already made tighter — apply the strictest.
+                widest = max(c.maxDistanceM for c in water_corridors)
+                any_clamped = False
+                for c in water_corridors:
+                    c.mode = "include"
+                    c.required = True            # hard gate for waterfront briefs
+                    if c.maxDistanceM > target:
+                        c.maxDistanceM = target
+                        any_clamped = True
+                effective = min(c.maxDistanceM for c in water_corridors)
+                source = "clamped" if any_clamped else "llm"
+                clamped_from = widest if any_clamped else None
+            # Drop the dead waterfront SCORING layer (the corridor + water mask
+            # already enforce riverside; as a POI count it returns ~0).
             kept_wf = [l for l in self.layers if not _WATERFRONT_LAYER_RE.search(l.name)]
             if kept_wf and len(kept_wf) < len(self.layers):
                 self.layers = kept_wf   # keep ≥1 genuine differentiator
+            self.waterfront = WaterfrontMeta(
+                isWaterfront=True, strictness=wf["strictness"],
+                corridorWidthM=effective, corridorSource=source, clampedFromM=clamped_from,
+            )
 
         places_n = sum(1 for l in self.layers if l.source.provider == "google_places")
         if places_n > MAX_PLACES_LAYERS:

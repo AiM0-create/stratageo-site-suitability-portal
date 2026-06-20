@@ -167,6 +167,17 @@ P7f. "WITHIN X OF A LINEAR FEATURE" IS NOT A POI-COUNT SCORING LAYER.
       centre is inside a water body, so you never need a "not in the water" exclusion and a
       candidate can never land in the river. Do NOT model "proximity to the river" as a
       weighted scoring layer — it is thin and barely varies, and the critic will flag it.
+      The engine ALSO clamps a waterfront corridor to a strict band (≤500 m; ~250 m for
+      "strictly/along the river") and hard-excludes water/railway/ghat/heritage/open-space
+      land — so you do NOT need to set a wide maxDistanceM; keep it tight or omit it.
+    - RIVERFRONT F&B SCORING (riverfront_fnb archetype) — for a riverside/waterfront
+      restaurant/cafe/lounge, do NOT lead with affluence (it picks inland premium blocks,
+      not the bank). Build factors roughly as: riverfront adjacency/visibility (~25%),
+      commercial frontage/road access (~20%), premium demand/affluence (~20%, SUPPORTING),
+      F&B ecosystem (~15%), competitor-saturation PENALTY (~10%, direction=negative),
+      tourist/leisure footfall (~10%). A nearby ghat/attraction is a DEMAND signal, but the
+      ghat itself is excluded as a building site. If buildable riverfront signal is weak,
+      lower confidence — do not let affluence manufacture a false winner.
     - Reserve weighted layers ONLY for factors that actually VARY across the study area.
 
 P7g. THIN-DATA / NICHE-INFRA BRIEFS — SET EXPECTATIONS, DON'T MANUFACTURE SIGNAL.
