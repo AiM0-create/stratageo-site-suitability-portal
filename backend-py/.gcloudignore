@@ -1,0 +1,9 @@
+# Keep Cloud Build uploads lean — deps are installed fresh from requirements.txt
+# inside the Docker build, and these are never needed in the image.
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+tests/
