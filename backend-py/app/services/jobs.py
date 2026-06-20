@@ -89,6 +89,60 @@ def _buildability_flags(spec) -> dict:
 _PREMIUM_RE = _re.compile(r"premium|luxury|high.?end|upscale|fine.?dining|flagship|5.?star|boutique", _re.I)
 
 
+_COMP_RE = _re.compile(r"compet|saturation|white\s?space|rival", _re.I)
+_DEMAND_RE = _re.compile(r"demand|affluen|premium|purchasing|income|spend|luxur", _re.I)
+_ECO_RE = _re.compile(r"f\s?&\s?b|f and b|ecosystem|restaurant|cafe|dining|\bfood\b|hospitality", _re.I)
+_FRONT_RE = _re.compile(r"frontage|access|\broad\b|commercial|visib", _re.I)
+
+
+def _cap_competition_whitespace(spec, locations: list[dict]) -> None:
+    """PATCH 4 — competition whitespace is only valuable where there is real demand.
+
+    For F&B/retail briefs, a low/zero competitor count (which inverts to a HIGH
+    'competitor saturation' factor score) must NOT prop up an otherwise dead area
+    (e.g. Tiretta Bazaar: demand 0, F&B 0, competition 10). Cap the competition
+    factor's score when the demand/F&B/frontage baseline is weak, then recompute the
+    composite from the (capped) per-factor scores. Mutates locations in place.
+    """
+    text = f"{spec.objective} {spec.businessType}".lower()
+    if not _COMMERCIAL_RE.search(text):
+        return
+    for loc in locations:
+        crits = loc.get("criteria_breakdown", [])
+
+        def _best(rx):
+            vals = [c["score"] for c in crits if c.get("score") is not None and rx.search(c["name"])]
+            return max(vals) if vals else None
+
+        demand, eco, front = _best(_DEMAND_RE), _best(_ECO_RE), _best(_FRONT_RE)
+        comp = [c for c in crits if c.get("score") is not None
+                and c.get("direction") == "negative" and _COMP_RE.search(c["name"])]
+        if not comp:
+            continue
+        cap = None
+        if demand is not None and eco is not None and demand < 3 and eco < 3:
+            cap = 3.0
+        elif front is not None and front < 3:
+            cap = 4.0
+        if cap is None:
+            continue
+        changed = False
+        for c in comp:
+            if c["score"] > cap:
+                c["score"] = cap
+                c["justification"] = (
+                    (c.get("justification", "") + " ⚠ Competition whitespace capped "
+                     "because demand/F&B baseline is weak.").strip()
+                )
+                changed = True
+        if changed:
+            num = sum(c["weight"] * c["score"] for c in crits if c.get("score") is not None)
+            den = sum(c["weight"] for c in crits if c.get("score") is not None)
+            if den > 0:
+                loc["mcda_score"] = round(num / den, 1)
+                loc["competitionCapped"] = True
+
+
 def _boundary_ring(polygon) -> list[list[float]]:
     """Study-area polygon → simplified [[lat,lng],...] exterior ring for the map
     (so the user can SEE the AOI and judge whether the spatial area is wrong)."""
@@ -121,8 +175,11 @@ def _viability_suggestions(spec) -> list[str]:
     wf = spec.waterfront
     if wf and wf.isWaterfront:
         cur = wf.corridorWidthM or 250
-        wider = 500 if cur < 500 else max(cur, 750)
-        out.append(f"Increase the riverfront band from {cur} m to {wider} m (keeps the same area between the named landmarks).")
+        # Graduated widening: 250 → 350 → 500. Never auto-widen — suggest the next step.
+        nxt = 350 if cur < 350 else (500 if cur < 500 else max(cur + 250, 750))
+        out.append(f"Increase the riverfront band from {cur} m to {nxt} m (keeps the same area between the named landmarks).")
+        if cur < 350:
+            out.append("If 350 m is still too tight, allow up to 500 m from the river.")
         out.append("Allow BOTH riverbanks if the brief implied only one.")
     if _PREMIUM_RE.search(f"{spec.objective} {spec.businessType}".lower()):
         out.append("Relax the premium co-tenancy / affluence requirement so well-located but less-affluent frontage qualifies.")
@@ -358,6 +415,22 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     cen = polygon.centroid
     lat0, lng0 = cen.y, cen.x
 
+    # Fetch water-body GEOMETRY once (ways + relation members → big rivers as
+    # multipolygons). Reused by BOTH the riverbank-corridor fallback (4c) and the
+    # water mask (4d). Includes waterway=river so the river line is available even
+    # when it isn't mapped as an area polygon.
+    try:
+        water_ways = await fetch_area_geometries(
+            ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
+        )
+    except Exception as e:
+        water_ways = []
+        fallbacks.append(f"Water-body geometry fetch failed: {e}.")
+    # PATCH 1 (v1.0.3.1): track whether a WATERFRONT gate was actually enforced, so a
+    # failed riverfront corridor never silently becomes "all candidates kept".
+    waterfront_corridor_enforced = False
+    waterfront_corridor_failed = False
+
     # ── 4c. Linear-feature corridor gates (distance-to-LINE, real geometry) ──
     # "within 5 km of the highway" / "away from the river" target a LINE, not a
     # point. Fetch the real way geometry, measure true distance-to-nearest-line,
@@ -370,28 +443,54 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     if spec.corridors:
         _update(job, 60, "corridors", f"Applying {len(spec.corridors)} linear-feature gate(s)...")
         for c in spec.corridors:
+            is_water = any(_is_water_tag(t) for t in c.source.tags)
             try:
                 ways = await fetch_line_geometries(c.source.tags, overpass_bbox)
             except Exception as e:
-                fallbacks.append(
-                    f"Corridor '{c.name}': could not fetch line geometry — gate not enforced ({e})."
+                ways = []
+                fallbacks.append(f"Corridor '{c.name}': line geometry fetch failed ({e}).")
+            geom_source = f"{len(ways)} line feature(s)"
+            # PATCH 1: a waterfront gate with NO river line must not be skipped — fall
+            # back to the water-polygon boundary as the riverbank. distance_to_lines_m
+            # measures distance to each feature's geometry (the polygon ring) = bank.
+            if not ways and is_water and water_ways:
+                ways = water_ways
+                geom_source = "water-polygon boundary (riverbank fallback)"
+                notes.append(
+                    f"Corridor '{c.name}': river line not found; used water-polygon "
+                    "boundary as riverbank fallback."
                 )
-                continue
             if not ways:
-                fallbacks.append(
-                    f"Corridor '{c.name}': no matching line features found in the study area — "
-                    "gate not enforced (all candidates kept)."
-                )
+                if is_water:
+                    # Neither river line nor water polygon → cannot build a reliable
+                    # riverfront corridor. Do NOT keep all candidates; flag for withhold.
+                    waterfront_corridor_failed = True
+                    fallbacks.append(
+                        f"Corridor '{c.name}': could not construct a reliable riverfront "
+                        "corridor (no river line and no water polygon) — recommendation withheld."
+                    )
+                else:
+                    fallbacks.append(
+                        f"Corridor '{c.name}': no matching line features found — "
+                        "gate not enforced (all candidates kept)."
+                    )
                 continue
             dists = corridors.distance_to_lines_m(hexes, ways, lat0, lng0)
             cmask = corridors.corridor_mask(dists, float(c.maxDistanceM), c.mode)
             excluded |= cmask
             corridor_widths.append(int(c.maxDistanceM))
+            if is_water:
+                waterfront_corridor_enforced = True
             verb = "beyond" if c.mode == "include" else "within"
             notes.append(
                 f"Corridor '{c.name}': masked {int(cmask.sum())} hex(es) {verb} "
-                f"{c.maxDistanceM} m of {len(ways)} line feature(s)."
+                f"{c.maxDistanceM} m of {geom_source}."
             )
+            if is_water:
+                notes.append(
+                    f"Riverfront corridor removed {int(cmask.sum())} hex(es) outside "
+                    f"{c.maxDistanceM} m band."
+                )
 
     # Waterfront transparency: width, source (LLM/clamped/injected), before/after.
     n_after_corridor = int((~excluded).sum())
@@ -407,6 +506,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             f"Waterfront brief ({wf.strictness}): riverfront band = {wf.corridorWidthM} m, {src_txt}. "
             f"Candidate hexes {n_before_corridor} → {n_after_corridor} after the riverfront corridor."
         )
+        if wf.strictness == "strict":
+            notes.append(
+                f"Strict riverfront band selected: {wf.corridorWidthM} m due to "
+                "'strictly' / 'along river' / 'riverside' wording."
+            )
         if wf.corridorSource == "clamped" and wf.clampedFromM:
             notes.append(
                 f"Waterfront corridor clamped from {wf.clampedFromM} m to {wf.corridorWidthM} m "
@@ -416,16 +520,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── 4d. Water mask — no candidate can sit inside a river/lake/pond ──
     # H3 fills the whole polygon, water surface included. Mask hexes whose
     # centroid lies inside a water body so the engine never ranks a site in
-    # the middle of a river (the Hooghly-riverside failure case).
-    try:
-        # area fetch (ways + relation members) so big rivers/lakes mapped as
-        # multipolygon relations are recovered, not just standalone water ways.
-        water_ways = await fetch_area_geometries(
-            ["natural=water", "waterway=riverbank", "water=*"], overpass_bbox,
-        )
-    except Exception as e:
-        water_ways = []
-        fallbacks.append(f"Water-body check skipped (geometry fetch failed: {e}).")
+    # the middle of a river (the Hooghly-riverside failure case). Reuses the
+    # water_ways fetched once above (shared with the riverbank-corridor fallback).
     if water_ways:
         wmask = water.water_mask(hexes, water_ways)
         n_water = int(wmask.sum())
@@ -509,6 +605,22 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     f"Heritage/protected/open-space exclusion removed {n} hex(es) "
                     "(parks, sacred, graveyard, heritage land)."
                 )
+
+            # PATCH 3: open grounds named "…Maidan / Parade Ground" are often bare
+            # nodes or untagged areas — exclude by NAME (a maidan is not a buildable
+            # commercial plot). Skipped when the brief is a park/open-air use.
+            if not bflags.get("park_exception"):
+                maidans = await fetch_named_features(buildability.OPEN_GROUND_NAME_RE, overpass_bbox)
+                mmask = buildability.point_buffer_mask(hexes, maidans, 75.0)
+                mmask &= ~excluded
+                nm = int(mmask.sum())
+                if nm:
+                    excluded |= mmask
+                    mask_stats["maidanRemoved"] = nm
+                    notes.append(
+                        f"Open-space / maidan / park land is not treated as buildable "
+                        f"commercial site — removed {nm} hex(es) near {len(maidans)} named open ground(s)."
+                    )
 
         if bflags.get("commercial_proxy"):
             road_lines = await _safe_line(buildability.ROAD_LINE_TAGS)
@@ -778,6 +890,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             not loc.get("excluded") and not loc.get("scoreWithheld") and in_corridor
         )
 
+    # PATCH 4: cap competition-whitespace benefit where demand/F&B baseline is weak
+    # (runs before the viability gate so capped scores feed `recommended`).
+    _cap_competition_whitespace(spec, locations)
+
     # ── Required-data gate: a hard-constraint layer with no data means NO
     # candidate can be truthfully validated. Withhold the ranking: every
     # candidate is marked excluded with the honest reason, and the composite
@@ -860,9 +976,19 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         )
     n_viable = sum(1 for l in locations if l["recommended"])
 
+    # PATCH 1: a waterfront brief whose riverfront corridor could not be enforced at
+    # all (no river line and no water polygon) must withhold — never keep-all.
+    wf_corridor_unenforced = is_wf and (waterfront_corridor_failed or not waterfront_corridor_enforced)
+
     critic_verdict = critique.get("verdict") if critique else None
     if all_required_missing or no_eligible:
         analysis_status = "unreliable"
+    elif wf_corridor_unenforced:
+        analysis_status = "insufficient_viable_land"
+        notes.append(
+            "Riverfront corridor could not be enforced (no river line or water polygon) — "
+            "recommendation withheld rather than keeping all candidates."
+        )
     elif is_wf and n_viable < topN:
         analysis_status = "insufficient_viable_land"
     elif critic_verdict == "unreliable":

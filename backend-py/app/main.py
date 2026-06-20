@@ -9,7 +9,7 @@ from .security import SecurityMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 
-app = FastAPI(title="Stratageo Analysis Engine", version="1.0.2")
+app = FastAPI(title="Stratageo Analysis Engine", version="1.0.3")
 
 # Order matters: CORS outermost (added last runs first), then rate-limit/size gate.
 app.add_middleware(SecurityMiddleware)

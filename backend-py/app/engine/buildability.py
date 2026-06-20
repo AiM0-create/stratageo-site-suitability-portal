@@ -34,13 +34,20 @@ logger = logging.getLogger(__name__)
 # ── OSM tag sets per no-build / demand class (consumed by jobs.py fetches) ──
 RAILWAY_AREA_TAGS = ["landuse=railway", "railway=yard", "railway=platform", "railway=station"]
 RAILWAY_LINE_TAGS = ["railway=rail", "railway=light_rail", "railway=narrow_gauge", "railway=siding"]
-# Hard no-build polygons: protected/heritage/open-space/sacred land.
+# Hard no-build polygons: protected/heritage/open-space/sacred land. A premium
+# restaurant cannot be built on a maidan, park, pitch, garden, graveyard or sacred
+# ground — these are excluded as the SITE (they may still be demand signals nearby).
 PROTECTED_AREA_TAGS = [
-    "leisure=park", "leisure=nature_reserve", "landuse=recreation_ground",
-    "landuse=grass", "natural=wood", "natural=scrub", "boundary=protected_area",
+    "leisure=park", "leisure=nature_reserve", "leisure=pitch", "leisure=garden",
+    "leisure=common", "leisure=recreation_ground", "landuse=recreation_ground",
+    "landuse=grass", "landuse=village_green", "landuse=meadow",
+    "natural=wood", "natural=scrub", "natural=grassland", "boundary=protected_area",
     "historic=*", "heritage=*", "amenity=grave_yard", "landuse=cemetery",
     "amenity=place_of_worship",
 ]
+# Open grounds are frequently named "…Maidan" without a usable area tag (or as a
+# bare node). A name match is the reliable signal; excluded with a buffer.
+OPEN_GROUND_NAME_RE = r"[Mm]aidan|[Pp]arade [Gg]round|[Mm]ydan"
 # Lightweight road network for the commercial-frontage proxy.
 ROAD_LINE_TAGS = [
     "highway=primary", "highway=secondary", "highway=tertiary",

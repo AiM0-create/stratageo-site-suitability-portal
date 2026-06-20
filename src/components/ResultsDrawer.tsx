@@ -401,6 +401,12 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         )}
         {(!withheld || showRaw) && (
         <>
+        {/* Persistent reminder that withheld results are diagnostic, not recommendations */}
+        {withheld && showRaw && (
+          <div className="withheld-raw-warning" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', margin: '4px 0 8px' }}>
+            ⚠ These are diagnostic <b>raw candidates, not site recommendations</b>. Scores and order are shown for inspection only.
+          </div>
+        )}
         {/* Comparison chart */}
         {selectedLocations.length >= 1
           ? <ComparisonChart locations={selectedLocations} />
@@ -411,16 +417,21 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           {ranked.map((loc, index) => {
             const isSelected = selectedLocations.some(sl => sl.name === loc.name);
             const isExpanded = expandedLoc === loc.name;
-            const scoreClass = loc.excluded ? 'score-excluded' : loc.mcda_score >= 7.5 ? 'score-high' : loc.mcda_score >= 5 ? 'score-mid' : 'score-low';
+            // v1.0.3.1 — when withheld, a non-excluded candidate is a RAW candidate,
+            // not a recommendation: no #rank, no STRONG badge, muted styling.
+            const raw = withheld && !loc.excluded;
+            const scoreClass = loc.excluded ? 'score-excluded' : raw ? 'score-raw' : loc.mcda_score >= 7.5 ? 'score-high' : loc.mcda_score >= 5 ? 'score-mid' : 'score-low';
+            const rankLabel = loc.excluded ? '✕' : raw ? `Raw ${String.fromCharCode(65 + index)}` : `#${index + 1}`;
 
             return (
               <div key={loc.name} className={`drawer-loc ${isSelected ? 'drawer-loc-selected' : ''} ${loc.excluded ? 'drawer-loc-excluded' : ''}`}>
                 <div className="drawer-loc-header" onClick={() => onSelectLocation(loc)} role="button" tabIndex={0}>
-                  <div className="drawer-loc-rank">#{index + 1}</div>
+                  <div className="drawer-loc-rank" style={raw ? { color: '#64748b', fontSize: '11px' } : undefined}>{rankLabel}</div>
                   <div className="drawer-loc-info">
                     <div className="drawer-loc-name">
                       {loc.name}
                       {loc.excluded && <span className="excluded-badge">EXCLUDED</span>}
+                      {raw && <span className="excluded-badge" style={{ background: '#e2e8f0', color: '#475569' }}>RAW — NOT RECOMMENDED</span>}
                     </div>
                     <div className="drawer-loc-coords">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
                   </div>
@@ -432,8 +443,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       </>
                     ) : (
                       <>
-                        <span className="score-number">{loc.mcda_score.toFixed(1)}</span>
-                        {!loc.excluded && <span className="score-quality-label">{getScoreQualityLabel(loc.mcda_score)}</span>}
+                        <span className="score-number" style={raw ? { color: '#64748b' } : undefined}>{loc.mcda_score.toFixed(1)}</span>
+                        {!loc.excluded && <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>{raw ? 'Not recommended' : getScoreQualityLabel(loc.mcda_score)}</span>}
                       </>
                     )}
                   </div>

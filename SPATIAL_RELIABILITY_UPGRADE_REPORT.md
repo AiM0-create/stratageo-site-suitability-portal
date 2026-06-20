@@ -82,6 +82,41 @@ Prompt: *"Identify the 3 best sites for a premium riverside restaurant along the
 
 ---
 
-## Hooghly test — exact expectation after this patch
+---
 
-The engine now hard-gates candidates to a ~250 m riverfront band (clamping the LLM's loose corridor), drops water/rail/ghat/heritage/open-space land, and refuses to recommend sites below 5.0/10. Howrah Maidan and Tiretta Bazaar — inland and/or on rail/ghat land — no longer survive. If too little buildable bank remains between the two bridges, the portal returns **"No viable site in the strict 250 m riverfront corridor"** with grey raw-candidate pins and the suggestion to **widen the band to 500 m while staying between Howrah Bridge and Vidyasagar Setu** — never silently widening the user's geography, never fabricating a winner.
+# Round 2 — v1.0.3.1 reliability patches (post-test follow-up)
+
+**What failed in the latest test** (`riverfront_fnb`, strict Hooghly prompt):
+- The strict riverfront corridor found **no OSM line features** and was **silently skipped** ("gate not enforced — all candidates kept"), so the band wasn't applied.
+- A candidate named **"Maidan"** ranked **#1 / 7.6 STRONG** — open ground treated as buildable.
+- **Tiretta Bazaar** survived as a raw candidate on **zero-competition whitespace** despite demand 0 / F&B 0.
+- The brief said "strictly / along the river" yet the band was the **normal 350 m**, not strict.
+- The UI showed **green #1 STRONG pins** while the banner said "No reliable recommendation".
+
+### Changes made (round 2)
+
+**PATCH 1 — riverbank-corridor fallback (no silent skip).** `services/jobs.py`: water geometry is now fetched **once before** the corridor loop and shared with the water mask. When a waterfront corridor finds no river *line*, the engine falls back to the **boundary of the unioned water polygons** (`distance_to_lines_m` measures distance to each polygon ring = the bank) and enforces the band. If **neither** line nor polygon exists, it sets `waterfront_corridor_failed` → `recommendationWithheld=true`, status `insufficient_viable_land` — it never keeps all candidates. New notes: *"river line not found; used water-polygon boundary as riverbank fallback"*, *"Riverfront corridor removed N hexes outside X m band"*, and the old "all candidates kept" note no longer appears for water corridors.
+
+**PATCH 2 — stricter strict band.** `models/spec.py` `_WATERFRONT_STRICT_RE` now also matches **riverside / riverbank / exactly / only / must be along** → strict **250 m**. The engine never auto-widens; if too few viable sites remain it returns `insufficient_viable_land` and suggests widening **250 → 350 → 500** gradually (`_viability_suggestions`). Note added: *"Strict riverfront band selected: 250 m due to 'strictly'/'along river'/'riverside' wording."*
+
+**PATCH 3 — open-space / maidan exclusion.** `engine/buildability.py`: `PROTECTED_AREA_TAGS` extended (`leisure=pitch|garden|common|recreation_ground`, `landuse=village_green|meadow`, `natural=grassland`, …). Added `OPEN_GROUND_NAME_RE` and a **name-based maidan/parade-ground exclusion** (75 m buffer via `point_buffer_mask`) wired into `jobs.py` for commercial briefs (skipped for park-kiosk/open-air use). Reason surfaced: *"Open-space / maidan / park land is not treated as buildable commercial site."* A candidate named "Maidan" is now excluded, not ranked #1.
+
+**PATCH 4 — competition-whitespace capping.** `services/jobs.py` `_cap_competition_whitespace()` (F&B/retail briefs): if **premium demand < 3 AND F&B ecosystem < 3**, the competitor-saturation factor is capped at **3/10**; if **frontage/access < 3**, capped at **4/10**. The composite is recomputed from the capped per-factor scores. Note: *"Competition whitespace capped because demand/F&B baseline is weak."* Tiretta Bazaar no longer gets a strong boost from empty competition.
+
+**PATCH 5/6 — UI + deterministic gate.** When `recommendationWithheld`/`insufficient_viable_land`: map pins render **grey "?" raw markers** ("RAW — NOT RECOMMENDED"), and drawer cards drop the `#rank`/STRONG badge — labelled **"Raw A / Raw B"**, score muted, quality shown as **"Not recommended"**, behind the existing opt-in toggle with a **persistent diagnostic warning**. Per-candidate `riverDistanceM` / `inWaterfrontCorridor` / `buildabilityStatus` / `hardConstraintPass` are computed deterministically; candidates failing the band are excluded before ranking and never counted as recommended.
+
+**Version** bumped to **1.0.3** in `backend-py/app/main.py`, `backend-py/app/routers/health.py`, and `package.json` (frontend topbar reads `__APP_VERSION__`).
+
+### Files changed (round 2)
+`backend-py/app/services/jobs.py`, `backend-py/app/models/spec.py`, `backend-py/app/engine/buildability.py`, `backend-py/app/main.py`, `backend-py/app/routers/health.py`, `package.json`, `src/components/ResultsDrawer.tsx` (+ `MapView.tsx` gating from round 1), and tests `backend-py/tests/test_v1031_patches.py`. **93 backend tests pass; frontend `tsc` clean.**
+
+### How the key mechanisms work
+- **River-polygon boundary fallback:** the same water polygons used by the water mask are passed (as features) to `corridors.distance_to_lines_m`, which builds LineStrings from each feature's ring and measures hex-centroid distance to the nearest ring — i.e. distance to the riverbank — then `corridor_mask` keeps only hexes within the strict band.
+- **Maidan/open-space exclusion:** area tags caught via `centroid_in_polygon_mask`; bare/untagged grounds caught via a name-regex Overpass fetch + 75 m point buffer. Both hard-exclude the *site* only — nearby ghats/parks remain valid demand signals.
+- **Competition capping:** a post-rank pass keys off factor names + `direction=negative`; caps the competition score when demand/F&B/frontage baselines are weak and recomputes the weighted-mean composite.
+
+## Hooghly test — exact expectation after this patch (v1.0.3.1)
+
+With the strict prompt, the engine now: selects the **strict 250 m** band ("strictly/riverside" wording); when no river *line* is found, **enforces the band from the water-polygon boundary** (the "all candidates kept" note is gone); **excludes the Maidan / open ground** by tag + name; **caps the zero-competition boost** at Tiretta Bazaar so empty whitespace can't carry a dead area; and **withholds** when fewer than 3 sites clear 5.0/10 inside the band.
+
+**Most likely outcome:** `insufficient_viable_land` — there is very little buildable, non-rail, non-ghat, non-park commercial frontage within 250 m of the Hooghly strictly between the two bridges. The portal returns **"No viable site in the strict 250 m riverfront corridor"**, shows any survivors as **grey "Raw A/B" diagnostic markers (no #rank, no STRONG)** with a persistent "not a recommendation" warning, and suggests **widening 250 → 350 → 500 m while staying between Howrah Bridge and Vidyasagar Setu**. If ≥3 genuine riverfront sites *do* clear the band and score ≥5.0, they are returned as real recommendations. Either way, **Maidan is no longer #1 STRONG**, no candidate sits outside the band, and the map/drawer no longer contradict the banner.
