@@ -4,6 +4,35 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.2.0] — 2026-06-24 — Deterministic Planning & Constraint Enforcement Upgrade
+
+### Added
+- **Canonical archetype registry** (`engine/canonical_archetypes.py`): 10 frozen archetype schemas with stable factor keys, weights (summing to 100), catchment radii, and scoring curves. Archetypes: student_qsr_cafe, generic_qsr_cafe, premium_restaurant, dark_kitchen, clinic_healthcare, warehouse_logistics, ev_charger, retail_store, preschool_school, generic fallback.
+- **Student QSR detection** (`detect_student_qsr()`): deterministic detection of student-oriented cafe prompts. The Ruby Crossing / EM Bypass prompt now reliably resolves to `student_qsr_cafe` with weights 32/27/18/14/9.
+- **Deterministic planner** (`engine/deterministic_planner.py`): overrides LLM-generated structural spec fields (factor keys, weights, catchment) with canonical schema. LLM is retained only for explanation text and study area geocoding.
+- **Prompt normalisation** (`normalize_prompt()`): stable lowercasing + place-name normalisation for reproducible fingerprinting.
+- **Spec fingerprinting** (`planning_fingerprint()`, `spec_fingerprint()`): stable SHA-256-based hashes for same-prompt reproducibility verification.
+- **Constraint enforcement records**: per-constraint `enforcementLevel` (hard_enforced / partially_enforced / advisory / not_enforced) and mechanism now stored in spec and result.
+- **Relaxation options** (`build_relaxation_options()`): concrete ordered options when `validCount < requestedCount`.
+- **No-reliable-recommendation banner** in ResultsDrawer: when all candidates are excluded, shows "No recommendable sites found. Excluded candidates are shown for inspection only."
+- **Planning mode disclosure** in ResultsDrawer: shows "Deterministic" badge + planning fingerprint + any LLM weight overrides.
+- **Config flags**: `STRATAGEO_DETERMINISTIC_PLANNING=true`, `STRATAGEO_SPEC_TEMPERATURE=0.0`, `STRATAGEO_SPEC_SEED=42`.
+- **SpecV2 v2.2**: new fields `planningMode`, `archetypeSource`, `weightsSource`, `llmRole`, `planningFingerprint`, `specFingerprint`, `normalizedPrompt`, `constraintEnforcementRecords`, `llmSuggestedButNotApplied`, `relaxationOptions`.
+- **Golden test suite** (`tests/golden/test_deterministic_planning.py`): 24 tests, same prompt × 5 runs asserts stable archetype/factors/weights/fingerprint.
+- `docs/V1.2_NONDETERMINISM_AUDIT.md`, `docs/RELEASE_NOTES_v1.2.0.md`, `docs/DEPLOYMENT_CHECKLIST_v1.2.0.md`, `docs/V1.2_DETERMINISM_VERIFICATION.md`.
+
+### Changed
+- `llm.py`: temperature set to 0 (from 0.2) + seed=42 in deterministic mode; deterministic planner applied after LLM spec building at `framework`/`ready` stage.
+- `models/spec.py`: version literal `"2.2"` added; new v1.2.0 fields.
+- `config.py`: APP_VERSION/ENGINE_VERSION → 1.2.0; SPEC_VERSION → 2.2.
+
+### Not changed
+- All v1.1.2 / v1.1.1 / v1.0.3 safeguards preserved.
+- Model routing unchanged (gpt-5.4-mini default).
+- Cloud Run deployment config unchanged.
+
+---
+
 ## [1.1.2] — 2026-06-24 — Water Tag Helper NameError Fix
 
 ### Fixed

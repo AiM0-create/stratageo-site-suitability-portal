@@ -429,7 +429,7 @@ class DataConfidence(BaseModel):
 
 
 class SpecV2(BaseModel):
-    version: Literal["2.0", "2.1"] = "2.1"
+    version: Literal["2.0", "2.1", "2.2"] = "2.2"
     objective: str
     businessType: str
     studyArea: StudyArea
@@ -494,6 +494,20 @@ class SpecV2(BaseModel):
 
     # Archetype key selected by the LLM or intent parser (v1.1.0).
     archetypeKey: Optional[str] = None
+
+    # ── v1.2.0 deterministic planning fields (all Optional, backward-compatible) ─
+    planningMode: Optional[Literal["deterministic", "advisory"]] = None
+    archetypeSource: Optional[str] = None   # "deterministic_registry" | "llm"
+    weightsSource: Optional[str] = None     # "deterministic_registry" | "llm"
+    constraintsSource: Optional[str] = None
+    llmRole: Optional[Literal["explanation_only", "ambiguity_resolution", "advisory"]] = None
+    planningFingerprint: Optional[str] = None   # stable hash of plan config
+    specFingerprint: Optional[str] = None       # stable hash of structural spec
+    normalizedPrompt: Optional[str] = None      # normalised for fingerprinting
+    schemaFingerprint: Optional[str] = None     # canonical schema hash
+    constraintEnforcementRecords: list[dict] = []
+    llmSuggestedButNotApplied: list[dict] = []  # transparency: what LLM changed that was overridden
+    relaxationOptions: list[dict] = []
 
     # ── Phase 18 — uploaded candidate points (hard constraint) ────────────────
     # When the user says "only rank my uploaded CSV points", the frontend must

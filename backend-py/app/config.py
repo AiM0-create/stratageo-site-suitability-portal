@@ -2,7 +2,8 @@
 
 v1.1.0: added configurable model routing + cost-mode tiers.
 v1.1.1: refreshed model defaults to the cost-aware gpt-5.4 family.
-All model names are overridable via STRATAGEO_* env vars; no Pro models used.
+v1.1.2: water tag helper import fix.
+v1.2.0: deterministic planning mode — canonical archetype schemas, spec fingerprinting.
 """
 from functools import lru_cache
 from typing import Literal
@@ -10,11 +11,11 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.1.2"
+APP_VERSION     = "1.2.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "1.1.2"
-SPEC_VERSION    = "2.1"
-RELEASE_NAME    = "Water Tag Helper NameError Fix"
+ENGINE_VERSION  = "1.2.0"
+SPEC_VERSION    = "2.2"
+RELEASE_NAME    = "Deterministic Planning & Constraint Enforcement Upgrade"
 
 
 class Settings(BaseSettings):
@@ -106,11 +107,20 @@ class Settings(BaseSettings):
     drive_speed_m_per_min: float = 400.0
     job_ttl_seconds: int = 1800
 
-    # ── Feature flags (v1.1.0) ────────────────────────────────────────────────
+    # ── Feature flags (v1.1.0+) ──────────────────────────────────────────────
     enable_raw_intent_parser: bool = True       # deterministic pre-LLM parser
     enable_universal_archetypes: bool = True    # archetype registry
     enable_multi_score_output: bool = True      # rank + viability + confidence
     enable_universal_critic: bool = True        # upgraded critic contract
+
+    # ── v1.2.0: Deterministic planning mode ──────────────────────────────────
+    # When true, structural spec fields (factor keys, weights, catchment) are
+    # locked to canonical archetype schemas; LLM is for explanation only.
+    stratageo_deterministic_planning: bool = True
+    # Temperature for spec-building LLM calls (0 = greedy, most reproducible).
+    stratageo_spec_temperature: float = 0.0
+    # Stable seed for spec-building calls where supported by the API.
+    stratageo_spec_seed: int = 42
 
     @property
     def origins_list(self) -> list[str]:
@@ -154,11 +164,12 @@ class Settings(BaseSettings):
 
     def feature_flags(self) -> dict:
         return {
-            "rawIntentParser":      self.enable_raw_intent_parser,
-            "universalArchetypes":  self.enable_universal_archetypes,
-            "multiScoreOutput":     self.enable_multi_score_output,
-            "universalCritic":      self.enable_universal_critic,
-            "modelEscalation":      self.stratageo_enable_model_escalation,
+            "rawIntentParser":       self.enable_raw_intent_parser,
+            "universalArchetypes":   self.enable_universal_archetypes,
+            "multiScoreOutput":      self.enable_multi_score_output,
+            "universalCritic":       self.enable_universal_critic,
+            "modelEscalation":       self.stratageo_enable_model_escalation,
+            "deterministicPlanning": self.stratageo_deterministic_planning,
         }
 
     def model_config_public(self) -> dict:

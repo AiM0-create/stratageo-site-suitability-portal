@@ -18,6 +18,9 @@ from ..models.chat import ChatMessage, ChatResponse, validate_spec
 from .archetypes import ARCHETYPE_PLAYBOOK
 from .prompts import chat_system_prompt
 from ..engine.intent_parser import parse_raw_intent
+from ..engine.canonical_archetypes import resolve_canonical_archetype
+from ..engine.deterministic_planner import apply_deterministic_plan
+from ..config import APP_VERSION, ENGINE_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -124,13 +127,19 @@ async def chat_turn(
 
     async def call(extra_system: str | None = None) -> dict:
         msgs = convo if not extra_system else convo + [{"role": "system", "content": extra_system}]
-        res = await client.chat.completions.create(
-            model=settings.effective_chat_model,
-            messages=msgs,
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            max_completion_tokens=4000,
-        )
+        # v1.2.0: use temperature=0 and seed for reproducibility in deterministic mode
+        temp = settings.stratageo_spec_temperature if settings.stratageo_deterministic_planning else 0.2
+        seed = settings.stratageo_spec_seed if settings.stratageo_deterministic_planning else None
+        create_kwargs: dict = {
+            "model":                 settings.effective_chat_model,
+            "messages":              msgs,
+            "response_format":       {"type": "json_object"},
+            "temperature":           temp,
+            "max_completion_tokens": 4000,
+        }
+        if seed is not None:
+            create_kwargs["seed"] = seed
+        res = await client.chat.completions.create(**create_kwargs)
         return {
             "parsed": json.loads(res.choices[0].message.content or "{}"),
             "usage": {
@@ -239,16 +248,40 @@ async def chat_turn(
         stage = "framework"
 
     # ── v1.1.0: enforce RawIntent topN into spec.output.topN ─────────────────
-    # The deterministic parser overrides whatever topN the LLM picked so the
-    # user's explicit count request is always honoured.  Only override when the
-    # user actually stated a count (requestedTopNRaw is not None).
-    if isinstance(new_spec, dict) and raw_intent.topN.get("requestedTopNRaw") is not None:
+    if isinstance(new_spec, dict):
         output = new_spec.setdefault("output", {})
         output["topN"] = resolved_top_n
-        # Persist rawIntent metadata into the spec for downstream transparency
         new_spec.setdefault("rawIntent", raw_intent.to_dict())
         if raw_intent.topN.get("outputCountWarning"):
             logger.info("Output count capped: %s", raw_intent.topN["outputCountWarning"])
+
+    # ── v1.2.0: deterministic planning override ───────────────────────────────
+    # When STRATAGEO_DETERMINISTIC_PLANNING=true, override structural spec fields
+    # (factor keys, weights, catchment) with the canonical archetype schema.
+    # LLM output is preserved for explanation text and study area place names.
+    if (settings.stratageo_deterministic_planning
+            and isinstance(new_spec, dict)
+            and new_spec.get("layers")
+            and stage in ("framework", "ready")):
+        try:
+            canonical = resolve_canonical_archetype(
+                raw_intent.businessTypeKey, raw_intent.rawPrompt,
+            )
+            new_spec = apply_deterministic_plan(
+                llm_spec=new_spec,
+                intent=raw_intent,
+                canonical=canonical,
+                engine_version=ENGINE_VERSION,
+                cost_mode=settings.cost_mode,
+            )
+            logger.info(
+                "Deterministic plan applied: archetype=%s planningFingerprint=%s",
+                canonical.key,
+                new_spec.get("planningFingerprint", "?"),
+            )
+            valid, err = validate_spec(new_spec)
+        except Exception as dp_err:
+            logger.warning("Deterministic planner failed (non-fatal): %s", dp_err)
 
     # Framework/ready stages must carry a complete plan block — backfill
     # deterministically from the archetype playbook when the model skimps.
