@@ -9,9 +9,10 @@ def test_version_is_110():
     assert ENGINE_VERSION == "1.1.0"
 
 
-def test_default_cost_mode_is_balanced():
+def test_default_cost_mode_is_low():
+    """Default MUST be low — upgrade is cost-sensitive (Phase 16 audit requirement)."""
     s = Settings()
-    assert s.cost_mode == "balanced"
+    assert s.cost_mode == "low"
 
 
 def test_default_escalation_disabled():
@@ -74,6 +75,12 @@ def test_critic_active_in_balanced_mode():
 
 def test_critic_inactive_in_low_mode():
     s = Settings(critic_enabled=True, stratageo_max_llm_cost_mode="low")
+    assert s.critic_active is False
+
+
+def test_critic_inactive_by_default():
+    """Default cost mode = low → critic is OFF by default (cost-sensitive)."""
+    s = Settings()
     assert s.critic_active is False
 
 

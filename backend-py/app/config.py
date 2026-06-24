@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     # ── Model routing (Phase 9 — cost-aware) ─────────────────────────────────
     # Defaults match the production models already in use — no env change needed
     # for existing deployments. Override via STRATAGEO_* env vars to switch.
+    # IMPORTANT: All stronger/more-expensive models must be opt-in via env only.
+    # No GPT-5.x or pro-tier model is ever set as a default here.
     stratageo_chat_model: str = "gpt-4o"       # conversational consultant turns
     stratageo_reasoning_model: str = "gpt-4o"  # spec building, hard constraint resolution
     stratageo_critic_model: str = "gpt-4o"     # post-execution self-critique
@@ -53,10 +55,11 @@ class Settings(BaseSettings):
     stratageo_escalation_model: str = ""
 
     # Cost mode controls how many LLM calls the engine makes:
-    #   low      — deterministic-first; one LLM call; template explanations; no critic
-    #   balanced — one critic call; better executive summary (DEFAULT)
+    #   low      — deterministic-first; one LLM call; template explanations; no critic (DEFAULT)
+    #   balanced — one critic call; better executive summary
     #   high     — optional escalation; richer reports; critic always on
-    stratageo_max_llm_cost_mode: Literal["low", "balanced", "high"] = "balanced"
+    # DEFAULT = low: this upgrade is cost-sensitive; operator must explicitly opt into balanced/high.
+    stratageo_max_llm_cost_mode: Literal["low", "balanced", "high"] = "low"
 
     # Legacy aliases kept for backward compatibility with existing .env files
     # and Secret Manager entries.  New code should use stratageo_* names above.

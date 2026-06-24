@@ -18,14 +18,24 @@ from typing import Optional
 
 # ── Output count extraction ────────────────────────────────────────────────────
 # Patterns like "top 5", "best 7", "give me 10 locations", "3 best places",
-# "rank 6 zones", "find one site".
+# "rank 6 zones", "find one site", "find top 5", "show me the top 3".
+# FIX (Phase 16 audit): added \s+ between keyword group and number to correctly
+# parse "top 5", "best 7" etc.; added compound "find top N" / "show top N" forms.
 _COUNT_RE = re.compile(
     r"""
     (?:
+        # "find top 5", "show me top 3" — multi-word lead + qualifier + number
+        (?:find|show|identify|get|give)\s+(?:me\s+)?(?:the\s+)?
+        (?:top|best|)\s*
+        (\d+|one|two|three|four|five|six|seven|eight|nine|ten)
+        \s+(?:location|site|place|area|zone|result|output|candidate|option)
+    |
+        # "top 5", "best 7", "rank 6", "recommend 4"
         (?:top|best|give\s+(?:me\s+)?|find\s+(?:me\s+)?|identify\s+|rank\s+|
            show\s+(?:me\s+)?|suggest\s+|recommend\s+)
-        (\d+|one|two|three|four|five|six|seven|eight|nine|ten)
+        \s*(\d+|one|two|three|four|five|six|seven|eight|nine|ten)
     |
+        # "3 best places", "5 locations"
         (\d+)\s+(?:best|top|good|suitable|ideal|optimal|viable|candidate|location|site|place|area|zone)
     |
         (\d+)\s+outputs?
@@ -50,9 +60,12 @@ def _parse_top_n(text: str) -> dict:
     m = _COUNT_RE.search(text)
     raw: int | None = None
     if m:
-        token = m.group(1) or m.group(2) or m.group(3)
+        # Try all capture groups in order (the regex now has 4 groups)
+        token = next((g for g in m.groups() if g is not None), None)
         if token:
-            raw = _WORD_NUMS.get(token.lower(), None) or (int(token) if token.isdigit() else None)
+            raw = _WORD_NUMS.get(token.lower(), None)
+            if raw is None and token.isdigit():
+                raw = int(token)
     requested = raw if raw is not None else TOP_N_DEFAULT
     if raw is None:
         reason = "defaulted to 3 (no explicit count in prompt)"

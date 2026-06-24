@@ -712,6 +712,13 @@ const App: React.FC = () => {
       const metaConstr = spec && spec.constraints.length > 0 ? `${spec.constraints.length} constraint(s)` : '';
       pdf.text([metaDate, metaRadius, metaConf, metaConstr].filter(Boolean).join('   |   '), ml, y);
       y += 5;
+      // v1.1.0 — version + model/cost metadata disclosure line
+      const appVer = `App v${__APP_VERSION__}  Engine v${__APP_VERSION__}`;
+      const recMode = (result as any).recommendationMode ? `Mode: ${(result as any).recommendationMode}` : '';
+      const siteClm = (result as any).siteClaimLevel ? `Claim: ${(result as any).siteClaimLevel}` : 'Claim: micro_market_zone';
+      pdf.setFontSize(6.5); T(C.s5);
+      pdf.text([appVer, recMode, siteClm, 'Preliminary screening — not legal/parcel/field due diligence'].filter(Boolean).join('   |   '), ml, y);
+      y += 5;
 
       // ── Constraint tags (ASCII safe) ──
       if (spec && spec.constraints.length > 0) {
@@ -1053,6 +1060,9 @@ const App: React.FC = () => {
         { title: 'Important Limitations',
           body: 'This is a screening-level assessment only. OSM coverage varies by region. Scores reflect relative suitability from available spatial data — not investment recommendations. Site-level due diligence and field validation are required before any real estate decision.',
           warn: true },
+        { title: '5. Version & Model Metadata',
+          body: `App v${__APP_VERSION__}  |  Engine v${__APP_VERSION__}  |  Spec v2.1  |  Analysis type: candidate zone screening (not parcel-level siting)  |  Recommendation mode: ${(result as any).recommendationMode || 'recommended_sites'}  |  Site claim level: ${(result as any).siteClaimLevel || 'micro_market_zone'}`,
+          warn: false },
       ];
       meths.forEach((m, mi) => {
         const mLines = pdf.splitTextToSize(m.body, cw - 10);
