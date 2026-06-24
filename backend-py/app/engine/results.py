@@ -357,7 +357,7 @@ async def write_explanations(
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=1200,
+            max_completion_tokens=1200,
         )
         data = json.loads(res.choices[0].message.content or "{}")
         return data.get("summary", ""), data.get("reasonings", [])

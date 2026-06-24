@@ -136,7 +136,7 @@ async def critique_analysis(
             messages=[{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
             response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=1200,
+            max_completion_tokens=1200,
         )
         data = json.loads(res.choices[0].message.content or "{}")
         verdict = data.get("verdict")

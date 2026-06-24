@@ -129,7 +129,7 @@ async def chat_turn(
             messages=msgs,
             response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=4000,
+            max_completion_tokens=4000,
         )
         return {
             "parsed": json.loads(res.choices[0].message.content or "{}"),
