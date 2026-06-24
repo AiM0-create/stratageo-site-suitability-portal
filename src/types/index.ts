@@ -246,6 +246,32 @@ export interface AnalysisResult {
   rankedUploadedCandidateCount?: number;
   excludedUploadedCandidateCount?: number;
   uploadedCandidateWarnings?: string[];
+  // v1.2.0 deterministic planning fields
+  planningMode?: 'deterministic' | 'advisory';
+  archetypeSource?: string;
+  weightsSource?: string;
+  llmRole?: 'explanation_only' | 'ambiguity_resolution' | 'advisory';
+  planningFingerprint?: string;
+  specFingerprint?: string;
+  normalizedPrompt?: string;
+  constraintEnforcementRecords?: Array<{
+    rawText: string;
+    enforcementLevel: 'hard_enforced' | 'partially_enforced' | 'advisory' | 'not_enforced';
+    enforcementMechanism: string;
+    blockingIfFailed: boolean;
+  }>;
+  llmSuggestedButNotApplied?: Array<{
+    factorName: string;
+    llmWeight: number;
+    canonicalWeight: number;
+    action: string;
+  }>;
+  relaxationOptions?: Array<{
+    id: string;
+    description: string;
+    effort: string;
+    riskOfWeakeningConstraint: string;
+  }>;
 }
 
 export interface GroundingSource {
