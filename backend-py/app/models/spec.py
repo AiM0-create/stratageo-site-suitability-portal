@@ -373,6 +373,15 @@ class WaterfrontMeta(BaseModel):
 
 # ─── v1.1.0 extensions (all Optional, backward-compatible) ────────────────────
 
+class UserCandidatePoint(BaseModel):
+    """A user-uploaded candidate site (from CSV/GeoJSON) — Phase 18."""
+    lat: float
+    lng: float
+    name: Optional[str] = None
+    id: Optional[str] = None          # original CSV row ID / label
+    attributes: dict = {}             # any extra columns from the CSV
+
+
 class RawIntentMeta(BaseModel):
     """Snapshot of the deterministic pre-LLM parse (v1.1.0)."""
     rawPrompt: Optional[str] = None
@@ -386,6 +395,8 @@ class RawIntentMeta(BaseModel):
     featureClasses: list[str] = []
     objectiveType: str = "demand_maximization"
     hasUploadedCandidates: bool = False
+    # Phase 18: was this flagged as "uploaded points ONLY" mode?
+    uploadedCandidatesOnly: bool = False
 
 
 class OutputCount(BaseModel):
@@ -483,6 +494,17 @@ class SpecV2(BaseModel):
 
     # Archetype key selected by the LLM or intent parser (v1.1.0).
     archetypeKey: Optional[str] = None
+
+    # ── Phase 18 — uploaded candidate points (hard constraint) ────────────────
+    # When the user says "only rank my uploaded CSV points", the frontend must
+    # populate this list with the actual coordinates before calling startAnalysis.
+    # The engine restricts candidate generation to these points when
+    # uploadedCandidatesOnly=True. If this is True and the list is empty, the
+    # engine BLOCKS execution with a clear user-facing message.
+    userCandidatePoints: list[UserCandidatePoint] = []
+    # Derived flag: True when RawIntent detected "only rank uploaded points".
+    # Set by the frontend or the LLM consultant; enforced by the engine.
+    uploadedCandidatesOnly: bool = False
 
     @model_validator(mode="after")
     def validate_layers(self):

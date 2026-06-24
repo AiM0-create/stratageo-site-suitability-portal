@@ -152,6 +152,18 @@ _SPATIAL_PATTERNS: dict[str, re.Pattern] = {
     "uploaded_candidates":  re.compile(r"\b(?:uploaded|csv|my\s+(?:list|points|locations)|candidate\s+points)\b", re.I),
 }
 
+# Phase 18: "only" uploaded candidates — hard constraint trigger.
+# These phrases unambiguously mean the user wants ONLY their uploaded points ranked,
+# not a new H3 search. Distinct from "use my uploaded points as a constraint" (softer).
+_UPLOADED_ONLY_RE = re.compile(
+    r"\b(?:only|solely|just|exclusively|restrict(?:ed)?\s+to)\b.{0,50}"
+    r"\b(?:uploaded|csv|my\s+(?:list|points|locations)|candidate\s+points)\b"
+    r"|"
+    r"\b(?:uploaded|csv|my\s+(?:list|points|locations)|candidate\s+points)\b.{0,30}"
+    r"\b(?:only|solely|just|exclusively)\b",
+    re.I,
+)
+
 
 def _extract_spatial_relations(text: str) -> list[str]:
     return [key for key, pat in _SPATIAL_PATTERNS.items() if pat.search(text)]
@@ -232,6 +244,9 @@ class RawIntent:
     featureClasses: list[str] = field(default_factory=list)
     objectiveType: str = "demand_maximization"
     hasUploadedCandidates: bool = False
+    # True when the user explicitly said "only" rank uploaded points (hard constraint).
+    # Distinct from hasUploadedCandidates which can be True even in a mixed prompt.
+    uploadedCandidatesOnly: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -247,7 +262,8 @@ class RawIntent:
             "spatialRelations":      self.spatialRelations,
             "featureClasses":        self.featureClasses,
             "objectiveType":         self.objectiveType,
-            "hasUploadedCandidates": self.hasUploadedCandidates,
+            "hasUploadedCandidates":   self.hasUploadedCandidates,
+            "uploadedCandidatesOnly":  self.uploadedCandidatesOnly,
         }
 
 
@@ -262,6 +278,7 @@ def parse_raw_intent(prompt: str) -> RawIntent:
         features = _extract_feature_classes(prompt)
         objective = _extract_objective(prompt)
         uploaded = bool(_SPATIAL_PATTERNS["uploaded_candidates"].search(prompt))
+        uploaded_only = bool(_UPLOADED_ONLY_RE.search(prompt))
         return RawIntent(
             rawPrompt=prompt,
             topN=top_n,
@@ -272,7 +289,8 @@ def parse_raw_intent(prompt: str) -> RawIntent:
             spatialRelations=spatial,
             featureClasses=features,
             objectiveType=objective,
-            hasUploadedCandidates=uploaded,
+            hasUploadedCandidates=uploaded or uploaded_only,
+            uploadedCandidatesOnly=uploaded_only,
         )
     except Exception:
         # Never crash the caller

@@ -145,6 +145,13 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const criticEnabled: boolean = (result as any).criticEnabled === true;
   const constraintEnforcementLevel: string = (result as any).constraintEnforcementLevel || 'advisory';
   const untracedConstraints: string[] = (result as any).untracedConstraints || [];
+  // Phase 18 — uploaded candidates mode
+  const uploadedCandidatesOnly: boolean = (result as any).uploadedCandidatesOnly === true;
+  const candidateSource: string = (result as any).candidateSource || 'h3_grid';
+  const uploadedCount: number = (result as any).uploadedCandidateCount || 0;
+  const rankedUploaded: number = (result as any).rankedUploadedCandidateCount || 0;
+  const excludedUploaded: number = (result as any).excludedUploadedCandidateCount || 0;
+  const uploadedWarnings: string[] = (result as any).uploadedCandidateWarnings || [];
   const MASK_LABELS: Record<string, string> = {
     corridorRemoved: 'Outside riverfront corridor',
     waterOverlapRemoved: 'Mostly water (>30% area)',
@@ -373,6 +380,21 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   <p className="assumption-note"><strong>AI-driven:</strong> sector archetype, search radius, criteria weights, land intensity, neighborhood selection, score justifications.</p>
                   <p className="assumption-note"><strong>Fixed rules:</strong> deduplication distance (500m), score scale (0–10), MCDA weighted-sum formula, data source priority (Places → OSM → AI fallback).</p>
                 </div>
+
+                {/* Phase 18 — uploaded candidates disclosure (shown first when relevant) */}
+                {uploadedCandidatesOnly && (
+                  <div className="assumption-section" style={{ marginBottom: 8, background: '#f0fdf4', borderLeft: '3px solid #059669', paddingLeft: 8 }}>
+                    <span className="assumption-label" style={{ color: '#059669' }}>Candidate Source</span>
+                    <div style={{ fontSize: '0.84em', color: '#064e3b', lineHeight: 1.6 }}>
+                      <b>Uploaded points only</b> — this analysis ranked user-supplied candidate sites, not a full study-area H3 search.
+                      <br />
+                      Total uploaded: <b>{uploadedCount}</b> · Ranked: <b>{rankedUploaded}</b> · Excluded: <b>{excludedUploaded}</b>
+                      {uploadedWarnings.length > 0 && uploadedWarnings.map((w, i) => (
+                        <div key={i} style={{ color: '#dc2626', marginTop: 2, fontSize: '0.9em' }}>⚠ {w}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Phase 17 — critic + constraint enforcement disclosure */}
                 <div className="assumption-section" style={{ marginBottom: 8 }}>

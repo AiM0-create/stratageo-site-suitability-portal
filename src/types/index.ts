@@ -126,7 +126,11 @@ export interface LocationData {
   absoluteViabilityScore?: number; // 0-10: archetype-benchmarked viability
   confidenceScore?: number;        // 0-10: data trustworthiness
   recommendationStatus?: 'RECOMMENDED' | 'CANDIDATE_ZONE' | 'WEAK_CANDIDATE' | 'RAW_DIAGNOSTIC' | 'EXCLUDED' | 'NO_RELIABLE_RECOMMENDATION';
-  competitionCapped?: boolean;     // competition whitespace cap was applied
+  competitionCapped?: boolean;
+  // Phase 18 uploaded-candidates fields
+  candidateSource?: 'uploaded_point' | 'h3_hex';
+  uploadedPointId?: string;
+  uploadedPointAttributes?: Record<string, unknown>;
 }
 
 export interface RouteMetric {
@@ -232,9 +236,16 @@ export interface AnalysisResult {
     outputCountWarning?: string | null;
   };
   // Phase 17 transparency fields
-  criticEnabled?: boolean;                  // was the post-exec self-critique actually run?
-  constraintEnforcementLevel?: 'advisory' | 'enforced';  // v1.1.0 = advisory; v1.2 = enforced
-  untracedConstraints?: string[];           // hard constraint phrases not traced to a SpecV2 gate
+  criticEnabled?: boolean;
+  constraintEnforcementLevel?: 'advisory' | 'enforced';
+  untracedConstraints?: string[];
+  // Phase 18 uploaded-candidates-only fields
+  uploadedCandidatesOnly?: boolean;
+  candidateSource?: 'uploaded_points' | 'h3_grid';
+  uploadedCandidateCount?: number;
+  rankedUploadedCandidateCount?: number;
+  excludedUploadedCandidateCount?: number;
+  uploadedCandidateWarnings?: string[];
 }
 
 export interface GroundingSource {
