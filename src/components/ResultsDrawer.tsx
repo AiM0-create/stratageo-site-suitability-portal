@@ -65,6 +65,23 @@ function getScoreQualityLabel(score: number): string {
   return 'Weak';
 }
 
+// v1.1.0: resolve recommendation label from status field (or fall back to score)
+function getRecommendationLabel(
+  loc: import('../types').LocationData,
+  withheld: boolean,
+  raw: boolean,
+): string {
+  if (loc.excluded) return 'Excluded';
+  if (raw || withheld) return 'Not recommended';
+  const rs = loc.recommendationStatus;
+  if (rs === 'RECOMMENDED') return 'Recommended';
+  if (rs === 'CANDIDATE_ZONE') return 'Candidate Zone';
+  if (rs === 'WEAK_CANDIDATE') return 'Weak Candidate';
+  if (rs === 'RAW_DIAGNOSTIC') return 'Diagnostic Only';
+  if (rs === 'NO_RELIABLE_RECOMMENDATION') return 'Not recommended';
+  return getScoreQualityLabel(loc.mcda_score);
+}
+
 const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
   const label =
     basis === 'osm-observed'        ? 'OSM + Places' :
@@ -124,6 +141,17 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const insufficient = analysisStatus === 'insufficient_viable_land';
   const suggestions: string[] = (result as any).suggestions || [];
   const maskStats: Record<string, number> = (result as any).maskStats || {};
+  // Phase 17 — critic and constraint enforcement transparency
+  const criticEnabled: boolean = (result as any).criticEnabled === true;
+  const constraintEnforcementLevel: string = (result as any).constraintEnforcementLevel || 'advisory';
+  const untracedConstraints: string[] = (result as any).untracedConstraints || [];
+  // Phase 18 — uploaded candidates mode
+  const uploadedCandidatesOnly: boolean = (result as any).uploadedCandidatesOnly === true;
+  const candidateSource: string = (result as any).candidateSource || 'h3_grid';
+  const uploadedCount: number = (result as any).uploadedCandidateCount || 0;
+  const rankedUploaded: number = (result as any).rankedUploadedCandidateCount || 0;
+  const excludedUploaded: number = (result as any).excludedUploadedCandidateCount || 0;
+  const uploadedWarnings: string[] = (result as any).uploadedCandidateWarnings || [];
   const MASK_LABELS: Record<string, string> = {
     corridorRemoved: 'Outside riverfront corridor',
     waterOverlapRemoved: 'Mostly water (>30% area)',
@@ -353,6 +381,45 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   <p className="assumption-note"><strong>Fixed rules:</strong> deduplication distance (500m), score scale (0–10), MCDA weighted-sum formula, data source priority (Places → OSM → AI fallback).</p>
                 </div>
 
+                {/* Phase 18 — uploaded candidates disclosure (shown first when relevant) */}
+                {uploadedCandidatesOnly && (
+                  <div className="assumption-section" style={{ marginBottom: 8, background: '#f0fdf4', borderLeft: '3px solid #059669', paddingLeft: 8 }}>
+                    <span className="assumption-label" style={{ color: '#059669' }}>Candidate Source</span>
+                    <div style={{ fontSize: '0.84em', color: '#064e3b', lineHeight: 1.6 }}>
+                      <b>Uploaded points only</b> — this analysis ranked user-supplied candidate sites, not a full study-area H3 search.
+                      <br />
+                      Total uploaded: <b>{uploadedCount}</b> · Ranked: <b>{rankedUploaded}</b> · Excluded: <b>{excludedUploaded}</b>
+                      {uploadedWarnings.length > 0 && uploadedWarnings.map((w, i) => (
+                        <div key={i} style={{ color: '#dc2626', marginTop: 2, fontSize: '0.9em' }}>⚠ {w}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Phase 17 — critic + constraint enforcement disclosure */}
+                <div className="assumption-section" style={{ marginBottom: 8 }}>
+                  <span className="assumption-label">Analysis Quality</span>
+                  <div style={{ fontSize: '0.82em', color: '#64748b', lineHeight: 1.5 }}>
+                    <span style={{ marginRight: 12 }}>
+                      Reliability critic: <b style={{ color: criticEnabled ? '#059669' : '#d97706' }}>
+                        {criticEnabled ? 'Enabled' : 'Disabled (low cost mode)'}
+                      </b>
+                    </span>
+                    <span>
+                      Constraint enforcement: <b style={{ color: constraintEnforcementLevel === 'advisory' ? '#d97706' : '#059669' }}>
+                        {constraintEnforcementLevel === 'advisory'
+                          ? 'Advisory (v1.1.0 — hard gates in v1.2)'
+                          : 'Enforced'}
+                      </b>
+                    </span>
+                    {untracedConstraints.length > 0 && (
+                      <div style={{ color: '#dc2626', marginTop: 4 }}>
+                        ⚠ {untracedConstraints.length} constraint phrase(s) not traced to a spec gate — may not be enforced.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Sources */}
                 <div className="assumption-section">
                   <span className="assumption-label">Data Sources</span>
@@ -444,7 +511,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     ) : (
                       <>
                         <span className="score-number" style={raw ? { color: '#64748b' } : undefined}>{loc.mcda_score.toFixed(1)}</span>
-                        {!loc.excluded && <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>{raw ? 'Not recommended' : getScoreQualityLabel(loc.mcda_score)}</span>}
+                        {!loc.excluded && (
+                          <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>
+                            {getRecommendationLabel(loc, withheld, raw)}
+                          </span>
+                        )}
+                        {/* v1.1.0: show secondary score pills when available */}
+                        {!raw && !loc.excluded && loc.relativeRankScore !== undefined && (
+                          <span className="score-pills" style={{ fontSize: '0.72em', color: '#64748b', marginTop: 2, display: 'flex', gap: 4 }}>
+                            <span title="Rank Score (vs peers)">R:{loc.relativeRankScore?.toFixed(1)}</span>
+                            <span title="Absolute Viability">V:{loc.absoluteViabilityScore?.toFixed(1)}</span>
+                            <span title="Data Confidence">C:{loc.confidenceScore?.toFixed(1)}</span>
+                          </span>
+                        )}
                       </>
                     )}
                   </div>

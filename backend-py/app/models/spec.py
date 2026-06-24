@@ -371,8 +371,65 @@ class WaterfrontMeta(BaseModel):
     clampedFromM: Optional[int] = None        # widest original water-corridor width, if clamped
 
 
+# ─── v1.1.0 extensions (all Optional, backward-compatible) ────────────────────
+
+class UserCandidatePoint(BaseModel):
+    """A user-uploaded candidate site (from CSV/GeoJSON) — Phase 18."""
+    lat: float
+    lng: float
+    name: Optional[str] = None
+    id: Optional[str] = None          # original CSV row ID / label
+    attributes: dict = {}             # any extra columns from the CSV
+
+
+class RawIntentMeta(BaseModel):
+    """Snapshot of the deterministic pre-LLM parse (v1.1.0)."""
+    rawPrompt: Optional[str] = None
+    topNResolved: int = 3
+    requestedTopNRaw: Optional[int] = None
+    topNReason: Optional[str] = None
+    outputCountWarning: Optional[str] = None
+    businessTypeKey: str = "generic"
+    hardConstraintPhrases: list[str] = []
+    spatialRelations: list[str] = []
+    featureClasses: list[str] = []
+    objectiveType: str = "demand_maximization"
+    hasUploadedCandidates: bool = False
+    # Phase 18: was this flagged as "uploaded points ONLY" mode?
+    uploadedCandidatesOnly: bool = False
+
+
+class OutputCount(BaseModel):
+    """Extended output metadata (v1.1.0) — added alongside existing Output."""
+    requestedTopNRaw: Optional[int] = None
+    topNResolved: int = 3
+    topNReason: Optional[str] = None
+    outputCountWarning: Optional[str] = None
+
+
+class ModelDisclosure(BaseModel):
+    """Transparency about which factors were and were not scored (v1.1.0)."""
+    intendedFactors: list[str] = []
+    scoredFactors: list[str] = []
+    droppedFactors: list[str] = []
+    missingCriticalFactors: list[str] = []
+    proxyFactors: list[str] = []
+    unvalidatedAssumptions: list[str] = []
+    effectiveWeightRedistribution: Optional[str] = None
+
+
+class DataConfidence(BaseModel):
+    """Per-source confidence signals (v1.1.0)."""
+    dataCoverage: Optional[float] = None          # 0-1 fraction of layers with data
+    constraintConfidence: Optional[float] = None  # 0-1
+    geometryConfidence: Optional[float] = None    # 0-1
+    poiConfidence: Optional[float] = None         # 0-1
+    routingConfidence: Optional[float] = None     # 0-1
+    overallConfidence: Optional[float] = None     # 0-1
+
+
 class SpecV2(BaseModel):
-    version: Literal["2.0"] = "2.0"
+    version: Literal["2.0", "2.1"] = "2.1"
     objective: str
     businessType: str
     studyArea: StudyArea
@@ -388,6 +445,66 @@ class SpecV2(BaseModel):
     feasibility: FeasibilityCheck = FeasibilityCheck()
     meta: SpecMeta = SpecMeta()
     waterfront: Optional[WaterfrontMeta] = None   # set by validate_layers (v1.0.3)
+
+    # ── v1.1.0 additions (all Optional, ignored by older analysis code) ────────
+    rawIntent: Optional[RawIntentMeta] = None
+    outputCount: Optional[OutputCount] = None
+
+    # Analysis mode controls which engine path is taken.
+    analysisMode: Optional[Literal[
+        "micro_market_scoring",
+        "catchment_accessibility",
+        "network_coverage",
+        "white_space_expansion",
+        "logistics_access",
+        "parcel_screening_proxy",
+        "uploaded_candidate_ranking",
+        "feasibility_only",
+    ]] = None
+
+    # Recommendation mode: what the output should be called/treated as.
+    recommendationMode: Optional[Literal[
+        "recommended_sites",
+        "candidate_zones",
+        "raw_diagnostic",
+        "no_reliable_recommendation",
+    ]] = None
+
+    # What the score means in this run.
+    scoreSemantics: Optional[Literal[
+        "relativeRankScore",
+        "absoluteViabilityScore",
+        "confidenceScore",
+        "compositeScore",
+    ]] = "compositeScore"
+
+    # Transparency about factors.
+    modelDisclosure: Optional[ModelDisclosure] = None
+
+    # Data confidence metadata.
+    dataConfidence: Optional[DataConfidence] = None
+
+    # How specific the output claims to be.
+    siteClaimLevel: Optional[Literal[
+        "parcel_site",
+        "point_candidate",
+        "micro_market_zone",
+        "broad_area",
+    ]] = "micro_market_zone"
+
+    # Archetype key selected by the LLM or intent parser (v1.1.0).
+    archetypeKey: Optional[str] = None
+
+    # ── Phase 18 — uploaded candidate points (hard constraint) ────────────────
+    # When the user says "only rank my uploaded CSV points", the frontend must
+    # populate this list with the actual coordinates before calling startAnalysis.
+    # The engine restricts candidate generation to these points when
+    # uploadedCandidatesOnly=True. If this is True and the list is empty, the
+    # engine BLOCKS execution with a clear user-facing message.
+    userCandidatePoints: list[UserCandidatePoint] = []
+    # Derived flag: True when RawIntent detected "only rank uploaded points".
+    # Set by the frontend or the LLM consultant; enforced by the engine.
+    uploadedCandidatesOnly: bool = False
 
     @model_validator(mode="after")
     def validate_layers(self):

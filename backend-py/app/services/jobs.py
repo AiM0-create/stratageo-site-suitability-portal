@@ -37,6 +37,12 @@ from ..engine.sandbox import run_custom_layer
 from ..engine.study_area import geocode, resolve_study_area, reverse_geocode_name
 from . import storage
 from .critic import critique_analysis
+from ..engine.intent_parser import parse_raw_intent, validate_hard_constraints_in_spec
+from ..engine.archetypes import get_archetype
+from ..engine.multi_score import compute_multi_scores
+from ..engine.uploaded_candidates import (
+    validate_uploaded_points, score_uploaded_points, build_no_points_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +291,164 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     s = get_settings()
     notes: list[str] = []
     fallbacks: list[str] = []
+
+    # ── Phase 17: advisory hard-constraint traceability ─────────────────────
+    # validate_hard_constraints_in_spec checks that every hard constraint phrase
+    # from the RawIntent parser is represented in a SpecV2 gate (exclusion /
+    # corridor / routeConstraint / studyArea). Mismatches are advisory warnings
+    # only in v1.1.0 — full blocking gate is scoped to v1.2.
+    _untraced_constraints: list[str] = []
+    _raw_intent_meta: dict = {}
+    if spec.rawIntent and s.enable_raw_intent_parser:
+        from ..engine.intent_parser import RawIntent, validate_hard_constraints_in_spec as _vhc
+        ri_dict = spec.rawIntent.model_dump()
+        _raw_intent_meta = ri_dict
+        # Reconstruct a minimal RawIntent from the stored meta for validation
+        ri_stub = RawIntent(
+            rawPrompt=ri_dict.get("rawPrompt", ""),
+            hardConstraintPhrases=ri_dict.get("hardConstraintPhrases", []),
+        )
+        missing = _vhc(ri_stub, spec.model_dump())
+        if missing:
+            _untraced_constraints = missing
+            notes.append(
+                f"Advisory (v1.1.0): {len(missing)} hard constraint phrase(s) from the "
+                "original prompt could not be traced to a SpecV2 gate — may not be enforced: "
+                + "; ".join(f'"{m[:60]}"' for m in missing[:3])
+            )
+        # Phase 18: uploaded-candidates-only is now enforced (not advisory).
+        # Remove the old advisory message — it is replaced by the hard gate below.
+
+    # ── Phase 18: HARD GATE — uploaded-candidates-only mode ─────────────────────
+    # If the spec says uploadedCandidatesOnly=True, we MUST NOT run a full H3 search.
+    # Enforcement is deterministic — no LLM call can bypass this.
+    if spec.uploadedCandidatesOnly:
+        _update(job, 5, "uploaded_candidates", "Uploaded-candidates-only mode detected…")
+        if not spec.userCandidatePoints:
+            # Hard block: no points provided → return user-facing error, no engine run.
+            logger.warning("job %s: uploadedCandidatesOnly=True but no userCandidatePoints — blocking", job.id[:8])
+            job.result = build_no_points_result(spec)
+            job.status = "done"; job.progress = 100; job.phase = "done"
+            job.message = "Blocked: no uploaded candidate points provided"
+            return
+
+        # Run the uploaded-only path: validate, fetch data, score, return.
+        _update(job, 15, "uploaded_candidates", f"Validating {len(spec.userCandidatePoints)} uploaded candidate point(s)…")
+        valid_cells, invalid_records = validate_uploaded_points(spec.userCandidatePoints)
+        if not valid_cells:
+            all_reasons = "; ".join(r["reason"] for r in invalid_records[:5])
+            job.result = {
+                **build_no_points_result(spec),
+                "summary": f"All {len(spec.userCandidatePoints)} uploaded point(s) failed validation: {all_reasons}",
+                "uploadedCandidateCount": len(spec.userCandidatePoints),
+                "excludedUploadedCandidateCount": len(invalid_records),
+                "uploadedCandidateWarnings": [r["reason"] for r in invalid_records],
+            }
+            job.status = "done"; job.progress = 100; job.phase = "done"
+            job.message = "Blocked: no valid uploaded candidate points"
+            return
+
+        # Fetch POI data for scoring (reuse existing machinery)
+        _update(job, 25, "fetch", "Fetching spatial data for uploaded candidates…")
+        # Build overpass bbox from the points' bounding box + buffer
+        lats = [c.lat for c in valid_cells]
+        lngs = [c.lng for c in valid_cells]
+        buf = 0.05   # ~5 km buffer around the candidate points
+        overpass_bbox = (min(lats)-buf, min(lngs)-buf, max(lats)+buf, max(lngs)+buf)
+
+        osm_tag_sets = {l.id: l.source.tags for l in spec.layers if l.source.provider == "osm"}
+        exc_tag_sets = {f"__exc__{e.name}": e.source.tags for e in spec.exclusions}
+        fetched: dict[str, list[dict]] = {}
+        if osm_tag_sets or exc_tag_sets:
+            try:
+                from ..engine.data_osm import fetch_all_layers as _fal
+                fetched = await _fal({**osm_tag_sets, **exc_tag_sets}, overpass_bbox)
+            except Exception as e:
+                notes.append(f"OSM fetch failed for uploaded candidates — scored with zero POI data ({e}).")
+
+        layer_pois: dict[str, list[dict]] = {l.id: fetched.get(l.id, []) for l in spec.layers}
+        exclusion_pois: dict[str, list[dict]] = {e.name: fetched.get(f"__exc__{e.name}", []) for e in spec.exclusions}
+
+        _update(job, 60, "scoring", f"Scoring {len(valid_cells)} uploaded candidate(s)…")
+        locations, excluded_cells = score_uploaded_points(
+            spec, valid_cells, layer_pois, exclusion_pois, spec.userCandidatePoints,
+        )
+
+        # Attach invalid records as excluded items
+        for rec in invalid_records:
+            locations.append({
+                "name": rec["name"], "lat": rec["lat"], "lng": rec["lng"],
+                "mcda_score": 0.0, "criteria_breakdown": [], "exclusions": [{
+                    "rule": "invalid_uploaded_point", "passed": False,
+                    "detail": rec["reason"], "evidenceBasis": "constraint-rule",
+                }],
+                "excluded": True, "reasoning": f"Excluded: {rec['reason']}",
+                "osmSignals": {}, "pois": [], "searchRadiusM": 0,
+                "candidateSource": "uploaded_point", "uploadedPointId": rec.get("id", ""),
+            })
+
+        # Apply multi-score if enabled
+        if s.enable_multi_score_output:
+            archetype_key = getattr(spec, "archetypeKey", None) or "generic"
+            compute_multi_scores(locations, archetype_key=archetype_key,
+                                 n_layers_total=len(spec.layers),
+                                 routing_available=False,
+                                 geometry_resolved=True, critic_result=None)
+
+        _update(job, 90, "explain", "Building summary…")
+        n_valid = len(valid_cells)
+        n_ranked = len([l for l in locations if not l.get("excluded")])
+        n_excl = len([l for l in locations if l.get("excluded")])
+        target_location = spec.userCandidatePoints[0].attributes.get("location", "") if spec.userCandidatePoints else ""
+
+        summary = (
+            f"Uploaded-candidates-only mode: {n_valid} valid point(s) scored, "
+            f"{n_ranked} returned (top {spec.output.topN}), {n_excl} excluded."
+            + (f" {len(invalid_records)} point(s) failed validation." if invalid_records else "")
+        )
+
+        job.result = {
+            "summary": summary,
+            "business_type": spec.businessType,
+            "target_location": target_location,
+            "methodology": f"Uploaded-candidates-only mode. Scored {n_valid} user-supplied points using MCDA factor framework.",
+            "spec": spec.model_dump(mode="json"),
+            "locations": locations,
+            "grounding_sources": [],
+            "hexGrid": [],
+            "catchments": [],
+            "dataSufficiency": {
+                "status": "sufficient" if locations else "insufficient_data",
+                "noDataLayers": [l.name for l in spec.layers if not layer_pois.get(l.id)],
+                "requiredMissing": [],
+                "noEligibleCandidates": n_ranked == 0,
+                "note": summary,
+            },
+            "dataQuality": [],
+            "critique": None,
+            "recommendationWithheld": n_ranked == 0,
+            "analysisStatus": "reliable" if n_ranked > 0 else "insufficient_viable_land",
+            "suggestions": [] if n_ranked > 0 else ["Upload more candidate points with better spatial coverage."],
+            "maskStats": {},
+            "studyAreaBoundary": [],
+            "waterfront": None,
+            # Phase 17/18 transparency
+            "criticEnabled": False,
+            "constraintEnforcementLevel": "enforced",
+            "untracedConstraints": [],
+            # Phase 18 uploaded-candidates metadata
+            "uploadedCandidatesOnly": True,
+            "candidateSource": "uploaded_points",
+            "uploadedCandidateCount": len(spec.userCandidatePoints),
+            "rankedUploadedCandidateCount": n_ranked,
+            "excludedUploadedCandidateCount": n_excl,
+            "uploadedCandidateWarnings": [r["reason"] for r in invalid_records],
+            "analysisMode": "uploaded_candidate_ranking",
+            "siteClaimLevel": "point_candidate",
+        }
+        job.status = "done"; job.progress = 100; job.phase = "done"
+        job.message = f"Uploaded-candidates-only complete — {n_ranked} ranked, {n_excl} excluded"
+        return
 
     # ── 1. Study area ───────────────────────────────────────────────
     _update(job, 5, "geocoding", "Resolving study area...")
@@ -667,6 +831,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "maskStats": mask_stats,
             "studyAreaBoundary": _boundary_ring(polygon),
             "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
+            # Phase 17 transparency fields
+            "criticEnabled": False,
+            "constraintEnforcementLevel": "advisory",
+            "untracedConstraints": [],
         }
         job.status = "done"; job.progress = 100; job.phase = "done"
         job.message = "Analysis complete — no viable site in the strict corridor"
@@ -954,6 +1122,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── Senior-consultant self-critique of the COMPUTED result ──────────────
     # Geographic sanity, dead factors, thin data, constraint satisfaction.
     # Fail-soft: returns None and the analysis ships without it.
+    # v1.1.0: critic runs based on cost_mode (not just critic_enabled flag).
     critique = await critique_analysis(spec, locations, data_quality, data_sufficiency)
 
     # ── Viability gate (v1.0.3) — minimum score + minimum viable candidates ──
@@ -1016,6 +1185,19 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     notes.extend(fallbacks)
     notes.extend(f"Unsupported: {u.requested} → {u.fallback}" for u in spec.meta.unsupportedRequests)
 
+    # ── v1.1.0 multi-score: relativeRankScore, absoluteViabilityScore, confidenceScore ──
+    if s.enable_multi_score_output:
+        archetype_key = getattr(spec, "archetypeKey", None) or "generic"
+        routing_available = bool(spec.routeConstraints) and not route_unavailable
+        compute_multi_scores(
+            locations,
+            archetype_key=archetype_key,
+            n_layers_total=len(spec.layers),
+            routing_available=routing_available,
+            geometry_resolved=not waterfront_corridor_failed,
+            critic_result=critique,
+        )
+
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
@@ -1044,6 +1226,18 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "maskStats": mask_stats,
         "studyAreaBoundary": _boundary_ring(polygon),
         "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
+        # Phase 17 — transparency fields (v1.1.0)
+        # criticEnabled: was the post-execution self-critique actually called?
+        # In low cost mode, critic is OFF by default.
+        "criticEnabled": bool(critique is not None),
+        # constraintEnforcementLevel: honest label for what was actually enforced.
+        # v1.1.0 is "advisory" — RawIntent parsing is deterministic but the gate
+        # from RawIntent → SpecV2 enforcement depends on LLM quality.
+        # Full blocking gate ("enforced") ships in v1.2.
+        "constraintEnforcementLevel": "advisory",
+        # untracedConstraints: hard constraint phrases from the original prompt that
+        # could not be traced to a SpecV2 gate (advisory warning only in v1.1.0).
+        "untracedConstraints": _untraced_constraints if '_untraced_constraints' in dir() else [],
     }
     job.status = "done"
     job.progress = 100

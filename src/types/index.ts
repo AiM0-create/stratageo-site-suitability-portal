@@ -121,6 +121,16 @@ export interface LocationData {
   buildabilityStatus?: 'viable' | 'weak' | 'excluded' | string;
   exclusionReasons?: string[];
   hardConstraintPass?: boolean;
+  // v1.1.0 multi-dimensional scores
+  relativeRankScore?: number;      // 0-10: percentile rank within this run
+  absoluteViabilityScore?: number; // 0-10: archetype-benchmarked viability
+  confidenceScore?: number;        // 0-10: data trustworthiness
+  recommendationStatus?: 'RECOMMENDED' | 'CANDIDATE_ZONE' | 'WEAK_CANDIDATE' | 'RAW_DIAGNOSTIC' | 'EXCLUDED' | 'NO_RELIABLE_RECOMMENDATION';
+  competitionCapped?: boolean;
+  // Phase 18 uploaded-candidates fields
+  candidateSource?: 'uploaded_point' | 'h3_hex';
+  uploadedPointId?: string;
+  uploadedPointAttributes?: Record<string, unknown>;
 }
 
 export interface RouteMetric {
@@ -168,6 +178,13 @@ export interface AnalysisCritique {
   whatWouldStrengthen: string[];
   confidence: 'high' | 'medium' | 'low';
   model?: string;
+  // v1.1.0 extended critic contract
+  shouldWithholdRecommendations?: boolean;
+  recommendationModeOverride?: 'candidate_zones' | 'raw_diagnostic' | 'no_reliable_recommendation' | null;
+  downgrades?: string[];
+  confidenceAdjustment?: number | null;
+  requiredFixes?: string[];
+  userFacingWarning?: string | null;
 }
 
 export interface FactorDataQuality {
@@ -208,6 +225,27 @@ export interface AnalysisResult {
     corridorSource?: string | null;
     clampedFromM?: number | null;
   } | null;
+  // v1.1.0 universal suitability fields
+  recommendationMode?: 'recommended_sites' | 'candidate_zones' | 'raw_diagnostic' | 'no_reliable_recommendation';
+  siteClaimLevel?: 'parcel_site' | 'point_candidate' | 'micro_market_zone' | 'broad_area';
+  archetypeKey?: string;
+  outputCount?: {
+    requestedTopNRaw?: number | null;
+    topNResolved: number;
+    topNReason?: string;
+    outputCountWarning?: string | null;
+  };
+  // Phase 17 transparency fields
+  criticEnabled?: boolean;
+  constraintEnforcementLevel?: 'advisory' | 'enforced';
+  untracedConstraints?: string[];
+  // Phase 18 uploaded-candidates-only fields
+  uploadedCandidatesOnly?: boolean;
+  candidateSource?: 'uploaded_points' | 'h3_grid';
+  uploadedCandidateCount?: number;
+  rankedUploadedCandidateCount?: number;
+  excludedUploadedCandidateCount?: number;
+  uploadedCandidateWarnings?: string[];
 }
 
 export interface GroundingSource {

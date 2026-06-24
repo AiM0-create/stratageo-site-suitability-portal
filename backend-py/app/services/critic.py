@@ -43,12 +43,19 @@ _SYSTEM = (
     "TIE between two sites with DIFFERENT factor profiles is normal MCDA arithmetic, NOT a "
     "bug — never report it as a 'scoring issue'; at most note the top sites are hard to "
     "separate. Only call a scoring issue when a number is genuinely impossible given the inputs.\n\n"
-    "Return STRICT JSON: {\n"
+    "Return STRICT JSON (v1.1.0 contract):\n"
+    "{\n"
     '  "verdict": "reliable" | "weak" | "unreliable",\n'
     '  "headline": "one blunt sentence — your bottom line",\n'
-    '  "issues": ["concrete problem", ...],            // [] if none\n'
-    '  "whatWouldStrengthen": ["concrete next move", ...],  // tighten study area / swap proxy / add data / reweight\n'
-    '  "confidence": "high" | "medium" | "low"\n'
+    '  "issues": ["concrete problem", ...],\n'
+    '  "whatWouldStrengthen": ["concrete next move", ...],\n'
+    '  "confidence": "high" | "medium" | "low",\n'
+    '  "shouldWithholdRecommendations": true | false,\n'
+    '  "recommendationModeOverride": null | "candidate_zones" | "raw_diagnostic" | "no_reliable_recommendation",\n'
+    '  "downgrades": ["which candidate and why it is demoted", ...],\n'
+    '  "confidenceAdjustment": null | -2 | -1 | 0 | +1,\n'
+    '  "requiredFixes": ["actionable fix the consultant must make before this can be reliable", ...],\n'
+    '  "userFacingWarning": null | "short plain-English warning for the UI disclaimer"\n'
     "}\n"
     "Be terse and specific. Do not invent data not shown. If the run is genuinely solid, "
     "say so plainly (verdict 'reliable') — do not manufacture problems."
@@ -93,7 +100,12 @@ async def critique_analysis(
     data_sufficiency: dict | None,
 ) -> dict | None:
     s = get_settings()
-    if not s.critic_enabled or not s.openai_api_key or not locations:
+    # v1.1.0: critic gated by cost_mode (not just critic_enabled).
+    # getattr fallback keeps mocks/stubs in tests working.
+    critic_on = getattr(s, "critic_active", None)
+    if critic_on is None:
+        critic_on = getattr(s, "critic_enabled", True)
+    if not critic_on or not s.openai_api_key or not locations:
         return None
 
     area = ""
@@ -120,23 +132,33 @@ async def critique_analysis(
     try:
         client = AsyncOpenAI(api_key=s.openai_api_key)
         res = await client.chat.completions.create(
-            model=s.critic_model,
+            model=s.effective_critic_model,
             messages=[{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
             response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=900,
+            max_tokens=1200,
         )
         data = json.loads(res.choices[0].message.content or "{}")
         verdict = data.get("verdict")
         if verdict not in ("reliable", "weak", "unreliable"):
             verdict = "weak"
+        # v1.1.0 extended critic contract
+        allowed_modes = {"candidate_zones", "raw_diagnostic", "no_reliable_recommendation"}
+        rmo = data.get("recommendationModeOverride")
         return {
             "verdict": verdict,
             "headline": str(data.get("headline", ""))[:400],
             "issues": [str(x)[:300] for x in (data.get("issues") or [])][:6],
             "whatWouldStrengthen": [str(x)[:300] for x in (data.get("whatWouldStrengthen") or [])][:6],
             "confidence": data.get("confidence") if data.get("confidence") in ("high", "medium", "low") else "medium",
-            "model": s.critic_model,
+            "model": s.effective_critic_model,
+            # v1.1.0 additions
+            "shouldWithholdRecommendations": bool(data.get("shouldWithholdRecommendations", False)),
+            "recommendationModeOverride": rmo if rmo in allowed_modes else None,
+            "downgrades": [str(x)[:300] for x in (data.get("downgrades") or [])][:6],
+            "confidenceAdjustment": data.get("confidenceAdjustment") if data.get("confidenceAdjustment") in (-2, -1, 0, 1) else None,
+            "requiredFixes": [str(x)[:300] for x in (data.get("requiredFixes") or [])][:6],
+            "userFacingWarning": str(data.get("userFacingWarning", "") or "")[:300] or None,
         }
     except Exception as e:
         logger.warning("critic pass failed (non-fatal): %s", e)

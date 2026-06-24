@@ -17,6 +17,7 @@ from ..config import get_settings
 from ..models.chat import ChatMessage, ChatResponse, validate_spec
 from .archetypes import ARCHETYPE_PLAYBOOK
 from .prompts import chat_system_prompt
+from ..engine.intent_parser import parse_raw_intent
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ async def chat_turn(
     async def call(extra_system: str | None = None) -> dict:
         msgs = convo if not extra_system else convo + [{"role": "system", "content": extra_system}]
         res = await client.chat.completions.create(
-            model=settings.chat_model,
+            model=settings.effective_chat_model,
             messages=msgs,
             response_format={"type": "json_object"},
             temperature=0.2,
@@ -138,6 +139,13 @@ async def chat_turn(
                 "totalTokens": res.usage.total_tokens,
             } if res.usage else None,
         }
+
+    # ── v1.1.0 Phase 2: RawIntent parse from the user's latest message ─────
+    # Extract topN, businessType, hard constraints deterministically before
+    # the LLM response arrives.  The parser result is attached to the spec so
+    # the engine can validate that every hard constraint is represented.
+    raw_intent = parse_raw_intent(last_user)
+    resolved_top_n = raw_intent.topN.get("topNResolved", 3)
 
     out = await call()
     parsed, usage = out["parsed"], out["usage"]
@@ -224,6 +232,18 @@ async def chat_turn(
     if stage == "ready" and not ready:
         stage = "framework"
 
+    # ── v1.1.0: enforce RawIntent topN into spec.output.topN ─────────────────
+    # The deterministic parser overrides whatever topN the LLM picked so the
+    # user's explicit count request is always honoured.  Only override when the
+    # user actually stated a count (requestedTopNRaw is not None).
+    if isinstance(new_spec, dict) and raw_intent.topN.get("requestedTopNRaw") is not None:
+        output = new_spec.setdefault("output", {})
+        output["topN"] = resolved_top_n
+        # Persist rawIntent metadata into the spec for downstream transparency
+        new_spec.setdefault("rawIntent", raw_intent.to_dict())
+        if raw_intent.topN.get("outputCountWarning"):
+            logger.info("Output count capped: %s", raw_intent.topN["outputCountWarning"])
+
     # Framework/ready stages must carry a complete plan block — backfill
     # deterministically from the archetype playbook when the model skimps.
     if stage != "chat" and isinstance(new_spec, dict) and new_spec.get("layers"):
@@ -270,6 +290,6 @@ async def chat_turn(
         ],
         specValid=valid,
         specValidationError=err,
-        model=settings.chat_model,
+        model=settings.effective_chat_model,
         usage=usage,
     )

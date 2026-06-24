@@ -276,7 +276,25 @@ const App: React.FC = () => {
     setHeatmapType(null);
     setAnalysisStatus({ message: 'Starting analysis…', progress: 2 });
     try {
-      const jobId = await startAnalysis(chatSpec);
+      // Phase 18: inject uploaded candidate points into the spec at execution time.
+      // userPoints live in frontend state; they must be sent as spec.userCandidatePoints
+      // so the engine can enforce "uploaded candidates only" mode deterministically.
+      const rawIntent = (chatSpec as any).rawIntent;
+      const isUploadedOnly =
+        rawIntent?.uploadedCandidatesOnly === true ||
+        (rawIntent?.hasUploadedCandidates && userPoints.length > 0 &&
+          (chatSpec as any).uploadedCandidatesOnly === true);
+      const specWithPoints = userPoints.length > 0 ? {
+        ...chatSpec,
+        userCandidatePoints: userPoints.map((p, i) => ({
+          lat: p.lat, lng: p.lng,
+          name: p.name || `Point-${i + 1}`,
+          id: `row-${i + 1}`,
+          attributes: p.category ? { category: p.category } : {},
+        })),
+        uploadedCandidatesOnly: isUploadedOnly,
+      } : chatSpec;
+      const jobId = await startAnalysis(specWithPoints as any);
       const analysisResultData = await pollAnalysis(jobId, setAnalysisStatus);
 
       setResult(analysisResultData);
@@ -712,6 +730,13 @@ const App: React.FC = () => {
       const metaConstr = spec && spec.constraints.length > 0 ? `${spec.constraints.length} constraint(s)` : '';
       pdf.text([metaDate, metaRadius, metaConf, metaConstr].filter(Boolean).join('   |   '), ml, y);
       y += 5;
+      // v1.1.0 — version + model/cost metadata disclosure line
+      const appVer = `App v${__APP_VERSION__}  Engine v${__APP_VERSION__}`;
+      const recMode = (result as any).recommendationMode ? `Mode: ${(result as any).recommendationMode}` : '';
+      const siteClm = (result as any).siteClaimLevel ? `Claim: ${(result as any).siteClaimLevel}` : 'Claim: micro_market_zone';
+      pdf.setFontSize(6.5); T(C.s5);
+      pdf.text([appVer, recMode, siteClm, 'Preliminary screening — not legal/parcel/field due diligence'].filter(Boolean).join('   |   '), ml, y);
+      y += 5;
 
       // ── Constraint tags (ASCII safe) ──
       if (spec && spec.constraints.length > 0) {
@@ -1053,6 +1078,14 @@ const App: React.FC = () => {
         { title: 'Important Limitations',
           body: 'This is a screening-level assessment only. OSM coverage varies by region. Scores reflect relative suitability from available spatial data — not investment recommendations. Site-level due diligence and field validation are required before any real estate decision.',
           warn: true },
+        { title: '5. Version & Model Metadata',
+          body: `App v${__APP_VERSION__}  |  Engine v${__APP_VERSION__}  |  Spec v2.1  |  Analysis type: ${(result as any).uploadedCandidatesOnly ? 'Uploaded-candidates-only (candidate universe restricted to uploaded points)' : 'candidate zone screening (not parcel-level siting)'}  |  Recommendation mode: ${(result as any).recommendationMode || 'recommended_sites'}  |  Site claim level: ${(result as any).siteClaimLevel || 'micro_market_zone'}`,
+          warn: false },
+        ...((result as any).uploadedCandidatesOnly ? [{
+          title: '6. Uploaded Candidate Points',
+          body: `Candidate universe: RESTRICTED to uploaded points only. Total uploaded: ${(result as any).uploadedCandidateCount || 0}. Ranked: ${(result as any).rankedUploadedCandidateCount || 0}. Excluded (invalid): ${(result as any).excludedUploadedCandidateCount || 0}. No H3 hex-grid search was performed — only user-supplied point locations were scored.`,
+          warn: false,
+        }] : []),
       ];
       meths.forEach((m, mi) => {
         const mLines = pdf.splitTextToSize(m.body, cw - 10);
