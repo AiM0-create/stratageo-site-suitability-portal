@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..config import get_settings
-from ..models.spec import SpecV2
+from ..models.spec import SpecV2, _is_water_tag
 from ..engine import buildability
 from ..engine import corridors
 from ..engine import poi_merge

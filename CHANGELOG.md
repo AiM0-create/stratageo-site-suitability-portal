@@ -4,6 +4,20 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.1.2] — 2026-06-24 — Water Tag Helper NameError Fix
+
+### Fixed
+- **`NameError: name '_is_water_tag' is not defined`** in `services/jobs.py` line 610. The helper `_is_water_tag` is defined in `models/spec.py` but was never imported into `jobs.py`. Any analysis that processed corridor water-tag checks (e.g. QSR cafe near road junction, any non-waterfront brief that still reaches the corridor loop) crashed with this NameError. **Fix:** added `_is_water_tag` to the import at `jobs.py` line 18. One-line change.
+- **Trigger prompt:** "Find the top 3 locations for a quick-service cafe targeting students near the Ruby crossing and the EM Bypass" — crashed the engine at the corridor loop even with no waterfront corridors.
+- 21 new regression tests in `tests/test_water_tag_hotfix.py`.
+
+### Not changed
+- Model routing (gpt-5.4-mini / gpt-5.4-nano / gpt-5.4).
+- Any spatial mask logic or water/buildability mask behavior.
+- No new dependencies.
+
+---
+
 ## [1.1.1] — 2026-06-24 — Cost-Aware Model Routing Refresh
 
 ### Changed

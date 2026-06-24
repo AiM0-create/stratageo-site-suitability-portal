@@ -10,11 +10,11 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.1.1"
+APP_VERSION     = "1.1.2"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "1.1.1"
+ENGINE_VERSION  = "1.1.2"
 SPEC_VERSION    = "2.1"
-RELEASE_NAME    = "Cost-Aware Model Routing Refresh"
+RELEASE_NAME    = "Water Tag Helper NameError Fix"
 
 
 class Settings(BaseSettings):

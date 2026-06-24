@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.1.1 — Cost-Aware Model Routing Refresh**
+**Current version: v1.1.2 — Water Tag Helper NameError Fix**
 
 ---
 
@@ -243,7 +243,8 @@ git checkout backup/pre-v1.1.0-universal-suitability
 
 | Version | Highlights |
 |---|---|
-| **v1.1.1** *(current)* | Cost-aware model routing refresh: defaults updated to gpt-5.4-mini / gpt-5.4-nano / gpt-5.4 · optional gpt-5.5 for high-mode critic · no Pro models · fallback env vars added |
+| **v1.1.2** *(current)* | Hotfix: restore `_is_water_tag` import in `jobs.py` — NameError crashed any analysis with corridor water-tag checks (e.g. QSR near EM Bypass) |
+| **v1.1.1** | Cost-aware model routing refresh: gpt-5.4-mini / gpt-5.4-nano / gpt-5.4 · max_completion_tokens for gpt-5.x compat |
 | **v1.1.0** | Universal archetype registry · RawIntent parser · multi-dimensional scoring · uploaded-candidates-only enforcement · cost-aware model routing · honest R/V/C score labels |
 | **v1.0.3** | Spatial Reliability Upgrade: waterfront corridor enforcement · buildability masks · viability gate · competition-whitespace capping · raw-candidate UI gating |
 | **v1.0.2** | Post-execution self-critique / Analyst Review; discrimination-aware scoring; constraints no longer double-encoded |
