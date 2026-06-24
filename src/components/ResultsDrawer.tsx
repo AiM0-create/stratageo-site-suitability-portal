@@ -65,6 +65,23 @@ function getScoreQualityLabel(score: number): string {
   return 'Weak';
 }
 
+// v1.1.0: resolve recommendation label from status field (or fall back to score)
+function getRecommendationLabel(
+  loc: import('../types').LocationData,
+  withheld: boolean,
+  raw: boolean,
+): string {
+  if (loc.excluded) return 'Excluded';
+  if (raw || withheld) return 'Not recommended';
+  const rs = loc.recommendationStatus;
+  if (rs === 'RECOMMENDED') return 'Recommended';
+  if (rs === 'CANDIDATE_ZONE') return 'Candidate Zone';
+  if (rs === 'WEAK_CANDIDATE') return 'Weak Candidate';
+  if (rs === 'RAW_DIAGNOSTIC') return 'Diagnostic Only';
+  if (rs === 'NO_RELIABLE_RECOMMENDATION') return 'Not recommended';
+  return getScoreQualityLabel(loc.mcda_score);
+}
+
 const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
   const label =
     basis === 'osm-observed'        ? 'OSM + Places' :
@@ -444,7 +461,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     ) : (
                       <>
                         <span className="score-number" style={raw ? { color: '#64748b' } : undefined}>{loc.mcda_score.toFixed(1)}</span>
-                        {!loc.excluded && <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>{raw ? 'Not recommended' : getScoreQualityLabel(loc.mcda_score)}</span>}
+                        {!loc.excluded && (
+                          <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>
+                            {getRecommendationLabel(loc, withheld, raw)}
+                          </span>
+                        )}
+                        {/* v1.1.0: show secondary score pills when available */}
+                        {!raw && !loc.excluded && loc.relativeRankScore !== undefined && (
+                          <span className="score-pills" style={{ fontSize: '0.72em', color: '#64748b', marginTop: 2, display: 'flex', gap: 4 }}>
+                            <span title="Rank Score (vs peers)">R:{loc.relativeRankScore?.toFixed(1)}</span>
+                            <span title="Absolute Viability">V:{loc.absoluteViabilityScore?.toFixed(1)}</span>
+                            <span title="Data Confidence">C:{loc.confidenceScore?.toFixed(1)}</span>
+                          </span>
+                        )}
                       </>
                     )}
                   </div>

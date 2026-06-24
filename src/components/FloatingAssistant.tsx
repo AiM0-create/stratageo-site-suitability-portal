@@ -346,22 +346,9 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
             </div>
           )}
 
-          {/* Result count control */}
-          <div className="assistant-controls">
-            <label className="assistant-count-label">
-              Results:
-              <select
-                value={resultCount}
-                onChange={(e) => onResultCountChange(parseInt(e.target.value))}
-                className="assistant-count-select"
-                disabled={isLoading}
-              >
-                {[1, 2, 3, 4, 5].map(n => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </label>
-          </div>
+          {/* v1.1.0: result count is inferred from the prompt by the deterministic
+              RawIntent parser — no dropdown needed in the chat UI.
+              Count editing remains available in SpecSummaryCard (advanced). */}
 
           {/* Context chips — show active memory items */}
           {memory.lastAnalysisTimestamp && (

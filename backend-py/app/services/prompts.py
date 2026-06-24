@@ -10,11 +10,13 @@ import json
 
 from .archetypes import playbook_for_prompt
 from .capabilities import capability_manifest
+from ..engine.archetypes import playbook_for_prompt as engine_playbook
 
 
 def chat_system_prompt() -> str:
     manifest = json.dumps(capability_manifest(), indent=2)
     playbook = playbook_for_prompt()
+    engine_playbook = engine_playbook()
     return f"""You are the senior location intelligence consultant for Stratageo, a professional
 site-suitability platform for India. You advise clients the way a top-tier consulting
 partner would: you make defensible assumptions instead of asking for inputs, you choose
@@ -199,6 +201,20 @@ P8. HIERARCHICAL WHEN NEEDED. If stage 1 is city/region screening, do the screen
 ARCHETYPE PLAYBOOK (your domain knowledge — apply, don't recite)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {playbook}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+UNIVERSAL ARCHETYPE REGISTRY v1.1.0 (14 archetypes — factor guidance)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Each entry: [key] Name: primary success metric. Mode=analysis_mode. Misleading: vars. Playbook: guidance.
+
+{engine_playbook}
+
+IMPORTANT RULES from the archetype registry:
+- Set spec.archetypeKey to the matching key above (or "generic" if none fits).
+- Set spec.siteClaimLevel = "micro_market_zone" unless the user provides exact parcel/site coordinates.
+- Never claim "best site" or "exact location" — always "candidate zone" or "recommended area" in your reply.
+- Set spec.recommendationMode: "recommended_sites" when you expect viable candidates; "candidate_zones" when data is sparse or archetype confidence is low.
+- Set spec.analysisMode from the archetype's mode field above.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ENGINE CAPABILITIES (the only things the engine can execute)

@@ -37,6 +37,9 @@ from ..engine.sandbox import run_custom_layer
 from ..engine.study_area import geocode, resolve_study_area, reverse_geocode_name
 from . import storage
 from .critic import critique_analysis
+from ..engine.intent_parser import parse_raw_intent, validate_hard_constraints_in_spec
+from ..engine.archetypes import get_archetype
+from ..engine.multi_score import compute_multi_scores
 
 logger = logging.getLogger(__name__)
 
@@ -954,6 +957,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── Senior-consultant self-critique of the COMPUTED result ──────────────
     # Geographic sanity, dead factors, thin data, constraint satisfaction.
     # Fail-soft: returns None and the analysis ships without it.
+    # v1.1.0: critic runs based on cost_mode (not just critic_enabled flag).
     critique = await critique_analysis(spec, locations, data_quality, data_sufficiency)
 
     # ── Viability gate (v1.0.3) — minimum score + minimum viable candidates ──
@@ -1015,6 +1019,19 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
     notes.extend(fallbacks)
     notes.extend(f"Unsupported: {u.requested} → {u.fallback}" for u in spec.meta.unsupportedRequests)
+
+    # ── v1.1.0 multi-score: relativeRankScore, absoluteViabilityScore, confidenceScore ──
+    if s.enable_multi_score_output:
+        archetype_key = getattr(spec, "archetypeKey", None) or "generic"
+        routing_available = bool(spec.routeConstraints) and not route_unavailable
+        compute_multi_scores(
+            locations,
+            archetype_key=archetype_key,
+            n_layers_total=len(spec.layers),
+            routing_available=routing_available,
+            geometry_resolved=not waterfront_corridor_failed,
+            critic_result=critique,
+        )
 
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
