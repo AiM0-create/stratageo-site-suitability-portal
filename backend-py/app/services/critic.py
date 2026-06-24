@@ -14,8 +14,6 @@ from __future__ import annotations
 import json
 import logging
 
-from openai import AsyncOpenAI
-
 from ..config import get_settings
 from ..models.spec import SpecV2
 
@@ -130,6 +128,7 @@ async def critique_analysis(
     )
 
     try:
+        from openai import AsyncOpenAI  # lazy import — only needed when LLM call fires
         client = AsyncOpenAI(api_key=s.openai_api_key)
         res = await client.chat.completions.create(
             model=s.effective_critic_model,

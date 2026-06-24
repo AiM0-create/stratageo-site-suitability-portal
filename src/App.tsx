@@ -1084,6 +1084,36 @@ const App: React.FC = () => {
         { title: '6. Deterministic Planning (v1.2.0)',
           body: `Planning mode: ${(result as any).planningMode || 'not set'}  |  Archetype: ${(result as any).archetypeKey || 'unknown'}  |  Weights source: ${(result as any).weightsSource || 'unknown'}  |  LLM role: ${(result as any).llmRole || 'unknown'}  |  Planning ID: ${(result as any).planningFingerprint || 'n/a'}  |  Note: factor keys and weights are locked by the canonical archetype registry and cannot be changed by the LLM between runs.`,
           warn: false },
+        // ── Evidence Appendix (v1.3.0) ──────────────────────────────────────────
+        ...(() => {
+          const et = (result as any).evidenceTrail;
+          if (!et) return [];
+          const providerSummary = (et.providerQueries || [])
+            .map((q: any) => `${q.provider} (${q.queryPurpose}): ${q.featureCount} features`)
+            .join(' | ') || 'No provider queries recorded';
+          const factorSummary = (et.factors || [])
+            .map((f: any) => `${f.displayName} w:${Math.round(f.weight * (f.weight > 1 ? 1 : 100))}% ${f.direction === 'positive' ? '▲' : '▼'} ${f.catchment}`)
+            .join(' | ') || 'No factor evidence';
+          const exclusionSummary = (et.exclusions || [])
+            .filter((e: any) => e.targetType === 'h3_cell')
+            .map((e: any) => e.reason)
+            .join(' | ') || 'No cell exclusions recorded';
+          const candExcl = (et.exclusions || []).filter((e: any) => e.targetType === 'candidate').length;
+          return [{
+            title: '7. Evidence Appendix (v1.3.0) — AUDIT REPRODUCIBLE',
+            body: [
+              `Evidence version: ${et.evidenceVersion}  |  Snapshot: ${et.dataSnapshot?.snapshotId || 'n/a'}  |  Provider mode: ${et.dataSnapshot?.providerMode || 'live'}  |  Study area geometry hash: ${et.studyArea?.geometryHash || 'n/a'}  |  H3 resolution: ${et.studyArea?.h3Resolution || 9}`,
+              `H3 cells before masks: ${et.studyArea?.h3CellCountBeforeMasks || '?'}  |  Candidate exclusions: ${candExcl}  |  Valid recommendations: ${et.recommendationSummary?.validRecommendationCount ?? '?'}  |  Excluded candidates: ${et.recommendationSummary?.excludedCandidateCount ?? '?'}`,
+              `PROVIDER QUERIES: ${providerSummary}`,
+              `FACTOR SCHEMA: ${factorSummary}`,
+              `CELL EXCLUSIONS: ${exclusionSummary}`,
+              `SCORING FORMULA: ${et.scoring?.formulaDescription || 'n/a'}`,
+              `LIMITATIONS: ${(et.limitations || []).slice(0, 2).join(' | ')}`,
+              'This evidence trail is AUDIT REPRODUCIBLE — scoring methodology is fully documented. Full data replay requires cached provider snapshots (not yet implemented).',
+            ].join('\n'),
+            warn: false,
+          }];
+        })(),
         ...((result as any).uploadedCandidatesOnly ? [{
           title: '7. Uploaded Candidate Points',
           body: `Candidate universe: RESTRICTED to uploaded points only. Total uploaded: ${(result as any).uploadedCandidateCount || 0}. Ranked: ${(result as any).rankedUploadedCandidateCount || 0}. Excluded (invalid): ${(result as any).excludedUploadedCandidateCount || 0}. No H3 hex-grid search was performed — only user-supplied point locations were scored.`,

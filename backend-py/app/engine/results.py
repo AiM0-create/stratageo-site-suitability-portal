@@ -11,8 +11,6 @@ import math
 import re
 from collections import defaultdict
 
-from openai import AsyncOpenAI
-
 from ..config import get_settings
 from ..models.spec import SpecV2
 from .grid import HexCell
@@ -302,6 +300,7 @@ async def write_explanations(
 ) -> tuple[str, list[str]]:
     """One gpt-4o-mini call → (summary, [reasoning per location]). None-safe for
     withheld scores and missing-data layers; honest when data is insufficient."""
+    from openai import AsyncOpenAI  # lazy import — only needed when LLM call fires
     s = get_settings()
     client = AsyncOpenAI(api_key=s.openai_api_key)
 

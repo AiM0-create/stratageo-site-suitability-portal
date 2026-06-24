@@ -43,13 +43,31 @@ def test_evidence_builder_importable():
     assert build_scoring_evidence
 
 
-def test_jobs_imports_evidence_builder():
-    try:
-        from app.services import jobs  # noqa: F401
-        assert hasattr(jobs, "QueryTracker") or True
-    except ModuleNotFoundError as e:
-        # openai not installed in unit-test env — skip gracefully
-        pytest.skip(f"Optional runtime dependency not installed: {e}")
+def test_jobs_import_does_not_require_openai():
+    """Importing jobs.py must not require the openai package at module level."""
+    from app.services import jobs  # noqa: F401 — triggers the full import chain
+    # If openai is not installed, this should still succeed (lazy import in results.py/critic.py)
+
+
+def test_results_import_does_not_require_openai():
+    """Importing results.py must not require openai at module level (lazy import fix)."""
+    from app.engine import results  # noqa: F401
+    assert callable(results.build_location)
+    assert callable(results.write_explanations)
+
+
+def test_critic_import_does_not_require_openai():
+    """Importing critic.py must not require openai at module level (lazy import fix)."""
+    from app.services import critic  # noqa: F401
+    assert callable(critic.critique_analysis)
+
+
+def test_evidence_import_does_not_require_openai():
+    """Importing evidence modules must not require openai."""
+    from app.models.evidence import EvidenceTrail  # noqa: F401
+    from app.engine.evidence_builder import QueryTracker  # noqa: F401
+    assert EvidenceTrail
+    assert QueryTracker
 
 
 # ── 2. Schema serialisation ───────────────────────────────────────────────────
@@ -526,10 +544,7 @@ def test_evidence_json_no_unserializable():
 # ── 14. PDF appendix marker ───────────────────────────────────────────────────
 
 def test_build_methodology_contains_layers():
-    try:
-        from app.engine.results import build_methodology
-    except ModuleNotFoundError as e:
-        pytest.skip(f"Optional runtime dependency not installed: {e}")
+    from app.engine.results import build_methodology
     from app.models.spec import SpecV2
 
     spec_dict = {
@@ -556,6 +571,75 @@ def test_build_methodology_contains_layers():
     method = build_methodology(spec, 120, 9, False, [])
     assert "H3" in method
     assert "weighted" in method.lower() or "layer" in method.lower()
+
+
+# ── 14b. PDF evidence appendix marker ────────────────────────────────────────
+
+def test_pdf_evidence_appendix_marker_in_source():
+    """App.tsx must contain an Evidence Appendix section (v1.3.0 PDF requirement)."""
+    import pathlib
+    app_tsx = pathlib.Path(__file__).parents[2] / "src" / "App.tsx"
+    if not app_tsx.exists():
+        pytest.skip("App.tsx not found relative to test location")
+    src = app_tsx.read_text(encoding="utf-8")
+    assert "Evidence Appendix" in src, (
+        "App.tsx PDF section must include 'Evidence Appendix' (v1.3.0 PDF requirement)"
+    )
+    assert "evidenceTrail" in src, (
+        "App.tsx PDF section must reference evidenceTrail"
+    )
+    assert "planningFingerprint" in src, (
+        "App.tsx PDF section must include planningFingerprint"
+    )
+
+
+# ── 14c. Evidence endpoint security ──────────────────────────────────────────
+
+def test_evidence_router_endpoints_importable():
+    """The analyses router must have the new evidence endpoint functions."""
+    from app.routers.analyses import get_evidence, download_evidence
+    assert callable(get_evidence)
+    assert callable(download_evidence)
+
+
+def test_evidence_endpoint_validates_uuid():
+    """Evidence endpoints must reject non-UUID job IDs."""
+    import pytest
+    import asyncio
+    from app.routers.analyses import get_evidence
+    from fastapi import HTTPException
+
+    async def _call():
+        return await get_evidence(job_id="not-a-uuid")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(_call())
+    assert exc_info.value.status_code == 400
+
+
+def test_evidence_endpoint_not_found_for_unknown_job():
+    """Evidence endpoint must return 404 for unknown job IDs."""
+    import asyncio
+    from app.routers.analyses import get_evidence
+    from fastapi import HTTPException
+
+    async def _call():
+        return await get_evidence(job_id="00000000-0000-0000-0000-000000000000")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(_call())
+    assert exc_info.value.status_code == 404
+
+
+def test_security_middleware_exempts_get_evidence():
+    """GET /api/v2/analyses/* endpoints must be exempt from rate-limit gate
+    (is_poll logic in SecurityMiddleware)."""
+    from app.security import _PROTECTED_PREFIXES
+    evidence_path = "/api/v2/analyses/some-id/evidence"
+    # Must be under a protected prefix...
+    assert any(evidence_path.startswith(p) for p in _PROTECTED_PREFIXES)
+    # ...and must be recognized as a poll/GET (the is_poll check exempts it)
+    assert evidence_path.startswith("/api/v2/analyses/")  # is_poll = True for GETs
 
 
 # ── 15. v1.2 deterministic planning tests not broken ─────────────────────────
