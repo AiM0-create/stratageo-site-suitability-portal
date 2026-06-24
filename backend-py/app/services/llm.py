@@ -140,6 +140,12 @@ async def chat_turn(
             } if res.usage else None,
         }
 
+    # ── last_user: extract the latest user message for RawIntent parsing ─────
+    # Must be defined BEFORE parse_raw_intent() is called (Python scoping:
+    # assigning last_user anywhere in the function makes it local throughout,
+    # so it must be assigned before its first use).
+    last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+
     # ── v1.1.0 Phase 2: RawIntent parse from the user's latest message ─────
     # Extract topN, businessType, hard constraints deterministically before
     # the LLM response arrives.  The parser result is attached to the spec so
@@ -169,7 +175,7 @@ async def chat_turn(
     # the model prioritized a user-dictated reply ("reply only with X") over the
     # invisible spec channel. Run one extraction-only pass so the plan card still
     # appears on the first turn.
-    last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+    # (last_user is already defined above — no re-assignment needed)
     if not new_spec and len(last_user) > 400:
         logger.info("Empty spec from long message — running extraction-only pass")
         out2 = await call(
