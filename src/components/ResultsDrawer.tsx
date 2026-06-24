@@ -141,6 +141,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const insufficient = analysisStatus === 'insufficient_viable_land';
   const suggestions: string[] = (result as any).suggestions || [];
   const maskStats: Record<string, number> = (result as any).maskStats || {};
+  // Phase 17 — critic and constraint enforcement transparency
+  const criticEnabled: boolean = (result as any).criticEnabled === true;
+  const constraintEnforcementLevel: string = (result as any).constraintEnforcementLevel || 'advisory';
+  const untracedConstraints: string[] = (result as any).untracedConstraints || [];
   const MASK_LABELS: Record<string, string> = {
     corridorRemoved: 'Outside riverfront corridor',
     waterOverlapRemoved: 'Mostly water (>30% area)',
@@ -368,6 +372,30 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   <span className="assumption-label">How Parameters Are Set</span>
                   <p className="assumption-note"><strong>AI-driven:</strong> sector archetype, search radius, criteria weights, land intensity, neighborhood selection, score justifications.</p>
                   <p className="assumption-note"><strong>Fixed rules:</strong> deduplication distance (500m), score scale (0–10), MCDA weighted-sum formula, data source priority (Places → OSM → AI fallback).</p>
+                </div>
+
+                {/* Phase 17 — critic + constraint enforcement disclosure */}
+                <div className="assumption-section" style={{ marginBottom: 8 }}>
+                  <span className="assumption-label">Analysis Quality</span>
+                  <div style={{ fontSize: '0.82em', color: '#64748b', lineHeight: 1.5 }}>
+                    <span style={{ marginRight: 12 }}>
+                      Reliability critic: <b style={{ color: criticEnabled ? '#059669' : '#d97706' }}>
+                        {criticEnabled ? 'Enabled' : 'Disabled (low cost mode)'}
+                      </b>
+                    </span>
+                    <span>
+                      Constraint enforcement: <b style={{ color: constraintEnforcementLevel === 'advisory' ? '#d97706' : '#059669' }}>
+                        {constraintEnforcementLevel === 'advisory'
+                          ? 'Advisory (v1.1.0 — hard gates in v1.2)'
+                          : 'Enforced'}
+                      </b>
+                    </span>
+                    {untracedConstraints.length > 0 && (
+                      <div style={{ color: '#dc2626', marginTop: 4 }}>
+                        ⚠ {untracedConstraints.length} constraint phrase(s) not traced to a spec gate — may not be enforced.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Sources */}

@@ -231,6 +231,10 @@ export interface AnalysisResult {
     topNReason?: string;
     outputCountWarning?: string | null;
   };
+  // Phase 17 transparency fields
+  criticEnabled?: boolean;                  // was the post-exec self-critique actually run?
+  constraintEnforcementLevel?: 'advisory' | 'enforced';  // v1.1.0 = advisory; v1.2 = enforced
+  untracedConstraints?: string[];           // hard constraint phrases not traced to a SpecV2 gate
 }
 
 export interface GroundingSource {

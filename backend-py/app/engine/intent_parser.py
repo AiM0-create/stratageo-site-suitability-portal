@@ -309,3 +309,55 @@ def validate_hard_constraints_in_spec(intent: RawIntent, spec_dict: dict) -> lis
         if signal and not any(w in gates_text for w in signal):
             missing.append(phrase)
     return missing
+
+
+def _to_metres(value: str, unit: str) -> float:
+    """Normalize a distance value+unit to metres."""
+    v = float(value)
+    u = unit.lower()
+    if u in ("km", "kilometer", "kilometre"):
+        return v * 1000
+    return v   # m / metre / meter
+
+
+def detect_contradictory_constraints(text: str) -> list[str]:
+    """Detect logically impossible constraint combinations in a prompt.
+
+    Returns a list of contradiction descriptions.  Empty list = no contradiction
+    detected.  This is a heuristic — the LLM is still responsible for feasibility.
+
+    Phase 17: surfaces P7-style contradictions early ("within 500m AND outside 2km
+    of the same anchor") — impossible because 500 m < 2 km.
+    """
+    contradictions: list[str] = []
+
+    # Capture: keyword, numeric value, unit, anchor text
+    _DIST_PAT = r"({kw})\s+(\d+(?:\.\d+)?)\s*(m|metres?|meters?|km|kilometers?|kilometres?)\s+of\s+([a-z][a-z\s]{{2,25}})"
+
+    within_matches  = re.findall(_DIST_PAT.format(kw="within"),  text.lower())
+    outside_matches = re.findall(_DIST_PAT.format(kw=r"outside|beyond|more\s+than"), text.lower())
+
+    for _, w_val, w_unit, w_anchor in within_matches:
+        for _, o_val, o_unit, o_anchor in outside_matches:
+            # Check if they reference the same anchor
+            same_anchor = (
+                w_anchor.strip()[:5] == o_anchor.strip()[:5]
+                or any(tok in o_anchor for tok in w_anchor.split() if len(tok) > 4)
+            )
+            if not same_anchor:
+                continue
+            try:
+                wd_m = _to_metres(w_val, w_unit)   # within distance in metres
+                od_m = _to_metres(o_val, o_unit)   # outside distance in metres
+                # Contradictory: must be WITHIN wd_m but also OUTSIDE od_m of same anchor.
+                # Impossible when wd_m <= od_m (you can't be within 500m AND outside 2000m).
+                if wd_m <= od_m:
+                    contradictions.append(
+                        f"Contradictory constraint: 'within {w_val} {w_unit} of {w_anchor.strip()}' "
+                        f"AND 'outside {o_val} {o_unit} of {o_anchor.strip()}' — "
+                        f"impossible (within {wd_m:.0f} m but outside {od_m:.0f} m of the same anchor)."
+                    )
+            except ValueError:
+                pass
+
+    return contradictions

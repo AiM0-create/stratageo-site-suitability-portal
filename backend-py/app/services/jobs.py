@@ -289,6 +289,39 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     notes: list[str] = []
     fallbacks: list[str] = []
 
+    # ── Phase 17: advisory hard-constraint traceability ─────────────────────
+    # validate_hard_constraints_in_spec checks that every hard constraint phrase
+    # from the RawIntent parser is represented in a SpecV2 gate (exclusion /
+    # corridor / routeConstraint / studyArea). Mismatches are advisory warnings
+    # only in v1.1.0 — full blocking gate is scoped to v1.2.
+    _untraced_constraints: list[str] = []
+    _raw_intent_meta: dict = {}
+    if spec.rawIntent and s.enable_raw_intent_parser:
+        from ..engine.intent_parser import RawIntent, validate_hard_constraints_in_spec as _vhc
+        ri_dict = spec.rawIntent.model_dump()
+        _raw_intent_meta = ri_dict
+        # Reconstruct a minimal RawIntent from the stored meta for validation
+        ri_stub = RawIntent(
+            rawPrompt=ri_dict.get("rawPrompt", ""),
+            hardConstraintPhrases=ri_dict.get("hardConstraintPhrases", []),
+        )
+        missing = _vhc(ri_stub, spec.model_dump())
+        if missing:
+            _untraced_constraints = missing
+            notes.append(
+                f"Advisory (v1.1.0): {len(missing)} hard constraint phrase(s) from the "
+                "original prompt could not be traced to a SpecV2 gate — may not be enforced: "
+                + "; ".join(f'"{m[:60]}"' for m in missing[:3])
+            )
+        # Uploaded-candidates advisory
+        if ri_dict.get("hasUploadedCandidates"):
+            notes.append(
+                "Advisory (v1.1.0): 'uploaded CSV points only' mode is NOT yet enforced "
+                "by the engine — the analysis screens all hexes in the study area. "
+                "Uploaded points are available as spatial constraints only. "
+                "Full candidate-restriction mode is scoped to v1.2."
+            )
+
     # ── 1. Study area ───────────────────────────────────────────────
     _update(job, 5, "geocoding", "Resolving study area...")
     polygon, area_notes = await resolve_study_area(spec.studyArea)
@@ -670,6 +703,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "maskStats": mask_stats,
             "studyAreaBoundary": _boundary_ring(polygon),
             "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
+            # Phase 17 transparency fields
+            "criticEnabled": False,
+            "constraintEnforcementLevel": "advisory",
+            "untracedConstraints": [],
         }
         job.status = "done"; job.progress = 100; job.phase = "done"
         job.message = "Analysis complete — no viable site in the strict corridor"
@@ -1061,6 +1098,18 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "maskStats": mask_stats,
         "studyAreaBoundary": _boundary_ring(polygon),
         "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
+        # Phase 17 — transparency fields (v1.1.0)
+        # criticEnabled: was the post-execution self-critique actually called?
+        # In low cost mode, critic is OFF by default.
+        "criticEnabled": bool(critique is not None),
+        # constraintEnforcementLevel: honest label for what was actually enforced.
+        # v1.1.0 is "advisory" — RawIntent parsing is deterministic but the gate
+        # from RawIntent → SpecV2 enforcement depends on LLM quality.
+        # Full blocking gate ("enforced") ships in v1.2.
+        "constraintEnforcementLevel": "advisory",
+        # untracedConstraints: hard constraint phrases from the original prompt that
+        # could not be traced to a SpecV2 gate (advisory warning only in v1.1.0).
+        "untracedConstraints": _untraced_constraints if '_untraced_constraints' in dir() else [],
     }
     job.status = "done"
     job.progress = 100
