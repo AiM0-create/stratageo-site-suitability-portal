@@ -41,3 +41,8 @@ test-suite.js
 
 # Local test artifacts — generated during local dev/testing, never commit
 local_test/
+
+# Generated documentation exports (DOCX/PDF produced by gen_doc_*.py / gen_docx.js scripts)
+# These are on-demand artefacts; they live outside the repo or are regenerated as needed.
+STRATAGEO_TECHNICAL_DOCUMENTATION.docx
+STRATAGEO_TECHNICAL_DOCUMENTATION.pdf
