@@ -272,6 +272,150 @@ export interface AnalysisResult {
     effort: string;
     riskOfWeakeningConstraint: string;
   }>;
+  // v1.3.0 evidence trail
+  evidenceTrail?: EvidenceTrail;
+}
+
+// ─── v1.3.0 Evidence Trail ───────────────────────────────────────────────────
+
+export interface ProviderQueryEvidence {
+  provider: 'Google Places' | 'OSM Overpass' | 'ORS' | 'Internal' | 'Derived';
+  queryPurpose: string;
+  queryType: string;
+  queryParamsPublic: Record<string, unknown>;
+  secretFieldsRedacted: true;
+  requestedAt: string;
+  responseStatus: string;
+  featureCount: number;
+  cacheKey?: string | null;
+  cacheHit?: boolean | null;
+  durationMs?: number | null;
+  warning?: string | null;
+}
+
+export interface CandidateFactorEvidence {
+  candidateId: string;
+  rawValue: number | string | null;
+  rawCount?: number | null;
+  normalizedScore: number | null;
+  weightedScore: number | null;
+  nearbyFeatureExamples?: Record<string, unknown>[];
+  explanation: string;
+  warning?: string | null;
+}
+
+export interface FactorEvidence {
+  factorKey: string;
+  displayName: string;
+  weight: number;
+  direction: 'positive' | 'negative';
+  catchment: string;
+  dataSources: string[];
+  confidence: string;
+  scoringCurve: string;
+  rawValueDescription: string;
+  normalizationMethod: string;
+  missingDataPolicy: string;
+  appliedToCandidates: CandidateFactorEvidence[];
+}
+
+export interface ConstraintCheckEvidence {
+  constraintName: string;
+  constraintType: string;
+  passed: boolean | null;
+  detail: string;
+  enforcementLevel: string;
+  evidenceBasis: string;
+}
+
+export interface CandidateEvidence {
+  candidateId: string;
+  rank?: number | null;
+  label: string;
+  centroid: { lat: number; lng: number };
+  h3CellIds?: string[];
+  recommendationStatus: string;
+  totalScore: number | null;
+  relativeRankScore?: number | null;
+  absoluteViabilityScore?: number | null;
+  confidenceScore?: number | null;
+  factorBreakdown: CandidateFactorEvidence[];
+  constraintChecks: ConstraintCheckEvidence[];
+  exclusionReasons: string[];
+  relaxationNeeded: boolean;
+  caveats: string[];
+}
+
+export interface ExclusionEvidence {
+  targetType: 'h3_cell' | 'candidate';
+  targetId: string;
+  exclusionType: string;
+  enforcementLevel: string;
+  source: string;
+  reason: string;
+  geometryHash?: string | null;
+  affectedAreaPct?: number | null;
+}
+
+export interface ScoringEvidence {
+  formulaDescription: string;
+  totalWeight: number;
+  totalPresentWeight: number;
+  normalization: Record<string, unknown>[];
+  tieBreakers: string[];
+  missingDataHandling: string;
+  confidenceMethod: string;
+  recommendationStatusRules: Record<string, unknown>[];
+  minViableScore?: number | null;
+  viableCandidates: number;
+}
+
+export interface EvidenceTrail {
+  evidenceVersion: string;
+  analysisId: string;
+  jobId: string;
+  createdAt: string;
+  appVersion: string;
+  engineVersion: string;
+  prompt: {
+    rawPrompt: string;
+    normalizedPrompt: string;
+    followUpTurns: string[];
+    planningFingerprint: string;
+    specFingerprint?: string | null;
+    archetypeKey: string;
+    planningMode: string;
+  };
+  dataSnapshot: {
+    snapshotId: string;
+    snapshotCreatedAt: string;
+    providerMode: 'live' | 'cached' | 'mocked';
+    cacheHit: boolean;
+    dataFreshnessWarnings: string[];
+  };
+  studyArea: {
+    label: string;
+    geometryType: string;
+    geometryHash: string;
+    h3Resolution: number;
+    h3CellCountBeforeMasks: number;
+    h3CellCountAfterMasks: number;
+    bounds?: Record<string, number> | null;
+  };
+  providerQueries: ProviderQueryEvidence[];
+  factors: FactorEvidence[];
+  candidates: CandidateEvidence[];
+  exclusions: ExclusionEvidence[];
+  scoring: ScoringEvidence;
+  recommendationSummary: {
+    requestedTopN: number;
+    resolvedTopN: number;
+    validRecommendationCount: number;
+    excludedCandidateCount: number;
+    recommendationStatus: string;
+    relaxationOptions: Record<string, unknown>[];
+  };
+  limitations: string[];
 }
 
 export interface GroundingSource {

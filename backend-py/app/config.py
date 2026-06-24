@@ -4,6 +4,7 @@ v1.1.0: added configurable model routing + cost-mode tiers.
 v1.1.1: refreshed model defaults to the cost-aware gpt-5.4 family.
 v1.1.2: water tag helper import fix.
 v1.2.0: deterministic planning mode — canonical archetype schemas, spec fingerprinting.
+v1.3.0: evidence trail & reproducible site-selection reports.
 """
 from functools import lru_cache
 from typing import Literal
@@ -11,11 +12,11 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.2.0"
+APP_VERSION     = "1.3.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "1.2.0"
+ENGINE_VERSION  = "1.3.0"
 SPEC_VERSION    = "2.2"
-RELEASE_NAME    = "Deterministic Planning & Constraint Enforcement Upgrade"
+RELEASE_NAME    = "Evidence Trail & Reproducible Site Selection Reports"
 
 
 class Settings(BaseSettings):
@@ -122,6 +123,11 @@ class Settings(BaseSettings):
     # Stable seed for spec-building calls where supported by the API.
     stratageo_spec_seed: int = 42
 
+    # ── v1.3.0: Evidence Trail ─────────────────────────────────────────────────
+    # When true, every completed analysis includes a full EvidenceTrail in the
+    # result payload and the /evidence endpoint is active.
+    enable_evidence_trail: bool = True
+
     @property
     def origins_list(self) -> list[str]:
         return [o.strip() for o in self.frontend_origins.split(",") if o.strip()]
@@ -170,6 +176,7 @@ class Settings(BaseSettings):
             "universalCritic":       self.enable_universal_critic,
             "modelEscalation":       self.stratageo_enable_model_escalation,
             "deterministicPlanning": self.stratageo_deterministic_planning,
+            "evidenceTrail":         self.enable_evidence_trail,
         }
 
     def model_config_public(self) -> dict:

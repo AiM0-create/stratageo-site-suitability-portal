@@ -43,6 +43,7 @@ from ..engine.multi_score import compute_multi_scores
 from ..engine.uploaded_candidates import (
     validate_uploaded_points, score_uploaded_points, build_no_points_result,
 )
+from ..engine.evidence_builder import QueryTracker, assemble_evidence_trail
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +292,9 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     s = get_settings()
     notes: list[str] = []
     fallbacks: list[str] = []
+    _qt = QueryTracker()          # v1.3.0 — evidence trail provider query tracker
+    import datetime as _dt
+    _analysis_start = _dt.datetime.utcnow().isoformat() + "Z"
 
     # ── Phase 17: advisory hard-constraint traceability ─────────────────────
     # validate_hard_constraints_in_spec checks that every hard constraint phrase
@@ -485,10 +489,21 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     _update(job, 20, "fetch", f"Fetching OSM data ({len(osm_tag_sets)} layers + {len(sup_tag_sets)} supplements, 1 combined query)...")
     fetched: dict[str, list[dict]] = {}
     if osm_tag_sets or exc_tag_sets or sup_tag_sets:
+        _osm_warn = None
         try:
             fetched = await fetch_all_layers({**osm_tag_sets, **exc_tag_sets, **sup_tag_sets}, overpass_bbox)
         except Exception as e:
+            _osm_warn = str(e)[:200]
             fallbacks.append(f"OSM fetch failed entirely — OSM layers scored as zero ({e}).")
+        _osm_total = sum(len(v) for v in fetched.values())
+        all_osm_tags = [t for ts in osm_tag_sets.values() for t in ts]
+        _qt.record_osm(
+            purpose="main_layer_fetch",
+            tags=all_osm_tags,
+            bbox=overpass_bbox,
+            feature_count=_osm_total,
+            warning=_osm_warn,
+        )
 
     places_fetches = 0   # Places is paid + tiled → bound total fetches
     PLACES_FETCH_CAP = 6
@@ -503,6 +518,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 _update(job, 40, "fetch", f"Google Places back-up for: {layer.name}...")
                 places_pois = await fetch_places_pois([ptype], None, overpass_bbox)
                 places_fetches += 1
+                _qt.record_places(
+                    purpose=f"backup_for_{layer.id}",
+                    place_types=[ptype],
+                    bbox=overpass_bbox,
+                    feature_count=len(places_pois),
+                )
                 merged = poi_merge.merge_pois(places_pois, osm_pois)   # Places primary
                 if places_pois and osm_pois:
                     notes.append(f"Layer '{layer.name}': merged {len(places_pois)} Places + {len(osm_pois)} OSM → {len(merged)} (deduped).")
@@ -517,6 +538,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 layer.source.types, layer.source.keyword, overpass_bbox,
             )
             places_fetches += 1
+            _qt.record_places(
+                purpose=f"primary_{layer.id}",
+                place_types=layer.source.types or [],
+                bbox=overpass_bbox,
+                feature_count=len(places_pois),
+            )
             osm_sup = fetched.get(f"__sup__{layer.id}", [])
             merged = poi_merge.merge_pois(places_pois, osm_sup)   # Places primary + OSM supplement
             if places_pois and osm_sup:
@@ -587,8 +614,21 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         water_ways = await fetch_area_geometries(
             ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
         )
+        _qt.record_osm(
+            purpose="water_body_geometry",
+            tags=["natural=water", "waterway=riverbank", "waterway=river"],
+            bbox=overpass_bbox,
+            feature_count=len(water_ways),
+        )
     except Exception as e:
         water_ways = []
+        _qt.record_osm(
+            purpose="water_body_geometry",
+            tags=["natural=water", "waterway=riverbank", "waterway=river"],
+            bbox=overpass_bbox,
+            feature_count=0,
+            warning=str(e)[:200],
+        )
         fallbacks.append(f"Water-body geometry fetch failed: {e}.")
     # PATCH 1 (v1.0.3.1): track whether a WATERFRONT gate was actually enforced, so a
     # failed riverfront corridor never silently becomes "all candidates kept".
@@ -852,6 +892,13 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             for l in iso_layers
         ))
         for layer, isos in zip(iso_layers, iso_results):
+            _qt.record_ors(
+                purpose=f"isochrone_{layer.id}",
+                mode=layer.catchment.type,
+                n_cells=len(cand_cells),
+                n_results=len(isos) if isos else 0,
+                warning=None if isos else "isochrone_unavailable",
+            )
             if not isos:
                 fallbacks.append(
                     f"Isochrones unavailable for '{layer.name}' — Euclidean proxy values kept.",
@@ -1206,6 +1253,28 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── Catchment outlines for the winners ───────────────────────────
     catchments = results_mod.build_catchments(spec, iso_polygons, finals, locations)
 
+    # ── v1.3.0: Assemble evidence trail ──────────────────────────────────────────
+    _relaxation_opts = getattr(spec, "relaxationOptions", None) or []
+    if isinstance(_relaxation_opts, list) and _relaxation_opts and hasattr(_relaxation_opts[0], "model_dump"):
+        _relaxation_opts = [o.model_dump(mode="json") for o in _relaxation_opts]
+    _ev_trail = assemble_evidence_trail(
+        job_id=job.id,
+        spec=spec,
+        polygon=polygon,
+        hexes=hexes,
+        scores=scores,
+        layer_pois=layer_pois,
+        locations=locations,
+        candidate_indices=finals,
+        mask_stats=mask_stats,
+        provider_queries=_qt.records,
+        h3_count_before=len(hexes),
+        analysis_status=analysis_status,
+        relaxation_options=_relaxation_opts,
+        limitations=list(fallbacks),
+        created_at=_analysis_start,
+    )
+
     job.result = {
         "summary": summary,
         "business_type": spec.businessType,
@@ -1227,17 +1296,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "studyAreaBoundary": _boundary_ring(polygon),
         "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
         # Phase 17 — transparency fields (v1.1.0)
-        # criticEnabled: was the post-execution self-critique actually called?
-        # In low cost mode, critic is OFF by default.
         "criticEnabled": bool(critique is not None),
-        # constraintEnforcementLevel: honest label for what was actually enforced.
-        # v1.1.0 is "advisory" — RawIntent parsing is deterministic but the gate
-        # from RawIntent → SpecV2 enforcement depends on LLM quality.
-        # Full blocking gate ("enforced") ships in v1.2.
         "constraintEnforcementLevel": "advisory",
-        # untracedConstraints: hard constraint phrases from the original prompt that
-        # could not be traced to a SpecV2 gate (advisory warning only in v1.1.0).
         "untracedConstraints": _untraced_constraints if '_untraced_constraints' in dir() else [],
+        # v1.3.0 — evidence trail (secret-safe serialisation)
+        "evidenceTrail": _ev_trail.safe_dict(),
     }
     job.status = "done"
     job.progress = 100

@@ -7,8 +7,9 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def test_version_is_120():
-    assert APP_VERSION == "1.2.0"
-    assert ENGINE_VERSION == "1.2.0"
+    # Updated to v1.3.0 — evidence trail upgrade
+    assert APP_VERSION == "1.3.0"
+    assert ENGINE_VERSION == "1.3.0"
 
 
 # ── Model defaults (v1.1.1 — gpt-5.4 family) ─────────────────────────────────

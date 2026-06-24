@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.2.0 — Deterministic Planning & Constraint Enforcement Upgrade**
+**Current version: v1.3.0 — Evidence Trail & Reproducible Site Selection Reports**
 
 ---
 
