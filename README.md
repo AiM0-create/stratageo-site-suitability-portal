@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.1.0 — Universal Suitability Logic Upgrade**
+**Current version: v1.1.1 — Cost-Aware Model Routing Refresh**
 
 ---
 
@@ -100,7 +100,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | Backend | Python 3.12 + FastAPI on **Google Cloud Run** (`--max-instances 1 --no-cpu-throttling`) |
 | Spatial | H3 (`h3-py`), Shapely, scikit-learn BallTree, NumPy |
 | Data | OpenStreetMap (Overpass), Google Places (New), OpenRouteService, Google Routes |
-| LLM | OpenAI gpt-4o (conversation, critic) · gpt-4o-mini (explanations) — all configurable |
+| LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
 | CI | pytest (236 tests) · GitHub Actions → GitHub Pages deploy |
@@ -118,11 +118,11 @@ ORS_API_KEY
 APP_SHARED_TOKEN
 
 # Cost-aware model routing (v1.1.0)
-STRATAGEO_CHAT_MODEL          # default: gpt-4o
-STRATAGEO_REASONING_MODEL     # default: gpt-4o
-STRATAGEO_CRITIC_MODEL        # default: gpt-4o
-STRATAGEO_REPORT_MODEL        # default: gpt-4o-mini
-STRATAGEO_FAST_MODEL          # default: gpt-4o-mini
+STRATAGEO_CHAT_MODEL          # default: gpt-5.4-mini
+STRATAGEO_REASONING_MODEL     # default: gpt-5.4-mini
+STRATAGEO_CRITIC_MODEL        # default: gpt-5.4
+STRATAGEO_REPORT_MODEL        # default: gpt-5.4-nano
+STRATAGEO_FAST_MODEL          # default: gpt-5.4-nano
 STRATAGEO_MAX_LLM_COST_MODE   # default: low  (low | balanced | high)
 STRATAGEO_ENABLE_MODEL_ESCALATION  # default: false
 
@@ -243,7 +243,8 @@ git checkout backup/pre-v1.1.0-universal-suitability
 
 | Version | Highlights |
 |---|---|
-| **v1.1.0** *(current)* | Universal archetype registry · RawIntent parser · multi-dimensional scoring · uploaded-candidates-only enforcement · cost-aware model routing · honest R/V/C score labels · CHANGELOG below |
+| **v1.1.1** *(current)* | Cost-aware model routing refresh: defaults updated to gpt-5.4-mini / gpt-5.4-nano / gpt-5.4 · optional gpt-5.5 for high-mode critic · no Pro models · fallback env vars added |
+| **v1.1.0** | Universal archetype registry · RawIntent parser · multi-dimensional scoring · uploaded-candidates-only enforcement · cost-aware model routing · honest R/V/C score labels |
 | **v1.0.3** | Spatial Reliability Upgrade: waterfront corridor enforcement · buildability masks · viability gate · competition-whitespace capping · raw-candidate UI gating |
 | **v1.0.2** | Post-execution self-critique / Analyst Review; discrimination-aware scoring; constraints no longer double-encoded |
 | **v1.0.1** | Conversational FastAPI engine on Cloud Run; H3 two-pass MCDA; network routing (ORS); traffic-aware drive catchments |

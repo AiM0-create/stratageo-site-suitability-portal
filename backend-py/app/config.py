@@ -1,8 +1,8 @@
 """Server configuration — all secrets come from env / .env, never from code.
 
 v1.1.0: added configurable model routing + cost-mode tiers.
-All model names default to values already in use in production so
-the app continues to work with zero config changes on existing deployments.
+v1.1.1: refreshed model defaults to the cost-aware gpt-5.4 family.
+All model names are overridable via STRATAGEO_* env vars; no Pro models used.
 """
 from functools import lru_cache
 from typing import Literal
@@ -10,11 +10,11 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.1.0"
+APP_VERSION     = "1.1.1"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "1.1.0"
+ENGINE_VERSION  = "1.1.1"
 SPEC_VERSION    = "2.1"
-RELEASE_NAME    = "Universal Suitability Logic Upgrade"
+RELEASE_NAME    = "Cost-Aware Model Routing Refresh"
 
 
 class Settings(BaseSettings):
@@ -36,23 +36,43 @@ class Settings(BaseSettings):
     # ── CORS / origin ─────────────────────────────────────────────────────────
     frontend_origins: str = "http://localhost:5173"
 
-    # ── Model routing (Phase 9 — cost-aware) ─────────────────────────────────
-    # Defaults match the production models already in use — no env change needed
-    # for existing deployments. Override via STRATAGEO_* env vars to switch.
-    # IMPORTANT: All stronger/more-expensive models must be opt-in via env only.
-    # No GPT-5.x or pro-tier model is ever set as a default here.
-    stratageo_chat_model: str = "gpt-4o"       # conversational consultant turns
-    stratageo_reasoning_model: str = "gpt-4o"  # spec building, hard constraint resolution
-    stratageo_critic_model: str = "gpt-4o"     # post-execution self-critique
-    stratageo_report_model: str = "gpt-4o-mini" # per-candidate explanations + summary
-    stratageo_fast_model: str = "gpt-4o-mini"  # templates, concise descriptions
+    # ── Model routing (v1.1.1 — cost-aware gpt-5.4 family) ───────────────────
+    # Defaults use the cost-efficient gpt-5.4 family.
+    # Override any model via STRATAGEO_* env vars.
+    # NO Pro-tier model is ever a default here.
+    #
+    # low mode (default):
+    #   chat/reasoning = gpt-5.4-mini  (cost-efficient conversational)
+    #   report/fast    = gpt-5.4-nano  (cheapest, for summaries/templates)
+    #   critic         = gpt-5.4       (better reasoning for quality review)
+    #
+    # balanced mode:
+    #   report         = gpt-5.4-mini  (better summaries)
+    #   critic         = gpt-5.4
+    #
+    # high mode (escalation must be explicitly enabled):
+    #   chat/reasoning = gpt-5.4       (stronger reasoning for hard prompts)
+    #   critic         = gpt-5.5       (best available critic; NOT Pro)
+    stratageo_chat_model: str = "gpt-5.4-mini"  # conversational consultant turns
+    stratageo_reasoning_model: str = "gpt-5.4-mini"  # spec building, hard constraint resolution
+    stratageo_critic_model: str = "gpt-5.4"     # post-execution self-critique
+    stratageo_report_model: str = "gpt-5.4-nano"  # per-candidate explanations + summary
+    stratageo_fast_model: str = "gpt-5.4-nano"   # templates, concise descriptions
 
-    # Optional escalation to a "stronger" configured model for difficult prompts.
+    # Optional escalation to stronger models for difficult prompts.
     # Disabled by default — enabling costs more money.
+    # In high mode with escalation=true, gpt-5.5 may be used for critic only.
     stratageo_enable_model_escalation: bool = False
-    # Set to a model name to use when escalation fires (e.g. "gpt-4o" or any
-    # future model the operator has access to). Falls back to chat_model if "".
+    # Model to use when escalation fires. Falls back to chat_model if empty.
+    # Must never be a Pro model.
     stratageo_escalation_model: str = ""
+
+    # Safe fallback models if configured models fail and fallback is enabled.
+    # Fallback is DISABLED by default; only activate when operator has verified
+    # the primary models are unavailable.
+    stratageo_enable_model_fallback: bool = False
+    stratageo_fallback_chat_model: str = "gpt-4o"
+    stratageo_fallback_fast_model: str = "gpt-4o-mini"
 
     # Cost mode controls how many LLM calls the engine makes:
     #   low      — deterministic-first; one LLM call; template explanations; no critic (DEFAULT)
@@ -151,6 +171,7 @@ class Settings(BaseSettings):
             "fastModel":       self.effective_fast_model,
             "escalationModel": self.effective_escalation_model if self.stratageo_enable_model_escalation else None,
             "escalationEnabled": self.stratageo_enable_model_escalation,
+            "fallbackEnabled": self.stratageo_enable_model_fallback,
         }
 
 

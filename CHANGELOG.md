@@ -4,6 +4,27 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.1.1] — 2026-06-24 — Cost-Aware Model Routing Refresh
+
+### Changed
+- **Model defaults updated to gpt-5.4 family** (`backend-py/app/config.py`):
+  - `STRATAGEO_CHAT_MODEL`: `gpt-5.4-mini` (was `gpt-4o`)
+  - `STRATAGEO_REASONING_MODEL`: `gpt-5.4-mini` (was `gpt-4o`)
+  - `STRATAGEO_CRITIC_MODEL`: `gpt-5.4` (was `gpt-4o`)
+  - `STRATAGEO_REPORT_MODEL`: `gpt-5.4-nano` (was `gpt-4o-mini`)
+  - `STRATAGEO_FAST_MODEL`: `gpt-5.4-nano` (was `gpt-4o-mini`)
+  - Escalation in `high` mode may use `gpt-5.5` for critic only (not Pro).
+  - **No Pro models used anywhere.**
+- Added `STRATAGEO_ENABLE_MODEL_FALLBACK`, `STRATAGEO_FALLBACK_CHAT_MODEL`, `STRATAGEO_FALLBACK_FAST_MODEL` — disabled by default.
+- Version bumped: `APP_VERSION`, `ENGINE_VERSION` → `1.1.1`; `package.json` → `1.1.1`.
+
+### Not changed
+- Cost mode default still `low`; critic still off in `low` mode.
+- All v1.1.0 and v1.0.3 features preserved.
+- No dependency changes.
+
+---
+
 ## [1.1.0] — 2026-06-24 — Universal Suitability Logic Upgrade
 
 ### Fixed (Phase 18 — production blocker)
