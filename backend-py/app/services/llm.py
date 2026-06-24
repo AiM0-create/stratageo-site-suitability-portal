@@ -264,12 +264,22 @@ async def chat_turn(
             and new_spec.get("layers")
             and stage in ("framework", "ready")):
         try:
-            canonical = resolve_canonical_archetype(
-                raw_intent.businessTypeKey, raw_intent.rawPrompt,
-            )
+            # v1.2.0 fix: in multi-turn conversations (e.g. turn 2 = "yes"),
+            # last_user is the follow-up, NOT the original business prompt.
+            # Prefer rawIntent stored in the spec from a previous turn, which
+            # carries the original prompt's businessTypeKey and rawPrompt.
+            stored_ri = (new_spec.get("rawIntent") or {}) if isinstance(new_spec, dict) else {}
+            effective_biz_key = stored_ri.get("businessTypeKey") or raw_intent.businessTypeKey
+            effective_raw_prompt = stored_ri.get("rawPrompt") or raw_intent.rawPrompt
+            canonical = resolve_canonical_archetype(effective_biz_key, effective_raw_prompt)
+
+            # Build a minimal RawIntent using the effective (original) prompt info
+            from ..engine.intent_parser import parse_raw_intent as _parse
+            planner_intent = _parse(effective_raw_prompt) if effective_raw_prompt != raw_intent.rawPrompt else raw_intent
+
             new_spec = apply_deterministic_plan(
                 llm_spec=new_spec,
-                intent=raw_intent,
+                intent=planner_intent,
                 canonical=canonical,
                 engine_version=ENGINE_VERSION,
                 cost_mode=settings.cost_mode,
