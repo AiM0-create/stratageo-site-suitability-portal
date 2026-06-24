@@ -2,7 +2,8 @@
 
 **Branch:** `feature/v1.1.0-universal-suitability-logic`
 **Backup tag:** `backup/pre-v1.1.0-universal-suitability`
-**Latest commit:** `9b105dd feat(phase18): enforce uploaded-candidates-only hard constraint`
+**Latest commit:** `3598b81 chore: ignore generated DOCX/PDF documentation artefacts`
+**Previous feature commit:** `9b105dd feat(phase18): enforce uploaded-candidates-only hard constraint`
 **Version:** 1.1.0
 **Date:** 2026-06-24
 
