@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import type { LocationData, AnalysisResult, AnalysisSpec, HeatmapType } from '../types';
+import type { LocationData, AnalysisResult, AnalysisSpec, HeatmapType, EvidenceTrail } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { compareToBenchmark } from '../services/benchmarks';
 
@@ -133,6 +133,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const [expandedLoc, setExpandedLoc] = useState<string | null>(locations[0]?.name ?? null);
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
+  const [evidenceExpandedFactor, setEvidenceExpandedFactor] = useState<string | null>(null);
+  const evidenceTrail: EvidenceTrail | undefined = (result as any).evidenceTrail;
   // The critic judged this ranking untrustworthy → withhold the recommendation
   // (show the reasons, not a confident list). Raw candidates stay behind an opt-in.
   const withheld = (result as any).recommendationWithheld === true;
@@ -683,6 +686,226 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         </div>
         </>
         )}
+        {/* v1.3.0 — Evidence Trail Section */}
+        <div className="drawer-assumptions" style={{ marginTop: 12 }}>
+          <button
+            className="assumptions-toggle"
+            onClick={() => setShowEvidence(!showEvidence)}
+            style={{ background: showEvidence ? '#f0fdf4' : undefined }}
+          >
+            <span>🔍 Evidence Trail {evidenceTrail ? `(v${evidenceTrail.evidenceVersion})` : '(unavailable)'}</span>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showEvidence ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+
+          {showEvidence && !evidenceTrail && (
+            <div className="assumptions-body" style={{ color: '#64748b', fontSize: '0.85em', padding: '8px 0' }}>
+              Evidence trail not available for this analysis (may be a saved or demo result).
+            </div>
+          )}
+
+          {showEvidence && evidenceTrail && (
+            <div className="assumptions-body">
+
+              {/* 1. Analysis Identity */}
+              <div className="assumption-section">
+                <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Analysis Identity</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '3px 8px', fontSize: '0.8em', color: '#374151' }}>
+                  <span style={{ color: '#64748b' }}>Version</span><span>{evidenceTrail.appVersion} (engine {evidenceTrail.engineVersion})</span>
+                  <span style={{ color: '#64748b' }}>Job ID</span><span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{evidenceTrail.jobId.slice(0, 16)}…</span>
+                  <span style={{ color: '#64748b' }}>Analysis ID</span><span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{evidenceTrail.analysisId}</span>
+                  <span style={{ color: '#64748b' }}>Created</span><span>{evidenceTrail.createdAt.replace('T', ' ').replace('Z', ' UTC')}</span>
+                  <span style={{ color: '#64748b' }}>Archetype</span><span style={{ fontFamily: 'monospace' }}>{evidenceTrail.prompt.archetypeKey || '—'}</span>
+                  <span style={{ color: '#64748b' }}>Planning</span><span>{evidenceTrail.prompt.planningMode}</span>
+                  {evidenceTrail.prompt.planningFingerprint && (
+                    <><span style={{ color: '#64748b' }}>Plan FP</span><span style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>{evidenceTrail.prompt.planningFingerprint}</span></>
+                  )}
+                  <span style={{ color: '#64748b' }}>Study area</span><span>{evidenceTrail.studyArea.label || '—'}</span>
+                  <span style={{ color: '#64748b' }}>H3 resolution</span><span>{evidenceTrail.studyArea.h3Resolution}</span>
+                  <span style={{ color: '#64748b' }}>Cells before masks</span><span>{evidenceTrail.studyArea.h3CellCountBeforeMasks}</span>
+                </div>
+              </div>
+
+              {/* 2. Data Sources */}
+              {evidenceTrail.providerQueries.length > 0 && (
+                <div className="assumption-section">
+                  <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Data Sources ({evidenceTrail.providerQueries.length} queries)</span>
+                  <table style={{ width: '100%', fontSize: '0.75em', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                        <th style={{ textAlign: 'left', padding: '2px 4px' }}>Provider</th>
+                        <th style={{ textAlign: 'left', padding: '2px 4px' }}>Purpose</th>
+                        <th style={{ textAlign: 'right', padding: '2px 4px' }}>Features</th>
+                        <th style={{ textAlign: 'center', padding: '2px 4px' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {evidenceTrail.providerQueries.map((q, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '2px 4px', color: '#1d4ed8' }}>{q.provider}</td>
+                          <td style={{ padding: '2px 4px', color: '#374151' }}>{q.queryPurpose}</td>
+                          <td style={{ padding: '2px 4px', textAlign: 'right', fontWeight: 600 }}>{q.featureCount}</td>
+                          <td style={{ padding: '2px 4px', textAlign: 'center' }}>
+                            <span style={{ color: q.responseStatus === 'ok' ? '#059669' : '#d97706', fontSize: '0.9em' }}>
+                              {q.responseStatus === 'ok' ? '✓' : '⚠'}
+                            </span>
+                            {q.warning && <span title={q.warning} style={{ color: '#d97706', marginLeft: 2 }}>!</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 3. Factor Evidence */}
+              {evidenceTrail.factors.length > 0 && (
+                <div className="assumption-section">
+                  <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Factor Evidence</span>
+                  {evidenceTrail.factors.map((f) => (
+                    <div key={f.factorKey} style={{ marginBottom: 6, border: '1px solid #e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+                      <button
+                        style={{ width: '100%', textAlign: 'left', background: '#f8fafc', border: 'none', padding: '4px 8px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                        onClick={() => setEvidenceExpandedFactor(evidenceExpandedFactor === f.factorKey ? null : f.factorKey)}
+                      >
+                        <span style={{ fontSize: '0.8em', fontWeight: 600, color: '#1e293b' }}>
+                          {f.direction === 'positive' ? '▲' : '▼'} {f.displayName}
+                        </span>
+                        <span style={{ fontSize: '0.72em', color: '#64748b' }}>
+                          weight {Math.round(f.weight * 100)}% · {f.catchment} · {f.dataSources[0] || 'Internal'}
+                        </span>
+                      </button>
+                      {evidenceExpandedFactor === f.factorKey && (
+                        <div style={{ padding: '4px 8px 8px', fontSize: '0.75em' }}>
+                          <div style={{ color: '#64748b', marginBottom: 4 }}>
+                            {f.rawValueDescription} · Normalization: {f.normalizationMethod} · Missing: {f.missingDataPolicy}
+                          </div>
+                          {f.appliedToCandidates.length > 0 && (
+                            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                                  <th style={{ textAlign: 'left', padding: '2px 4px' }}>Candidate</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Raw</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Norm</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Weighted</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {f.appliedToCandidates.map((cf, ci) => (
+                                  <tr key={ci} title={cf.explanation} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                    <td style={{ padding: '2px 4px', color: '#374151' }}>{cf.candidateId}</td>
+                                    <td style={{ padding: '2px 4px', textAlign: 'right' }}>{cf.rawCount ?? cf.rawValue ?? '—'}</td>
+                                    <td style={{ padding: '2px 4px', textAlign: 'right' }}>{cf.normalizedScore != null ? cf.normalizedScore.toFixed(1) : '—'}</td>
+                                    <td style={{ padding: '2px 4px', textAlign: 'right', fontWeight: 600 }}>{cf.weightedScore != null ? cf.weightedScore.toFixed(2) : '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 4. Candidate Breakdown */}
+              {evidenceTrail.candidates.length > 0 && (
+                <div className="assumption-section">
+                  <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Candidate Evidence</span>
+                  {evidenceTrail.candidates.map((c) => (
+                    <div key={c.candidateId} style={{ marginBottom: 6, fontSize: '0.78em', padding: '4px 6px', background: c.recommendationStatus === 'excluded_candidate' ? '#fef2f2' : '#f0fdf4', borderRadius: 4, borderLeft: `3px solid ${c.recommendationStatus === 'excluded_candidate' ? '#dc2626' : c.recommendationStatus === 'recommended' ? '#059669' : '#d97706'}` }}>
+                      <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                        {c.rank ? `#${c.rank} ` : ''}{c.label} — {c.recommendationStatus.replace(/_/g, ' ')}
+                        {c.totalScore != null && <span style={{ float: 'right', color: '#64748b' }}>{c.totalScore.toFixed(1)}/10</span>}
+                      </div>
+                      {c.exclusionReasons.length > 0 && (
+                        <div style={{ color: '#dc2626' }}>Excluded: {c.exclusionReasons.join('; ')}</div>
+                      )}
+                      {/* Top drivers */}
+                      {c.factorBreakdown.filter(f => f.weightedScore != null).sort((a, b) => Math.abs(b.weightedScore!) - Math.abs(a.weightedScore!)).slice(0, 3).map((f, i) => (
+                        <div key={i} style={{ color: '#374151' }} title={f.explanation}>
+                          {(f.weightedScore ?? 0) >= 0 ? '+' : ''}{f.weightedScore?.toFixed(2)} {f.candidateId.replace('cand_', 'layer ')}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 5. Exclusion Ledger */}
+              {evidenceTrail.exclusions.length > 0 && (
+                <div className="assumption-section">
+                  <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Exclusion Ledger ({evidenceTrail.exclusions.length} events)</span>
+                  {evidenceTrail.exclusions.map((ex, i) => (
+                    <div key={i} style={{ fontSize: '0.78em', color: '#374151', padding: '2px 0', borderBottom: '1px solid #f1f5f9' }}>
+                      <span style={{ background: '#fee2e2', color: '#991b1b', padding: '1px 4px', borderRadius: 3, marginRight: 4, fontSize: '0.85em' }}>{ex.targetType === 'h3_cell' ? 'Cells' : 'Candidate'}</span>
+                      <span style={{ color: '#dc2626' }}>{ex.source}</span>
+                      <span style={{ color: '#64748b', marginLeft: 4 }}>{ex.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 6. Scoring Formula */}
+              <div className="assumption-section">
+                <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Scoring Formula</span>
+                <p className="assumption-note" style={{ fontFamily: 'monospace', fontSize: '0.8em', background: '#f8fafc', padding: '4px 6px', borderRadius: 4 }}>
+                  {evidenceTrail.scoring.formulaDescription}
+                </p>
+                <div style={{ fontSize: '0.78em', color: '#64748b' }}>
+                  Total weight: {evidenceTrail.scoring.totalWeight.toFixed(2)} · Present weight: {evidenceTrail.scoring.totalPresentWeight.toFixed(2)}
+                  {evidenceTrail.scoring.minViableScore != null && <> · Min viable: {evidenceTrail.scoring.minViableScore}/10</>}
+                  {' · '}{evidenceTrail.scoring.viableCandidates} viable candidate(s)
+                </div>
+                <div style={{ fontSize: '0.78em', color: '#64748b', marginTop: 2 }}>{evidenceTrail.scoring.missingDataHandling}</div>
+              </div>
+
+              {/* 7. Reproducibility */}
+              <div className="assumption-section">
+                <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Reproducibility</span>
+                <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '3px 8px', fontSize: '0.78em', color: '#374151' }}>
+                  <span style={{ color: '#64748b' }}>Snapshot ID</span><span style={{ fontFamily: 'monospace' }}>{evidenceTrail.dataSnapshot.snapshotId}</span>
+                  <span style={{ color: '#64748b' }}>Provider mode</span><span>{evidenceTrail.dataSnapshot.providerMode}</span>
+                  <span style={{ color: '#64748b' }}>Geometry hash</span><span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{evidenceTrail.studyArea.geometryHash || '—'}</span>
+                  <span style={{ color: '#64748b' }}>Plan fingerprint</span><span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{evidenceTrail.prompt.planningFingerprint || '—'}</span>
+                </div>
+                <p className="assumption-note" style={{ fontSize: '0.75em', color: '#64748b', marginTop: 4 }}>
+                  ⚠ Audit reproducible — the plan and scoring formula are stable. Full data replay requires cached provider snapshots.
+                </p>
+                <button
+                  className="assumptions-toggle"
+                  style={{ marginTop: 6, fontSize: '0.8em', padding: '4px 10px' }}
+                  onClick={() => {
+                    const blob = new Blob([JSON.stringify(evidenceTrail, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `stratageo-evidence-${evidenceTrail.jobId.slice(0, 8)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <span>↓ Export Evidence JSON</span>
+                </button>
+              </div>
+
+              {/* Limitations */}
+              {evidenceTrail.limitations.length > 0 && (
+                <div className="assumption-section">
+                  <span className="assumption-label" style={{ color: '#d97706' }}>Known Limitations</span>
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    {evidenceTrail.limitations.slice(0, 6).map((l, i) => (
+                      <li key={i} className="assumption-note" style={{ fontSize: '0.75em', color: '#78350f' }}>{l}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

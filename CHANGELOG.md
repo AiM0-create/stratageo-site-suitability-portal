@@ -4,6 +4,39 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.3.0] — 2026-06-25 — Evidence Trail & Reproducible Site Selection Reports
+
+### Added
+- **EvidenceTrail schema** (`models/evidence.py`): audit-grade Pydantic v2 schema with `ProviderQueryEvidence`, `FactorEvidence`, `CandidateEvidence`, `ExclusionEvidence`, `ScoringEvidence`, `DataSnapshotEvidence`, `StudyAreaEvidence`.
+- **Secret scrubbing** (`safe_dict()` + `_scrub_secrets()`): `evidenceTrail` payload recursively removes any key matching `api_key|authorization|token|secret|password`.
+- **Evidence builder** (`engine/evidence_builder.py`): `QueryTracker` + builder functions for all evidence types.
+- **Provider query tracking**: OSM Overpass (main fetch + water), Google Places (primary + backup), ORS (isochrones) — all recorded with feature counts, timestamps, bbox params (no secrets).
+- **Exclusion ledger**: explicit `ExclusionEvidence` records for every H3-cell-batch mask (railway, water, corridor, ghat, protected) and every excluded candidate.
+- **Factor evidence**: per-factor raw count, normalized score, and weighted contribution per candidate.
+- **Candidate evidence**: per-candidate recommendation status, score breakdown, constraint checks, exclusion reasons.
+- **Scoring evidence**: formula description, total/present weight, normalization method per factor, recommendation status rules, min viable score.
+- **API endpoints**: `GET /api/v2/analyses/{jobId}/evidence` and `GET /api/v2/analyses/{jobId}/evidence.json`.
+- **Evidence Trail section** in ResultsDrawer: collapsible with 7 sub-sections (identity, data sources, factor evidence, candidate breakdown, exclusion ledger, scoring formula, reproducibility + JSON export).
+- **Evidence JSON export button** in UI: client-side download of `safe_dict()` evidence with no secrets.
+- **TypeScript interfaces** for all evidence trail types in `src/types/index.ts`.
+- **Config flag**: `enable_evidence_trail = True`.
+- 36 new tests in `tests/test_evidence_trail.py` (34 pass, 2 skip).
+- Docs: `V1.3_EVIDENCE_TRAIL_AUDIT.md`, `V1.3_EVIDENCE_SCHEMA.md`, `V1.3_REPRODUCIBILITY_LIMITATIONS.md`, `RELEASE_NOTES_v1.3.0.md`, `DEPLOYMENT_CHECKLIST_v1.3.0.md`.
+
+### Changed
+- `config.py`: APP_VERSION/ENGINE_VERSION → 1.3.0; RELEASE_NAME updated.
+- `tests/test_config_v110.py`: version assertion updated to 1.3.0.
+- `package.json`: version → 1.3.0.
+- `README.md`: current version updated.
+
+### Not changed
+- All v1.2.0 deterministic planning safeguards preserved (planningFingerprint, canonical archetypes, temperature=0, seed=42).
+- SPEC_VERSION remains "2.2".
+- Model routing defaults unchanged.
+- All v1.2.0 and earlier tests continue to pass.
+
+---
+
 ## [1.2.0] — 2026-06-24 — Deterministic Planning & Constraint Enforcement Upgrade
 
 ### Added
