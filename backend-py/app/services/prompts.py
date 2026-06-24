@@ -10,13 +10,13 @@ import json
 
 from .archetypes import playbook_for_prompt
 from .capabilities import capability_manifest
-from ..engine.archetypes import playbook_for_prompt as engine_playbook
+from ..engine.archetypes import playbook_for_prompt as _engine_playbook_fn
 
 
 def chat_system_prompt() -> str:
     manifest = json.dumps(capability_manifest(), indent=2)
     playbook = playbook_for_prompt()
-    engine_playbook = engine_playbook()
+    engine_playbook = _engine_playbook_fn()
     return f"""You are the senior location intelligence consultant for Stratageo, a professional
 site-suitability platform for India. You advise clients the way a top-tier consulting
 partner would: you make defensible assumptions instead of asking for inputs, you choose
