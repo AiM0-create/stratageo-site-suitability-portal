@@ -266,11 +266,14 @@ async def chat_turn(
         try:
             # v1.2.0 fix: in multi-turn conversations (e.g. turn 2 = "yes"),
             # last_user is the follow-up, NOT the original business prompt.
-            # Prefer rawIntent stored in the spec from a previous turn, which
-            # carries the original prompt's businessTypeKey and rawPrompt.
-            stored_ri = (new_spec.get("rawIntent") or {}) if isinstance(new_spec, dict) else {}
-            effective_biz_key = stored_ri.get("businessTypeKey") or raw_intent.businessTypeKey
-            effective_raw_prompt = stored_ri.get("rawPrompt") or raw_intent.rawPrompt
+            # Read rawIntent from the INCOMING spec (the client's spec from the
+            # previous turn), which carries the original prompt's intent.
+            # NOTE: read from `spec` (the parameter), NOT from `new_spec` (which
+            # was already modified by `setdefault("rawIntent", raw_intent.to_dict())`
+            # using the current "yes" rawIntent).
+            incoming_ri = (spec or {}).get("rawIntent") or {} if isinstance(spec, dict) else {}
+            effective_biz_key = incoming_ri.get("businessTypeKey") or raw_intent.businessTypeKey
+            effective_raw_prompt = incoming_ri.get("rawPrompt") or raw_intent.rawPrompt
             canonical = resolve_canonical_archetype(effective_biz_key, effective_raw_prompt)
 
             # Build a minimal RawIntent using the effective (original) prompt info
