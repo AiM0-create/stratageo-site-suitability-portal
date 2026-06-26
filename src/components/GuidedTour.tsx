@@ -1,5 +1,25 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
+const TOUR_SEEN_KEY = 'sg_tour_seen_v14';
+
+/** Returns true if this is the user's first visit (tour not yet seen). */
+export function isTourFirstVisit(): boolean {
+  try {
+    return !localStorage.getItem(TOUR_SEEN_KEY);
+  } catch {
+    return false;
+  }
+}
+
+/** Mark the tour as seen so it won't auto-start again. */
+export function markTourSeen(): void {
+  try {
+    localStorage.setItem(TOUR_SEEN_KEY, '1');
+  } catch {
+    // localStorage unavailable — non-fatal
+  }
+}
+
 interface TourStep {
   selector: string;
   title: string;
@@ -114,25 +134,49 @@ export const GuidedTour: React.FC<GuidedTourProps> = ({ active, onEnd, hasResult
 
     const pos = currentStep.position;
     const tt: React.CSSProperties = {};
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const TW = Math.min(320, vw - 24); // tooltip width clamped for mobile
+    const isMobile = vw < 600;
 
-    if (pos === 'bottom') {
-      tt.top = rect.bottom + pad + 8;
-      tt.left = Math.max(12, rect.left + rect.width / 2 - 160);
+    if (isMobile) {
+      // On mobile always place at bottom center — avoids off-screen clipping
+      tt.bottom = 16;
+      tt.left = 12;
+      tt.right = 12;
+      tt.width = 'auto';
+    } else if (pos === 'bottom') {
+      tt.top = Math.min(rect.bottom + pad + 8, vh - 180);
+      tt.left = Math.max(12, Math.min(rect.left + rect.width / 2 - TW / 2, vw - TW - 12));
     } else if (pos === 'top') {
-      tt.bottom = window.innerHeight - rect.top + pad + 8;
-      tt.left = Math.max(12, rect.left + rect.width / 2 - 160);
+      const preferredBottom = vh - rect.top + pad + 8;
+      tt.bottom = Math.min(preferredBottom, vh - 12);
+      tt.left = Math.max(12, Math.min(rect.left + rect.width / 2 - TW / 2, vw - TW - 12));
     } else if (pos === 'left') {
-      tt.top = Math.max(12, rect.top + rect.height / 2 - 60);
-      tt.right = window.innerWidth - rect.left + pad + 8;
+      const rightOfTooltip = rect.left - pad - 8;
+      if (rightOfTooltip < TW + 12) {
+        // Not enough space on left → fall to bottom
+        tt.top = Math.min(rect.bottom + pad + 8, vh - 180);
+        tt.left = Math.max(12, Math.min(rect.left, vw - TW - 12));
+      } else {
+        tt.top = Math.max(12, Math.min(rect.top + rect.height / 2 - 80, vh - 200));
+        tt.right = vw - rect.left + pad + 8;
+      }
     } else if (pos === 'right') {
-      tt.top = Math.max(12, rect.top + rect.height / 2 - 60);
-      tt.left = rect.right + pad + 8;
+      const leftOfTooltip = rect.right + pad + 8;
+      if (leftOfTooltip + TW > vw - 12) {
+        // Not enough space on right → fall to bottom
+        tt.top = Math.min(rect.bottom + pad + 8, vh - 180);
+        tt.left = Math.max(12, Math.min(rect.left, vw - TW - 12));
+      } else {
+        tt.top = Math.max(12, Math.min(rect.top + rect.height / 2 - 80, vh - 200));
+        tt.left = leftOfTooltip;
+      }
     }
 
-    // Keep tooltip on screen
-    if (tt.left && typeof tt.left === 'number') {
-      tt.left = Math.min(tt.left, window.innerWidth - 340);
-    }
+    // Final clamp: never overflow viewport
+    if (typeof tt.left === 'number') tt.left = Math.min(tt.left, vw - TW - 12);
+    if (typeof tt.top === 'number')  tt.top  = Math.min(tt.top,  vh - 180);
 
     setTooltipStyle(tt);
     setArrowClass(`tour-arrow-${pos}`);
@@ -159,28 +203,33 @@ export const GuidedTour: React.FC<GuidedTourProps> = ({ active, onEnd, hasResult
 
   const isLast = step >= availableSteps.length - 1;
 
+  const handleEnd = () => {
+    markTourSeen();
+    onEnd();
+  };
+
   return (
     <>
       {/* Overlay */}
-      <div className="tour-overlay" onClick={onEnd} />
+      <div className="tour-overlay" onClick={handleEnd} />
 
       {/* Highlight cutout */}
       <div className="tour-highlight" style={highlightStyle} />
 
       {/* Tooltip */}
-      <div className={`tour-tooltip ${arrowClass}`} style={tooltipStyle} ref={tooltipRef}>
+      <div className={`tour-tooltip ${arrowClass}`} style={{ ...tooltipStyle, maxWidth: 'min(320px, calc(100vw - 24px))' }} ref={tooltipRef}>
         <div className="tour-step-counter">{step + 1} of {availableSteps.length}</div>
         <h4 className="tour-title">{currentStep.title}</h4>
         <p className="tour-desc">{currentStep.description}</p>
         <div className="tour-actions">
-          <button className="tour-skip" onClick={onEnd}>Skip tour</button>
+          <button className="tour-skip" onClick={handleEnd}>Skip tour</button>
           <div className="tour-nav">
             {step > 0 && (
               <button className="tour-btn tour-btn-prev" onClick={() => setStep(s => s - 1)}>Back</button>
             )}
             <button
               className="tour-btn tour-btn-next"
-              onClick={() => isLast ? onEnd() : setStep(s => s + 1)}
+              onClick={() => isLast ? handleEnd() : setStep(s => s + 1)}
             >
               {isLast ? 'Done' : 'Next'}
             </button>

@@ -383,7 +383,7 @@ DARK_KITCHEN = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,   # drive-catchment needs larger cells to avoid false precision
     factors=(
         CanonicalFactor(
             key="residential_delivery_demand",
@@ -442,7 +442,7 @@ CLINIC_HEALTHCARE = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,   # drive-catchment healthcare; district-level resolution
     factors=(
         CanonicalFactor(
             key="residential_population",
@@ -498,7 +498,7 @@ WAREHOUSE_LOGISTICS = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,   # large footprints; district-level is more appropriate
     factors=(
         CanonicalFactor(
             key="highway_arterial_access",
@@ -556,7 +556,7 @@ EV_CHARGING = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,   # city/highway network coverage; neighbourhood not micro-market
     factors=(
         CanonicalFactor(
             key="highway_arterial_proximity",
@@ -782,7 +782,7 @@ LARGE_FORMAT_RETAIL = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=5,
-    grid_resolution=9,
+    grid_resolution=8,   # large-format retail; district-level catchment
     factors=(
         CanonicalFactor(
             key="drive_residential_demand",

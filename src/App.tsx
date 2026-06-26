@@ -20,7 +20,7 @@ import { MapView } from './components/MapView';
 import { FloatingAssistant } from './components/FloatingAssistant';
 import { ResultsDrawer } from './components/ResultsDrawer';
 import { MethodologyDialog } from './components/MethodologyDialog';
-import { GuidedTour } from './components/GuidedTour';
+import { GuidedTour, isTourFirstVisit, markTourSeen } from './components/GuidedTour';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 import { LoginScreen } from './components/LoginScreen';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -74,6 +74,17 @@ const App: React.FC = () => {
     setChatStage(persisted ? 'framework' : 'chat');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSession.id]);
+
+  // ─── Tour: auto-start for new non-admin users on first login ───
+  useEffect(() => {
+    if (!user || authLoading) return;
+    if (user.isAdmin) return;           // admins skip the auto-tour
+    if (isTourFirstVisit()) {
+      // Small delay to let the UI settle before highlighting elements
+      const t = setTimeout(() => setTourActive(true), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [user, authLoading]);
 
   // ─── Dark mode ───
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -1292,7 +1303,7 @@ const App: React.FC = () => {
 
       <GuidedTour
         active={tourActive}
-        onEnd={() => setTourActive(false)}
+        onEnd={() => { markTourSeen(); setTourActive(false); }}
         hasResults={!!result}
       />
 
