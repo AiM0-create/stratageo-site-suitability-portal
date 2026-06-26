@@ -65,11 +65,15 @@ P7. FEASIBILITY BEFORE RECOMMENDATIONS — THE GATE. Before designing ANY plan, 
     the user's constraints and check whether the HARD constraints are jointly satisfiable:
     - "must" / "cannot exceed" / "only" → HARD constraint. "prefer" / "ideally" → SOFT.
     - Statuses: feasible | tradeoffs | not_feasible | insufficient_data → spec.feasibility.
-    - NOT FEASIBLE (hard constraints contradict each other or known market reality, e.g.
-      "10,000 sq ft on a primary arterial in Sector V at rent ≤ ₹20/sq ft"): DO NOT
-      produce a plan or ranked candidates. Say which constraints conflict, give the
-      MINIMUM relaxations (raise ceiling / secondary roads / wider area / smaller
-      footprint), and offer the nearest feasible alternative. Never rank fake "top 3"s.
+    - NOT FEASIBLE (hard constraints directly contradict each other, e.g.
+      "within 500m of a metro AND strictly outside 2km of any metro" — logically
+      impossible; or "warehouse on a residential-only plot with no conversion allowed"):
+      DO NOT produce a plan or ranked candidates. Say which constraints contradict,
+      give the MINIMUM relaxations, and offer the nearest feasible alternative.
+      Never rank fake results. NOTE: "rent ≤ ₹20/sq ft" or any other financial/
+      market constraint is NEVER "not_feasible" by itself — it is UNVALIDATABLE
+      (data unavailable). Proceed with status "tradeoffs" and mark rent as
+      requiring site-visit verification. See the UNVALIDATABLE rule below.
     - INSUFFICIENT DATA: never pretend certainty. Name what's missing; proceed only with
       clearly labeled proxies if defensible.
     - TRADEOFFS / FEASIBLE: proceed with the normal workflow, noting the tradeoffs.
@@ -406,10 +410,11 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
   "constraints": [
     // Extract EVERY distinct constraint the user stated — footprint/size, road class,
     // location scope, budget/rent, timing, brand rules. One row each, never merged.
-    // e.g. the supermarket example yields FOUR rows: 10,000 sq ft footprint (hard),
-    // primary arterial frontage (hard), Sector V only (hard), rent ≤ ₹20/sq ft (hard).
-    {{"constraint": "rent ≤ ₹20/sq ft", "type": "hard", "status": "unvalidatable",
-      "notes": "no rent data in any available layer — cannot be proven"}}
+    // Extract EVERY distinct constraint the user stated (footprint/size, road class,
+    // location scope, budget/rent, timing, brand rules). One row each, never merged.
+    // Rent / land-price constraints are ALWAYS "unvalidatable" — never "not_feasible".
+    {{"constraint": "rent ≤ ₹X/sq ft", "type": "hard", "status": "unvalidatable",
+      "notes": "no rent data in any available layer — flagged for broker/site verification"}}
     // type: "hard" (must/cannot/only) | "soft" (prefer/ideally)
     // status: "satisfiable" | "conflicting" | "unvalidatable"
   ],

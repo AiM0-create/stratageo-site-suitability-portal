@@ -17,6 +17,35 @@ class StartRequest(BaseModel):
     spec: dict
 
 
+def _repair_spec_layers(spec_dict: dict) -> tuple[dict, list[str]]:
+    """Strip layers whose source is entirely empty (no tags and no types).
+
+    Returns the patched spec dict and a list of dropped layer names.
+    This prevents 422 from empty-source layers while preserving all
+    valid layers; dropped layers are reported in notes/fallbacks.
+    """
+    warnings: list[str] = []
+    layers = spec_dict.get("layers") or []
+    good: list[dict] = []
+    for layer in layers:
+        src = layer.get("source") or {}
+        provider = src.get("provider", "")
+        tags = src.get("tags") or []
+        types = src.get("types") or []
+        if provider == "osm" and not tags:
+            warnings.append(f"Layer '{layer.get('name','?')}': empty OSM tags — dropped")
+            continue
+        if provider == "google_places" and not types:
+            warnings.append(f"Layer '{layer.get('name','?')}': empty Places types — dropped")
+            continue
+        good.append(layer)
+    if warnings:
+        spec_dict = dict(spec_dict)
+        spec_dict["layers"] = good
+        logger.warning("Spec repair: %s", "; ".join(warnings))
+    return spec_dict, warnings
+
+
 @router.post("/api/v2/analyses")
 async def start_analysis(req: StartRequest):
     # Feasibility gate FIRST (raw check) — an infeasible plan often has no layers,
@@ -28,8 +57,20 @@ async def start_analysis(req: StartRequest):
             "conflicts": feas.get("conflicts", []),
             "relaxationOptions": feas.get("relaxationOptions", []),
         })
+
+    # Repair: drop layers with empty OSM tags or empty Places types so they don't
+    # produce a cryptic 422. The engine already handles layers with no data gracefully
+    # (has_data=False → excluded from scoring, reported in notes).
+    spec_dict, repair_warnings = _repair_spec_layers(dict(req.spec))
+    if not spec_dict.get("layers"):
+        raise HTTPException(422, (
+            "spec has no valid layers after removing empty-source layers. "
+            "Ensure each OSM layer has at least one tag and each Google Places "
+            "layer has at least one type. Details: " + "; ".join(repair_warnings)
+        ))
+
     try:
-        spec = SpecV2.model_validate(req.spec)
+        spec = SpecV2.model_validate(spec_dict)
     except ValidationError as e:
         raise HTTPException(422, f"spec validation failed: {e.errors()[:5]}") from e
     job_id = jobs.start_job(spec)

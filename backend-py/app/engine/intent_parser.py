@@ -103,6 +103,8 @@ _BIZ_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("hotel",               re.compile(r"\b(hotel|lodging|accommodation|guesthouse|inn)\b", re.I)),
     ("office",              re.compile(r"\b(office|coworking|co.?working|commercial\s+space|business\s+park|corporate)\b", re.I)),
     ("industrial",          re.compile(r"\b(industrial|manufacturing|factory|plant|production\s+facility|SEZ)\b", re.I)),
+    ("discount_supermarket", re.compile(r"\b(discount\s+supermarket|hypermarket|big[\s\-]box|discount\s+store|cash\s+and\s+carry|wholesale\s+market)\b", re.I)),
+    ("supermarket",         re.compile(r"\b(supermarket|super\s+market|grocery\s+store|grocery\s+chain)\b", re.I)),
     ("retail",              re.compile(r"\b(retail|store|shop|showroom|outlet|mall|market)\b", re.I)),
 ]
 
