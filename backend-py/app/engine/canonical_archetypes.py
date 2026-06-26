@@ -20,6 +20,72 @@ import hashlib
 import json
 
 
+# ── Default OSM tags and Google Places types per canonical factor key ─────────
+# Used in to_layers_dict() to ensure layers always have at least one valid
+# source tag/type — preventing SpecV2 validation errors when the LLM hasn't
+# yet filled in the exact tags. LLM output overwrites these at planning time.
+_DEFAULT_OSM_TAGS: dict[str, list[str]] = {
+    # demand / population proxies
+    "student_catchment_proxy":      ["amenity=school", "amenity=college", "amenity=university"],
+    "pedestrian_transit_access":    ["railway=station", "public_transport=station", "highway=bus_stop"],
+    "pedestrian_footfall":          ["highway=pedestrian", "highway=footway", "amenity=bus_station"],
+    "transit_access":               ["railway=station", "public_transport=station"],
+    "transit_catchment":            ["railway=station", "public_transport=station", "highway=bus_stop"],
+    "residential_population":       ["building=residential", "building=apartments", "landuse=residential"],
+    "drive_residential_demand":     ["building=residential", "building=apartments", "landuse=residential"],
+    "office_daytime_demand":        ["office=yes", "building=office", "landuse=commercial"],
+    "young_family_residential":     ["building=residential", "building=apartments"],
+    "residential_delivery_demand":  ["building=residential", "building=apartments", "landuse=residential"],
+    "office_delivery_demand":       ["office=yes", "building=commercial", "landuse=commercial"],
+    # road / logistics
+    "road_access":                  ["highway=primary", "highway=secondary", "highway=tertiary"],
+    "road_delivery_access":         ["highway=primary", "highway=secondary"],
+    "highway_arterial_access":      ["highway=primary", "highway=trunk", "highway=secondary"],
+    "highway_arterial_proximity":   ["highway=primary", "highway=trunk"],
+    "commercial_land_density":      ["landuse=commercial", "landuse=retail", "building=commercial"],
+    # exclusion / negative proxies
+    "frontage_barrier_penalty":     ["railway=rail", "highway=motorway", "barrier=wall"],
+    "industrial_zone_proximity":    ["landuse=industrial", "building=industrial"],
+    "residential_conflict_risk":    ["building=residential", "landuse=residential"],
+    "peer_warehouse_cluster":       ["building=warehouse", "landuse=industrial"],
+    # accessibility
+    "walk_accessibility":           ["highway=footway", "highway=pedestrian", "highway=path"],
+    "transit_accessibility":        ["railway=station", "public_transport=station"],
+    "destination_accessibility":    ["highway=primary", "highway=secondary"],
+    # other
+    "demand_density_proxy":         ["building=yes", "landuse=commercial", "amenity=place_of_worship"],
+    "generic_competition":          ["shop=supermarket", "amenity=marketplace", "shop=convenience"],
+    "park_safe_play":               ["leisure=park", "leisure=playground"],
+    "power_grid_proximity":         ["power=line", "power=minor_line"],
+    "tourist_leisure_footfall":     ["tourism=attraction", "leisure=park", "amenity=theatre"],
+}
+
+_DEFAULT_PLACES_TYPES: dict[str, list[str]] = {
+    # competition layers
+    "direct_cafe_competition":      ["cafe", "coffee_shop"],
+    "direct_retail_competition":    ["store", "shopping_mall"],
+    "direct_restaurant_competition":["restaurant"],
+    "supermarket_competition":      ["supermarket", "grocery_or_supermarket"],
+    "kitchen_competition":          ["restaurant", "meal_delivery"],
+    "clinic_saturation":            ["doctor", "hospital", "pharmacy"],
+    "preschool_gap":                ["school", "primary_school"],
+    # co-tenancy / anchor
+    "commercial_cotenancy":         ["store", "shopping_mall", "restaurant"],
+    "retail_cotenancy_anchor":      ["shopping_mall", "store", "department_store"],
+    "premium_cotenancy":            ["store", "shopping_mall"],
+    "healthcare_ecosystem":         ["hospital", "pharmacy", "doctor"],
+    "commercial_stopover_anchors":  ["restaurant", "cafe", "gas_station"],
+    # demand
+    "pedestrian_footfall":          ["restaurant", "store", "cafe"],
+    "tourist_leisure_footfall":     ["tourist_attraction", "museum", "park"],
+    # competition gap
+    "ev_charger_gap":               ["electric_vehicle_charging_station"],
+    # fallback
+    "generic_competition":          ["store", "supermarket", "restaurant"],
+    "peer_warehouse_cluster":       ["storage", "moving_company"],
+}
+
+
 @dataclass(frozen=True)
 class CanonicalFactor:
     key: str                        # stable machine identifier
@@ -74,18 +140,29 @@ class CanonicalArchetype:
             if f.catchment_type == "euclidean":
                 catchment = {"type": "euclidean", "meters": f.catchment_meters or 500}
             elif f.catchment_type == "drive":
-                catchment = {"type": "drive", "minutes": f.catchment_minutes or 15}
+                catchment = {"type": "drive", "minutes": f.catchment_minutes or 15,
+                             "trafficAware": f.catchment_type == "drive"}
             else:
                 catchment = {"type": "walk", "minutes": f.catchment_minutes or 10}
+
+            provider = "google_places" if f.data_priority[0] == "google_places" else "osm"
+
+            # Default tags/types per factor key — prevents empty-source validation errors.
+            # LLM may override these; they are a safe fallback, never hardcoded as final.
+            default_osm_tags = _DEFAULT_OSM_TAGS.get(f.key, ["building=yes"])
+            default_places_types = _DEFAULT_PLACES_TYPES.get(f.key, ["point_of_interest"])
+
+            if provider == "google_places":
+                source = {"provider": "google_places", "types": default_places_types, "keyword": None}
+            else:
+                source = {"provider": "osm", "tags": default_osm_tags}
+
             layers.append({
                 "id": f"C_{f.key}",
                 "name": f.display_name,
                 "weight": round(f.weight / total, 4),
                 "direction": f.direction,
-                "source": {
-                    "provider": "google_places" if f.data_priority[0] == "google_places" else "osm",
-                    "tags": [],   # filled by LLM for OSM; types filled by LLM for Places
-                },
+                "source": source,
                 "catchment": catchment,
                 "confidence": f.confidence_default,
                 "required": f.required,
@@ -693,6 +770,81 @@ GENERIC_FALLBACK = CanonicalArchetype(
 )
 
 
+# ── Large-format retail / discount supermarket archetype ─────────────────────
+# Destination business: people DRIVE to supermarkets. Arterial road access is
+# enforced via corridors (P7f), NOT a scoring layer. Scoring factors: drive-
+# reachable demand, supermarket competition, commercial co-tenancy quality.
+# Footprint caveat: no parcel-level data — proxy via commercial land density.
+LARGE_FORMAT_RETAIL = CanonicalArchetype(
+    key="large_format_retail",
+    display_name="Large-Format Retail / Discount Supermarket",
+    analysis_mode="catchment_accessibility",
+    site_claim_level="micro_market_zone",
+    recommendation_mode_default="candidate_zones",
+    top_n_default=5,
+    grid_resolution=9,
+    factors=(
+        CanonicalFactor(
+            key="drive_residential_demand",
+            display_name="Drive-reachable residential demand",
+            direction="positive",
+            weight=38,
+            catchment_type="drive",
+            catchment_minutes=12,
+            data_priority=("osm",),
+            scoring_curve="positive_linear",
+            confidence_default="medium",
+            proxy_warning="Residential building count proxy for drive-catchment population; actual household data unavailable.",
+        ),
+        CanonicalFactor(
+            key="supermarket_competition",
+            display_name="Supermarket / grocery competition",
+            direction="negative",
+            weight=28,
+            catchment_type="drive",
+            catchment_minutes=10,
+            data_priority=("google_places",),
+            scoring_curve="inverted_u_or_penalty",
+            confidence_default="medium",
+            proxy_warning="Supermarket density from Places; discount-format identification unreliable in OSM.",
+        ),
+        CanonicalFactor(
+            key="commercial_land_density",
+            display_name="Commercial / mixed-use land density",
+            direction="positive",
+            weight=20,
+            catchment_type="euclidean",
+            catchment_meters=400,
+            data_priority=("osm",),
+            scoring_curve="positive_linear",
+            confidence_default="medium",
+            proxy_warning=(
+                "OSM commercial-landuse density as proxy for large-format parcel availability. "
+                "10,000 sq ft exact footprint cannot be verified without plot-level data; "
+                "flag for field/broker check."
+            ),
+        ),
+        CanonicalFactor(
+            key="office_daytime_demand",
+            display_name="Office / daytime worker demand",
+            direction="positive",
+            weight=14,
+            catchment_type="drive",
+            catchment_minutes=10,
+            data_priority=("osm",),
+            scoring_curve="positive_linear",
+            confidence_default="medium",
+        ),
+    ),
+    hard_exclusion_defaults=("waterway=river", "railway=rail"),
+    misleading_variables=(
+        "pedestrian footfall (supermarkets are drive-destination, not walk-by)",
+        "premium co-tenancy (discount format targets value-seeking shoppers)",
+        "rent data (not available in any OSM/Places layer — must be site-verified)",
+    ),
+)
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 _REGISTRY: dict[str, CanonicalArchetype] = {
@@ -700,32 +852,35 @@ _REGISTRY: dict[str, CanonicalArchetype] = {
         STUDENT_QSR_CAFE, GENERIC_QSR_CAFE, PREMIUM_RESTAURANT,
         DARK_KITCHEN, CLINIC_HEALTHCARE, WAREHOUSE_LOGISTICS,
         EV_CHARGING, RETAIL_STORE, PRESCHOOL_SCHOOL, GENERIC_FALLBACK,
+        LARGE_FORMAT_RETAIL,
     ]
 }
 
 # Maps from intent_parser archetype keys to canonical registry keys
 _PARSER_TO_CANONICAL: dict[str, str] = {
-    "student_qsr_cafe":  "student_qsr_cafe",
-    "qsr_restaurant":    "generic_qsr_cafe",
-    "cafe":              "generic_qsr_cafe",
-    "restaurant":        "generic_qsr_cafe",
-    "premium_restaurant":"premium_restaurant",
-    "dark_kitchen":      "dark_kitchen",
-    "clinic":            "clinic_healthcare",
-    "maternity_clinic":  "clinic_healthcare",
-    "hospital":          "clinic_healthcare",
-    "preschool":         "preschool_school",
-    "school":            "preschool_school",
-    "warehouse":         "warehouse_logistics",
-    "logistics":         "warehouse_logistics",
-    "ev_charger":        "ev_charger",
-    "retail":            "retail_store",
-    "gym":               "generic",
-    "hotel":             "generic",
-    "resort":            "generic",
-    "office":            "generic",
-    "industrial":        "generic",
-    "generic":           "generic",
+    "student_qsr_cafe":    "student_qsr_cafe",
+    "qsr_restaurant":      "generic_qsr_cafe",
+    "cafe":                "generic_qsr_cafe",
+    "restaurant":          "generic_qsr_cafe",
+    "premium_restaurant":  "premium_restaurant",
+    "dark_kitchen":        "dark_kitchen",
+    "clinic":              "clinic_healthcare",
+    "maternity_clinic":    "clinic_healthcare",
+    "hospital":            "clinic_healthcare",
+    "preschool":           "preschool_school",
+    "school":              "preschool_school",
+    "warehouse":           "warehouse_logistics",
+    "logistics":           "warehouse_logistics",
+    "ev_charger":          "ev_charger",
+    "discount_supermarket":"large_format_retail",
+    "supermarket":         "large_format_retail",
+    "retail":              "retail_store",
+    "gym":                 "generic",
+    "hotel":               "generic",
+    "resort":              "generic",
+    "office":              "generic",
+    "industrial":          "generic",
+    "generic":             "generic",
 }
 
 
