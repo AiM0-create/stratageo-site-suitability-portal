@@ -143,18 +143,22 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   // Spatial Reliability Upgrade v1.0.3 — viability gate surfacing.
   const analysisStatus: string | undefined = (result as any).analysisStatus;
   const insufficient = analysisStatus === 'insufficient_viable_land';
-  const isProvisional = analysisStatus === 'provisional';
   const suggestions: string[] = (result as any).suggestions || [];
   const maskStats: Record<string, number> = (result as any).maskStats || {};
   // Phase 17 — critic and constraint enforcement transparency
   const criticEnabled: boolean = (result as any).criticEnabled === true;
   const constraintEnforcementLevel: string = (result as any).constraintEnforcementLevel || 'advisory';
   const untracedConstraints: string[] = (result as any).untracedConstraints || [];
-  // v1.4.0 — constraint policy + validation checklist
+  // v1.4.0 — constraint policy + validation checklist (must be before isProvisional)
   const constraintPolicy: any = (result as any).constraintPolicy || {};
   const unverifiedConstraints: string[] = constraintPolicy.unverifiedHardConstraints || [];
   const provisionalReasons: string[] = constraintPolicy.provisionalReasons || [];
   const validationChecklist: any[] = constraintPolicy.validationChecklist || [];
+  // v1.4.0: provisional = constraintPolicy.hasUnverifiableConstraints, not analysisStatus.
+  // det_critic sets verdict="weak" when constraints are unverifiable, so analysisStatus is
+  // always "weak" — the provisional banner must read constraintPolicy directly.
+  const isProvisional = (result as any).constraintPolicy?.hasUnverifiableConstraints === true
+    || unverifiedConstraints.length > 0;
   const siteClaimLevel: string = (result as any).siteClaimLevel || 'micro_market_zone';
   const disclaimer: string = (result as any).disclaimer || '';
   // v1.4.0 — data coverage

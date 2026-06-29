@@ -1214,10 +1214,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     elif det_verdict == "unreliable":
         analysis_status = "unreliable"
     elif det_verdict == "weak" or n_viable == 0:
+        # "weak" covers unverifiable constraints (det_critic flags them), so analysis_status
+        # is "weak" rather than "provisional". The separate _policy field carries the full
+        # provisional metadata for the UI.
         analysis_status = "weak"
-    elif _policy.hasUnverifiableConstraints:
-        # Unverifiable constraints → analysis runs but result is provisional
-        analysis_status = "provisional"
     else:
         analysis_status = "reliable"
 
