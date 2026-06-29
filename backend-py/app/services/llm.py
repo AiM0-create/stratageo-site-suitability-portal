@@ -234,10 +234,6 @@ async def chat_turn(
             parsed["specStatus"] = "draft"
 
     spec_status = parsed.get("specStatus", "empty" if not new_spec else "draft")
-    # Strip layers with empty OSM tags / Places types before validating so they
-    # don't cause specValid=False → chatReady=False → "Start analysis" never appears.
-    if isinstance(new_spec, dict):
-        new_spec = _strip_empty_source_layers(new_spec)
     valid, err = validate_spec(new_spec)
     # A carried-forward spec that validates fully is complete regardless of label
     if valid and spec_status != "complete":

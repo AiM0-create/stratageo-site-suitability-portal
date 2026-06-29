@@ -19,6 +19,57 @@ import copy
 import hashlib
 import json
 
+# ── Default OSM tags and Google Places types per canonical factor key ─────────
+# Used in to_layers_dict() so that layers always have at least one valid source
+# tag/type after the deterministic planner runs. Without these, every canonical
+# layer gets tags:[] which fails SpecV2 validation → specValid=False → chatReady=
+# False → the "Start analysis" button never appears. LLM output overwrites these
+# at planning time via the "CURRENT SPEC DRAFT modify, don't restart" mechanism.
+_DEFAULT_OSM_TAGS: dict[str, list[str]] = {
+    "student_catchment_proxy":      ["amenity=school", "amenity=college", "amenity=university"],
+    "pedestrian_transit_access":    ["railway=station", "public_transport=station", "highway=bus_stop"],
+    "pedestrian_footfall":          ["highway=pedestrian", "highway=footway", "amenity=bus_station"],
+    "transit_access":               ["railway=station", "public_transport=station"],
+    "transit_catchment":            ["railway=station", "public_transport=station", "highway=bus_stop"],
+    "transit_accessibility":        ["railway=station", "public_transport=station"],
+    "residential_population":       ["building=residential", "building=apartments", "landuse=residential"],
+    "young_family_residential":     ["building=residential", "building=apartments"],
+    "residential_delivery_demand":  ["building=residential", "building=apartments", "landuse=residential"],
+    "office_delivery_demand":       ["office=yes", "building=commercial", "landuse=commercial"],
+    "road_access":                  ["highway=primary", "highway=secondary", "highway=tertiary"],
+    "road_delivery_access":         ["highway=primary", "highway=secondary"],
+    "highway_arterial_access":      ["highway=primary", "highway=trunk", "highway=secondary"],
+    "highway_arterial_proximity":   ["highway=primary", "highway=trunk"],
+    "industrial_zone_proximity":    ["landuse=industrial", "building=industrial"],
+    "residential_conflict_risk":    ["building=residential", "landuse=residential"],
+    "peer_warehouse_cluster":       ["building=warehouse", "landuse=industrial"],
+    "frontage_barrier_penalty":     ["railway=rail", "highway=motorway", "barrier=wall"],
+    "walk_accessibility":           ["highway=footway", "highway=pedestrian", "highway=path"],
+    "destination_accessibility":    ["highway=primary", "highway=secondary"],
+    "park_safe_play":               ["leisure=park", "leisure=playground"],
+    "power_grid_proximity":         ["power=line", "power=minor_line"],
+    "tourist_leisure_footfall":     ["tourism=attraction", "leisure=park", "amenity=theatre"],
+    "demand_density_proxy":         ["building=yes", "landuse=commercial", "landuse=residential"],
+    "generic_competition":          ["shop=supermarket", "amenity=marketplace", "shop=convenience"],
+}
+
+_DEFAULT_PLACES_TYPES: dict[str, list[str]] = {
+    "direct_cafe_competition":          ["cafe", "coffee_shop"],
+    "direct_retail_competition":        ["store", "shopping_mall"],
+    "direct_restaurant_competition":    ["restaurant"],
+    "commercial_cotenancy":             ["store", "shopping_mall", "restaurant"],
+    "retail_cotenancy_anchor":          ["shopping_mall", "store", "department_store"],
+    "premium_cotenancy":                ["store", "shopping_mall"],
+    "healthcare_ecosystem":             ["hospital", "pharmacy", "doctor"],
+    "commercial_stopover_anchors":      ["restaurant", "cafe", "gas_station"],
+    "preschool_gap":                    ["school", "primary_school"],
+    "clinic_saturation":                ["doctor", "hospital", "pharmacy"],
+    "kitchen_competition":              ["restaurant", "meal_delivery"],
+    "ev_charger_gap":                   ["electric_vehicle_charging_station"],
+    "peer_warehouse_cluster":           ["storage", "moving_company"],
+    "generic_competition":              ["store", "supermarket", "restaurant"],
+}
+
 
 @dataclass(frozen=True)
 class CanonicalFactor:
@@ -77,15 +128,29 @@ class CanonicalArchetype:
                 catchment = {"type": "drive", "minutes": f.catchment_minutes or 15}
             else:
                 catchment = {"type": "walk", "minutes": f.catchment_minutes or 10}
+
+            provider = "google_places" if f.data_priority[0] == "google_places" else "osm"
+            # Use sensible defaults so layers always pass SpecV2 validation.
+            # Without defaults, all tags are [] which makes validate_spec() fail →
+            # specValid=False → chatReady=False → "Start analysis" never appears.
+            if provider == "google_places":
+                source = {
+                    "provider": "google_places",
+                    "types": _DEFAULT_PLACES_TYPES.get(f.key, ["point_of_interest"]),
+                    "keyword": None,
+                }
+            else:
+                source = {
+                    "provider": "osm",
+                    "tags": _DEFAULT_OSM_TAGS.get(f.key, ["building=yes"]),
+                }
+
             layers.append({
                 "id": f"C_{f.key}",
                 "name": f.display_name,
                 "weight": round(f.weight / total, 4),
                 "direction": f.direction,
-                "source": {
-                    "provider": "google_places" if f.data_priority[0] == "google_places" else "osm",
-                    "tags": [],   # filled by LLM for OSM; types filled by LLM for Places
-                },
+                "source": source,
                 "catchment": catchment,
                 "confidence": f.confidence_default,
                 "required": f.required,
