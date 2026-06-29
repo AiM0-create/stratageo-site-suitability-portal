@@ -26,6 +26,34 @@ logger = logging.getLogger(__name__)
 
 MAX_HISTORY = 30
 
+
+def _strip_empty_source_layers(spec_dict: dict) -> dict:
+    """Remove layers with empty OSM tags or empty Places types.
+
+    Called before validate_spec() so that specValid isn't falsely set to False
+    by layers whose source the LLM didn't fill in. The engine handles missing
+    data gracefully; an invalid spec silently prevents chatReady from becoming
+    True and the 'Start analysis' button from ever appearing.
+    """
+    layers = spec_dict.get("layers") or []
+    good = []
+    dropped = []
+    for layer in layers:
+        src = layer.get("source") or {}
+        provider = src.get("provider", "")
+        if provider == "osm" and not src.get("tags"):
+            dropped.append(layer.get("name", "?"))
+            continue
+        if provider == "google_places" and not src.get("types"):
+            dropped.append(layer.get("name", "?"))
+            continue
+        good.append(layer)
+    if dropped:
+        logger.info("llm: stripped %d empty-source layer(s): %s", len(dropped), dropped)
+        spec_dict = dict(spec_dict)
+        spec_dict["layers"] = good
+    return spec_dict
+
 # ─── Deterministic stage / intent signals ─────────────────────────────────────
 # The model's own stage/readyToExecute flags are inconsistent across turns, so
 # unambiguous user signals are classified server-side as the source of truth.
@@ -206,6 +234,10 @@ async def chat_turn(
             parsed["specStatus"] = "draft"
 
     spec_status = parsed.get("specStatus", "empty" if not new_spec else "draft")
+    # Strip layers with empty OSM tags / Places types before validating so they
+    # don't cause specValid=False → chatReady=False → "Start analysis" never appears.
+    if isinstance(new_spec, dict):
+        new_spec = _strip_empty_source_layers(new_spec)
     valid, err = validate_spec(new_spec)
     # A carried-forward spec that validates fully is complete regardless of label
     if valid and spec_status != "complete":
