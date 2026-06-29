@@ -332,6 +332,30 @@ async def chat_turn(
     if stage != "chat" and isinstance(new_spec, dict) and new_spec.get("layers"):
         _backfill_plan(new_spec)
 
+    # ── Waterfront false-positive guard (server-side) ──────────────────────
+    # The LLM sometimes sets waterfront.isWaterfront=true for non-waterfront
+    # briefs (e.g. "near EM Bypass" — the LLM knows canals run alongside it,
+    # so it marks the brief as riverside). When the engine then enforces a
+    # strict riverfront corridor, ALL hexes are removed → silent "no viable site".
+    #
+    # Fix: compare the LLM's waterfront verdict against the deterministic
+    # detect_waterfront() regex on the ORIGINAL prompt. If the regex returns
+    # False but the LLM set True, the LLM is hallucinating a riverside context —
+    # override it. Real waterfront prompts always contain keywords like
+    # "riverside", "along the Hooghly", "on the waterfront" etc. which the
+    # regex reliably matches.
+    if isinstance(new_spec, dict) and (new_spec.get("waterfront") or {}).get("isWaterfront"):
+        from ..models.spec import detect_waterfront as _detect_wf
+        _full_prompt = effective_raw_prompt if "effective_raw_prompt" in dir() else last_user
+        _det = _detect_wf(_full_prompt)
+        if not _det.get("isWaterfront"):
+            logger.warning(
+                "Waterfront false-positive: LLM set isWaterfront=true but prompt "
+                "contains no waterfront keywords — overriding to False. Prompt: %r",
+                _full_prompt[:120],
+            )
+            new_spec["waterfront"] = {"isWaterfront": False, "strictness": None, "corridorWidthM": None}
+
     # ── Feasibility-first gate (server-side, prompt-independent) ──────────
     # A not_feasible plan can NEVER execute, even on an explicit go signal —
     # the model's reply explains conflicts/relaxations instead of ranking.
