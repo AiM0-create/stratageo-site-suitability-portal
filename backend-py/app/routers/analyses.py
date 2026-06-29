@@ -17,6 +17,33 @@ class StartRequest(BaseModel):
     spec: dict
 
 
+def _repair_spec_layers(spec_dict: dict) -> tuple[dict, list[str]]:
+    """Strip layers with empty OSM tags or empty Places types before validation.
+
+    Prevents cryptic 422 errors when the LLM omits source tags for a layer.
+    The engine already handles layers with no data gracefully (excluded from
+    scoring with a warning), so dropping them here is safe.
+    """
+    warnings: list[str] = []
+    layers = spec_dict.get("layers") or []
+    good: list[dict] = []
+    for layer in layers:
+        src = layer.get("source") or {}
+        provider = src.get("provider", "")
+        if provider == "osm" and not src.get("tags"):
+            warnings.append(f"Layer '{layer.get('name','?')}': empty OSM tags — dropped")
+            continue
+        if provider == "google_places" and not src.get("types"):
+            warnings.append(f"Layer '{layer.get('name','?')}': empty Places types — dropped")
+            continue
+        good.append(layer)
+    if warnings:
+        spec_dict = dict(spec_dict)
+        spec_dict["layers"] = good
+        logger.warning("Spec repair: %s", "; ".join(warnings))
+    return spec_dict, warnings
+
+
 @router.post("/api/v2/analyses")
 async def start_analysis(req: StartRequest):
     # Feasibility gate FIRST (raw check) — an infeasible plan often has no layers,
@@ -28,8 +55,14 @@ async def start_analysis(req: StartRequest):
             "conflicts": feas.get("conflicts", []),
             "relaxationOptions": feas.get("relaxationOptions", []),
         })
+
+    # Repair: strip layers with empty OSM tags / Places types before validation.
+    spec_dict, _ = _repair_spec_layers(dict(req.spec))
+    if not spec_dict.get("layers"):
+        raise HTTPException(422, "All layers have empty sources — spec cannot be executed.")
+
     try:
-        spec = SpecV2.model_validate(req.spec)
+        spec = SpecV2.model_validate(spec_dict)
     except ValidationError as e:
         raise HTTPException(422, f"spec validation failed: {e.errors()[:5]}") from e
     job_id = jobs.start_job(spec)
