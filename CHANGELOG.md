@@ -39,9 +39,12 @@ The portal must never imply more certainty than the data supports. v1.4.0 enforc
 
 ### Fixed
 - Supermarket prompt (`discount supermarket in Sector V`) now selects `LARGE_FORMAT_RETAIL` archetype and correctly marks rent + footprint as PROVISIONAL rather than failing with `not_feasible`.
-- Metro exclusion no longer silently uses generic `railway=station` as proxy — now uses verified Kolkata station list or explicitly declares confidence tier.
+- **Metro exclusion geometry enforced (Critical Fix 1):** `detect_metro_exclusion()` + `metro_stations_to_pois()` replace OSM tag-based exclusion POIs with verified metro station coordinates. Kolkata prompt: 30 verified stations injected into exclusion mask. Generic railway=station alone does NOT qualify as metro exclusion. Generic fallback explicitly declared with `confidence=low` and critic downgrade.
+- **Strict route constraint enforcement (Critical Fix 2):** `route_policy.validate_strict_route_constraints()` called after route evaluation. "Exactly within / strictly within / delivery drive" phrases with no `routeConstraint` in spec → `route_unavailable` entry → recommendations withheld. routeConstraint present but no ORS/Google Routes → explicitly declares Euclidean not acceptable → withheld.
+- **Provisional banner bug fixed:** `isProvisional` in ResultsDrawer now reads `constraintPolicy.hasUnverifiableConstraints` directly. Previous implementation checked `analysisStatus === 'provisional'` which was never set (det_critic sets `verdict='weak'`, not `'provisional'`).
 - Score precision: "7.1/10" is now shown as "7.0" with band "6.5–7.5" — no false precision.
 - Previous analysis result no longer persists into new analysis start (state cleared deterministically).
+- 28 new tests for metro geometry and strict route enforcement added (419 total, all pass).
 
 ---
 

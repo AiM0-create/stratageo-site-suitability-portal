@@ -225,3 +225,58 @@ def get_metro_exclusion_tags(mode: MetroResolutionMode) -> list[str]:
     if mode == "osm_metro":
         return METRO_OSM_TAGS
     return GENERIC_STATION_TAGS  # fallback
+
+
+# ── Exclusion helpers ─────────────────────────────────────────────────────────
+
+# Name keywords that identify a metro-station exclusion
+_METRO_EXCL_NAME_KW = ("metro", "subway", "underground", "rapid transit")
+# Tag signals that indicate a metro/subway exclusion (not just generic rail)
+_METRO_EXCL_TAG_SIGNALS = frozenset(("station=subway", "subway=yes"))
+# Tags that MAY be a metro exclusion (must also have name hint)
+_METRO_EXCL_GENERIC_TAGS = frozenset(("railway=station", "public_transport=station"))
+
+
+def detect_metro_exclusion(spec) -> tuple[str, int] | None:
+    """Scan spec.exclusions for a metro/subway exclusion.
+
+    Returns (exclusion_name, buffer_m) or None.
+
+    Detection strategy:
+    - Name contains "metro", "subway", "underground" → metro exclusion.
+    - OR source tags contain station=subway or subway=yes → metro exclusion.
+    - Generic railway=station alone is NOT treated as metro unless name also matches.
+    """
+    for e in (getattr(spec, "exclusions", []) or []):
+        name_lower = (e.name or "").lower()
+        name_match = any(kw in name_lower for kw in _METRO_EXCL_NAME_KW)
+        tags = frozenset(getattr(e.source, "tags", []) or [])
+        strong_tag_match = bool(tags & _METRO_EXCL_TAG_SIGNALS)
+        # Only treat generic railway=station as metro exclusion if name also matches
+        weak_tag_match = bool(tags & _METRO_EXCL_GENERIC_TAGS) and name_match
+        if name_match or strong_tag_match or weak_tag_match:
+            return (e.name, e.bufferM)
+    return None
+
+
+def metro_stations_to_pois(stations: list[dict]) -> list[dict]:
+    """Convert metro station dicts to the {lat, lng, tags} format used by the engine.
+
+    The scoring engine's build_tree() and point_buffer_mask() both require
+    {lat: float, lng: float} keys.
+    """
+    result: list[dict] = []
+    for s in stations:
+        lat = s.get("lat")
+        lng = s.get("lng")
+        if lat is not None and lng is not None:
+            result.append({
+                "lat": float(lat),
+                "lng": float(lng),
+                "tags": {
+                    "name": s.get("name", ""),
+                    "station": "subway",
+                    "line": s.get("line", ""),
+                },
+            })
+    return result

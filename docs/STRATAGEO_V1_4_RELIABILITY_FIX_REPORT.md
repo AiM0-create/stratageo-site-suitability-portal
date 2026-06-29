@@ -105,28 +105,44 @@ Updated proxy warning on `student_catchment_proxy` factor to explicitly state:
 
 Added `hasStudentDemandSignal` detection in `intent_parser.py`.
 
-### Phase 8 — Metro Exclusion Fix
-**New file:** `backend-py/app/engine/metro.py`
+### Phase 8 — Metro Exclusion Fix (Enforcement + Geometry)
+**File:** `backend-py/app/engine/metro.py`
 
-- Static verified Kolkata Metro station list (35+ stations, Blue + Green lines)
-- Resolution priority: `static_verified > osm_metro > generic_station_fallback > unavailable`
-- OSM tags: `station=subway`, `subway=yes` preferred over `railway=station`
-- Confidence: `high` for static list, `medium` for OSM subway, `low` for generic fallback
-- Generic fallback generates advisory warning
-- Returns `MetroResolutionResult` with `to_evidence_dict()` for evidence trail
+New functions:
+- `resolve_metro_stations()` — static verified Kolkata list, then OSM subway tags, then generic fallback
+- `detect_metro_exclusion(spec)` — scans `spec.exclusions` for metro/subway exclusions (by name keyword OR `station=subway` / `subway=yes` tags). Returns `(name, buffer_m)` or `None`.
+- `metro_stations_to_pois(stations)` — converts station list to `{lat, lng, tags}` format compatible with the scoring engine's `build_tree()` and `point_buffer_mask()`.
 
-### Phase 9 — Strict Route-Time Validation
-**File:** `backend-py/app/engine/intent_parser.py`
+**Geometry enforcement (not just metadata):**
+- `detect_metro_exclusion()` is called early in `jobs.py` (before `exclusion_pois` is built)
+- `resolve_metro_stations()` is called early (before Pass-A scoring)
+- `exclusion_pois[metro_exclusion_name]` is **replaced** with verified station coordinates
+- This means the actual exclusion buffer uses the verified metro station lat/lng — not whatever OSM returns for `railway=station` (which includes non-metro mainline stations)
+- If metro is unavailable: `exclusion_pois[name] = []` (empty — not enforced), added to `route_unavailable`
 
-New regex patterns:
+Key behaviour:
+- Kolkata prompt → `static_verified`, 30 stations, confidence=high → exclusion buffer uses hardcoded metro coordinates
+- Generic fallback (unknown city, no OSM subway tags) → warning + confidence=low + deterministic critic downgrade
+- No stations resolved → exclusion empty + `route_unavailable` entry → constraint policy = failed
+
+Note: `railway=station` alone (without a metro name or `station=subway`/`subway=yes` tag) is **not** treated as a metro exclusion.
+
+### Phase 9 — Strict Route-Time Validation (Enforcement)
+**Files:** `backend-py/app/engine/intent_parser.py`, `backend-py/app/engine/route_policy.py`
+
+**intent_parser.py** — detection:
 - `_STRICT_ROUTE_RE`: detects "exactly within", "strictly within", "must be within", "delivery drive", "10-minute drive"
 - `_STRICT_WALK_RE`: detects "walking radius", "walk time", "on foot"
+- New `RawIntent` fields: `hasStrictRouteConstraint`, `hasStrictWalkConstraint`
 
-New `RawIntent` fields:
-- `hasStrictRouteConstraint: bool`
-- `hasStrictWalkConstraint: bool`
+**route_policy.py** (new) — enforcement:
+- `validate_strict_route_constraints(spec, raw_intent_dict, has_ors, has_google_routes)` is called in `jobs.py` after route evaluation
+- **Case A:** `hasStrictRouteConstraint=True` + no `routeConstraints` in spec + no corridors → `withheld=True`; entries added to `route_unavailable` → constraint policy = failed → `recommendation_withheld = True`
+- **Case B:** `routeConstraints` present but no ORS/Google Routes → `withheld=True`; message explicitly states "Euclidean straight-line distance does NOT satisfy 'exactly within' / 'strictly within' constraints"
+- **Case C:** corridor present (no routeConstraint) → partial mitigation; not failed (corridors apply a spatial gate)
+- **Case D:** routeConstraints present + ORS or Google Routes available → OK; standard ORS evaluation applies
 
-These propagate into the evidence trail. The constraint policy layer marks route constraints as `failed` when routing is unavailable for strict prompts.
+Euclidean fallback cannot satisfy strict route constraints unless ORS is available and succeeds.
 
 ### Phase 10 — Deterministic Reliability Critic (Always-On)
 **New file:** `backend-py/app/engine/reliability_critic.py`
@@ -257,13 +273,14 @@ Added TypeScript types for all v1.4 fields: `constraintPolicy`, `metroValidation
 ## Test Results
 
 ```
-391 passed, 5 warnings in 7.87s
+419 passed, 5 warnings in 7.68s
   └─ 335 original tests
-  └─ 56 new v1.4 tests
+  └─ 56 v1.4.0 reliability tests
+  └─ 28 critical fix tests (metro geometry + strict route enforcement)
 ```
 
 TypeScript: `npx tsc --noEmit` — 0 errors  
-Build: `npm run build` — succeeds (9.2s)
+Build: `npm run build` — succeeds (10.3s)
 
 ---
 
@@ -273,14 +290,15 @@ Build: `npm run build` — succeeds (9.2s)
 |-----|-----|
 | Unvalidatable rent/footprint/zoning | `constraint_policy.py` — detected and blocks RECOMMENDED |
 | Scores too precise (7.1/10) | `multi_score.py` — `displayScore` rounds to nearest 0.5, `scoreBand` shows range |
-| Generic railway stations for metro exclusion | `metro.py` — verified Kolkata list; fallback declares confidence tier |
+| Metro exclusion used generic railway=station | `metro.py` — `detect_metro_exclusion()` + `metro_stations_to_pois()` replace OSM POIs with verified station coordinates in the actual exclusion mask. Kolkata: 30 verified stations injected. Generic fallback explicitly declared, confidence=low, critic downgraded. |
 | LLM critic disabled in low-cost mode | `reliability_critic.py` — deterministic critic always runs |
 | H3 hexes called "sites"/"parcels" | Renamed to "candidate zones" in UI; siteClaimLevel always "micro_market_zone" |
 | Stale poll responses from old jobIds | `activeJobIdRef` guard in App.tsx |
 | Missing data coverage not accounted for | `compute_data_coverage()` + deterministic critic checks coverage ratio |
 | Student demand over-reliant on schools | Expanded OSM tags (library, dormitory, training); proxy warning updated |
 | Supermarket prompt not running | LARGE_FORMAT_RETAIL archetype + parser patterns |
-| Strict route constraint satisfied by Euclidean | `_STRICT_ROUTE_RE` detection; constraint policy marks failed when routing unavailable |
+| Strict route constraint satisfied by Euclidean | `route_policy.py` — `validate_strict_route_constraints()` called after route eval in jobs.py. If strict phrase + no routeConstraint in spec: `route_unavailable` entry → recommendations withheld. If strict + routeConstraints + no ORS: explicitly declares Euclidean not acceptable → withheld. |
+| Provisional banner never showed | Fixed: `isProvisional` now reads `constraintPolicy.hasUnverifiableConstraints` directly, not `analysisStatus === 'provisional'` (which was dead code). |
 
 ---
 

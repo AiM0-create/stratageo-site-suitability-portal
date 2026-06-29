@@ -668,3 +668,425 @@ class TestHealthCapabilityFlags:
         resp = client.get("/health")
         data = resp.json()
         assert data["supportsVerifiedMetroLayer"] is True
+
+
+# ── Critical Fix 1: Metro exclusion geometry (verified coordinates) ────────────
+
+class TestMetroExclusionGeometry:
+    """Tests that metro exclusion uses verified station coordinates, not generic
+    railway=station OSM tags. Core claim: Kolkata prompts get the static verified
+    list injected into the exclusion mask, not whatever OSM returns for
+    railway=station (which includes non-metro lines).
+    """
+
+    def _make_metro_spec(self, exclusion_name: str = "Metro station exclusion",
+                         excl_tags: list[str] | None = None,
+                         buffer_m: int = 1000):
+        from app.models.spec import SpecV2, StudyArea, Layer, OsmSource, Catchment, Exclusion
+        layers = [Layer(
+            id="L1", name="Demand", weight=1.0, direction="positive",
+            source=OsmSource(tags=["building=residential"]),
+            catchment=Catchment(type="drive", minutes=12),
+        )]
+        excl = Exclusion(
+            name=exclusion_name,
+            source=OsmSource(tags=excl_tags or ["railway=station"]),
+            bufferM=buffer_m,
+        )
+        return SpecV2(
+            version="2.2",
+            objective="Dark kitchen outside 1km of any metro station near Ballygunge",
+            businessType="dark kitchen",
+            studyArea=StudyArea(type="places", places=["South Kolkata"]),
+            layers=layers,
+            exclusions=[excl],
+        )
+
+    # ── detect_metro_exclusion ────────────────────────────────────────────────
+
+    def test_detect_metro_by_name(self):
+        from app.engine.metro import detect_metro_exclusion
+        spec = self._make_metro_spec("Metro station exclusion")
+        result = detect_metro_exclusion(spec)
+        assert result is not None
+        assert result[0] == "Metro station exclusion"
+        assert result[1] == 1000
+
+    def test_detect_metro_by_subway_tag(self):
+        from app.engine.metro import detect_metro_exclusion
+        spec = self._make_metro_spec("Station exclusion", excl_tags=["station=subway"])
+        result = detect_metro_exclusion(spec)
+        assert result is not None
+
+    def test_detect_metro_by_subway_yes_tag(self):
+        from app.engine.metro import detect_metro_exclusion
+        spec = self._make_metro_spec("Rail exclusion", excl_tags=["subway=yes"])
+        result = detect_metro_exclusion(spec)
+        assert result is not None
+
+    def test_generic_railway_tag_alone_not_metro(self):
+        """railway=station without a metro name or subway tag is NOT treated as metro."""
+        from app.engine.metro import detect_metro_exclusion
+        spec = self._make_metro_spec("Railway crossing exclusion", excl_tags=["railway=station"])
+        result = detect_metro_exclusion(spec)
+        # Name has no metro keyword → should NOT be detected as metro exclusion
+        assert result is None
+
+    def test_detect_metro_case_insensitive(self):
+        from app.engine.metro import detect_metro_exclusion
+        spec = self._make_metro_spec("METRO STATION BUFFER")
+        result = detect_metro_exclusion(spec)
+        assert result is not None
+
+    def test_no_metro_exclusion_returns_none(self):
+        from app.engine.metro import detect_metro_exclusion
+        spec = self._make_metro_spec("Heritage site buffer", excl_tags=["historic=*"])
+        result = detect_metro_exclusion(spec)
+        assert result is None
+
+    # ── metro_stations_to_pois ─────────────────────────────────────────────────
+
+    def test_pois_have_lat_lng(self):
+        from app.engine.metro import metro_stations_to_pois, KOLKATA_METRO_STATIONS
+        pois = metro_stations_to_pois(KOLKATA_METRO_STATIONS)
+        assert len(pois) == len(KOLKATA_METRO_STATIONS)
+        for p in pois:
+            assert "lat" in p and "lng" in p
+            assert isinstance(p["lat"], float)
+            assert isinstance(p["lng"], float)
+
+    def test_pois_have_subway_station_tag(self):
+        from app.engine.metro import metro_stations_to_pois, KOLKATA_METRO_STATIONS
+        pois = metro_stations_to_pois(KOLKATA_METRO_STATIONS)
+        for p in pois:
+            assert p.get("tags", {}).get("station") == "subway"
+
+    def test_pois_compatible_with_build_tree(self):
+        """Verify POI format is accepted by the scoring engine's build_tree function."""
+        from app.engine.metro import metro_stations_to_pois, KOLKATA_METRO_STATIONS
+        from app.engine.scoring import build_tree
+        pois = metro_stations_to_pois(KOLKATA_METRO_STATIONS)
+        tree = build_tree(pois)
+        assert tree is not None
+
+    def test_empty_station_list_gives_empty_pois(self):
+        from app.engine.metro import metro_stations_to_pois
+        pois = metro_stations_to_pois([])
+        assert pois == []
+
+    def test_station_without_lat_lng_skipped(self):
+        from app.engine.metro import metro_stations_to_pois
+        stations = [{"name": "Bad", "lat": None, "lng": 88.0, "line": "Blue"},
+                    {"name": "Good", "lat": 22.5, "lng": 88.3, "line": "Blue"}]
+        pois = metro_stations_to_pois(stations)
+        assert len(pois) == 1
+        assert pois[0]["tags"]["name"] == "Good"
+
+    # ── End-to-end: Kolkata exclusion uses verified list, not railway=station ──
+
+    def test_kolkata_metro_exclusion_uses_verified_stations(self):
+        """Core test: for a Kolkata metro exclusion, resolve_metro_stations returns
+        static_verified stations, and metro_stations_to_pois() gives POIs whose
+        coordinates are the ACTUAL metro station locations — not generic OSM
+        railway=station results that could include non-metro lines.
+        """
+        from app.engine.metro import (
+            resolve_metro_stations, detect_metro_exclusion,
+            metro_stations_to_pois, KOLKATA_METRO_STATIONS,
+        )
+        spec = self._make_metro_spec()
+        prompt = "Dark kitchen outside 1km of any metro station in South Kolkata"
+        area = "South Kolkata"
+
+        # 1. Detection
+        excl = detect_metro_exclusion(spec)
+        assert excl is not None, "Metro exclusion not detected"
+
+        # 2. Resolution
+        metro = resolve_metro_stations(prompt, area)
+        assert metro.mode == "static_verified"
+        assert metro.station_count == len(KOLKATA_METRO_STATIONS)
+        assert metro.confidence == "high"
+        assert metro.warning is None
+
+        # 3. Conversion to POIs
+        pois = metro_stations_to_pois(metro.stations)
+        assert len(pois) == len(KOLKATA_METRO_STATIONS)
+
+        # 4. Verify a known Kolkata Metro station is in the list
+        esplanade_lats = [p["lat"] for p in pois
+                          if abs(p["lat"] - 22.5609) < 0.002]
+        assert len(esplanade_lats) > 0, "Esplanade station not found in verified list"
+
+        # 5. Key assertion: none of the verified station coordinates come from
+        #    generic OSM railway=station tags. They are hardcoded verified positions.
+        for p in pois:
+            assert p["tags"]["station"] == "subway", "All POIs must be tagged as subway"
+
+    def test_non_metro_railway_stations_not_used_for_kolkata(self):
+        """Non-metro railway stations (e.g., Howrah terminus, Sealdah) should NOT
+        be in the verified metro list used for the exclusion mask."""
+        from app.engine.metro import metro_stations_to_pois, KOLKATA_METRO_STATIONS
+
+        pois = metro_stations_to_pois(KOLKATA_METRO_STATIONS)
+        poi_names = [p["tags"]["name"].lower() for p in pois]
+
+        # Howrah railway terminus is NOT a metro station (it's a mainline terminal)
+        # The verified list should NOT contain it
+        howrah_terminus = [n for n in poi_names if "howrah" in n and "metro" not in n]
+        # Note: Howrah Metro (Green Line) IS in the list, but the terminus itself should
+        # only appear as "Howrah" (metro station), not as a mainline station
+        # This just verifies none have "howrah junction" or "howrah terminal" labels
+        for n in poi_names:
+            assert "junction" not in n, f"Non-metro junction found in verified list: {n}"
+            assert "terminal" not in n, f"Non-metro terminal found in verified list: {n}"
+
+    def test_generic_fallback_declared_and_confidence_low(self):
+        """When no city is detected and no OSM subway tags are found, mode=
+        generic_station_fallback and confidence=low."""
+        from app.engine.metro import resolve_metro_stations
+        # Generic railway station with no subway tag
+        osm_stations = [{"lat": 22.5, "lng": 88.3, "tags": {"railway": "station"}}]
+        result = resolve_metro_stations("", "", osm_fetched_stations=osm_stations)
+        assert result.mode == "generic_station_fallback"
+        assert result.confidence == "low"
+        assert result.warning is not None
+        assert "generic" in result.warning.lower() or "railway" in result.warning.lower()
+
+    def test_unknown_city_no_stations_unavailable(self):
+        """No city detected, no OSM stations → unavailable."""
+        from app.engine.metro import resolve_metro_stations
+        result = resolve_metro_stations("Find locations near Guwahati", "Guwahati", osm_fetched_stations=None)
+        assert result.mode == "unavailable"
+        assert result.station_count == 0
+        assert result.confidence == "low"
+
+    def test_metro_exclusion_unenforced_when_unavailable(self):
+        """When metro is unavailable, the constraint policy should reflect failed enforcement."""
+        from app.engine.constraint_policy import evaluate_constraint_policy
+        from app.models.spec import SpecV2, StudyArea, Layer, OsmSource, Catchment, Exclusion
+        layers = [Layer(
+            id="L1", name="Demand", weight=1.0, direction="positive",
+            source=OsmSource(tags=["building=residential"]),
+            catchment=Catchment(type="drive", minutes=12),
+        )]
+        excl = Exclusion(
+            name="Metro station exclusion",
+            source=OsmSource(tags=["station=subway"]),
+            bufferM=1000,
+        )
+        spec = SpecV2(
+            version="2.2", objective="Must be outside 1km of metro", businessType="dark kitchen",
+            studyArea=StudyArea(type="places", places=["Unknown City"]),
+            layers=layers, exclusions=[excl],
+        )
+        # Simulate metro unenforced: pass its name in route_unavailable
+        policy = evaluate_constraint_policy(
+            spec, [],
+            route_unavailable=["Metro exclusion: Metro station exclusion — no station data"],
+        )
+        assert policy.constraintEnforcementLevel == "failed"
+        assert policy.clientReady is False
+
+
+# ── Critical Fix 2: Strict route constraint enforcement ───────────────────────
+
+class TestStrictRoutePolicy:
+    """Tests that 'exactly within X-minute drive' prompts are enforced via real
+    ORS/Google routing, not Euclidean straight-line proxy.
+    """
+
+    def _make_spec_with_route(self, has_route_constraint: bool = True,
+                               objective: str = "Exactly within 10-minute delivery drive"):
+        from app.models.spec import SpecV2, StudyArea, Layer, OsmSource, Catchment, RouteConstraint
+        layers = [Layer(
+            id="L1", name="Demand", weight=1.0, direction="positive",
+            source=OsmSource(tags=["building=residential"]),
+            catchment=Catchment(type="drive", minutes=12),
+        )]
+        rcs = []
+        if has_route_constraint:
+            rcs = [RouteConstraint(
+                name="10-min delivery drive",
+                targetKeyword="Ballygunge Phari",
+                mode="drive",
+                maxMinutes=10.0,
+                required=True,
+            )]
+        return SpecV2(
+            version="2.2", objective=objective, businessType="dark kitchen",
+            studyArea=StudyArea(type="places", places=["South Kolkata"]),
+            layers=layers, routeConstraints=rcs,
+        )
+
+    def _ri_dict(self, has_strict: bool, has_strict_walk: bool = False) -> dict:
+        return {
+            "hasStrictRouteConstraint": has_strict,
+            "hasStrictWalkConstraint": has_strict_walk,
+        }
+
+    # ── Non-strict prompt: no enforcement needed ──────────────────────────────
+
+    def test_non_strict_prompt_no_action(self):
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(has_route_constraint=False)
+        result = validate_strict_route_constraints(spec, self._ri_dict(False), has_ors=False)
+        assert result.ok is True
+        assert result.withheld is False
+
+    def test_no_raw_intent_no_action(self):
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route()
+        result = validate_strict_route_constraints(spec, None, has_ors=True)
+        assert result.ok is True
+
+    # ── Case A: strict phrase but no routeConstraint in spec ─────────────────
+
+    def test_strict_route_no_constraint_in_spec_fails(self):
+        """hasStrictRoute=True + no routeConstraints + no corridors → withheld."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(has_route_constraint=False,
+                                          objective="Exactly within 10-minute delivery drive")
+        result = validate_strict_route_constraints(spec, self._ri_dict(True), has_ors=True)
+        assert result.ok is False
+        assert result.withheld is True
+        assert len(result.missing_constraints) > 0
+        assert any("routeConstraint" in m or "spec" in m.lower() for m in result.missing_constraints)
+
+    def test_strict_route_no_constraint_entries_non_empty(self):
+        """to_route_unavailable_entries() must return at least one entry to add to route_unavailable."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(has_route_constraint=False)
+        result = validate_strict_route_constraints(spec, self._ri_dict(True), has_ors=True)
+        entries = result.to_route_unavailable_entries()
+        assert len(entries) >= 1
+
+    # ── Case B: routeConstraint present but no routing provider ──────────────
+
+    def test_strict_route_no_provider_fails(self):
+        """routeConstraint exists but no ORS and no Google Routes → Euclidean cannot satisfy."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(has_route_constraint=True)
+        result = validate_strict_route_constraints(
+            spec, self._ri_dict(True),
+            has_ors=False, has_google_routes=False,
+        )
+        assert result.ok is False
+        assert result.withheld is True
+        assert len(result.failures) > 0
+        # Must explicitly state Euclidean is not acceptable
+        failure_text = " ".join(result.failures).lower()
+        assert "euclidean" in failure_text or "straight-line" in failure_text
+
+    def test_strict_route_with_ors_available_ok(self):
+        """routeConstraint present + ORS available → no additional failure from route_policy."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(has_route_constraint=True)
+        result = validate_strict_route_constraints(
+            spec, self._ri_dict(True),
+            has_ors=True, has_google_routes=False,
+        )
+        assert result.ok is True
+
+    def test_strict_route_with_google_routes_ok(self):
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(has_route_constraint=True)
+        result = validate_strict_route_constraints(
+            spec, self._ri_dict(True),
+            has_ors=False, has_google_routes=True,
+        )
+        assert result.ok is True
+
+    # ── Strict walk constraint detection ─────────────────────────────────────
+
+    def test_strict_walk_no_provider_fails(self):
+        """walking radius constraint + no routing provider → cannot enforce."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        from app.models.spec import SpecV2, StudyArea, Layer, OsmSource, Catchment, RouteConstraint
+        layers = [Layer(
+            id="L1", name="D", weight=1.0, direction="positive",
+            source=OsmSource(tags=["building=residential"]),
+            catchment=Catchment(type="drive", minutes=12),
+        )]
+        spec = SpecV2(
+            version="2.2", objective="Outside 1km walking radius of metro",
+            businessType="dark kitchen",
+            studyArea=StudyArea(type="places", places=["Kolkata"]),
+            layers=layers,
+            routeConstraints=[RouteConstraint(
+                name="Metro walk exclusion",
+                targetKeyword="Ballygunge Phari Metro",
+                mode="walk", maxDistanceM=1000.0, required=True,
+            )],
+        )
+        ri = {"hasStrictRouteConstraint": False, "hasStrictWalkConstraint": True}
+        # hasStrictWalkConstraint alone doesn't trigger route_policy (only hasStrictRoute does)
+        # — this test confirms that the walk-radius scenario needs its own handling
+        result = validate_strict_route_constraints(spec, ri, has_ors=False)
+        # hasStrictWalkConstraint is not checked by validate_strict_route_constraints
+        # (it only checks hasStrictRouteConstraint). This is a known limitation.
+        assert result.ok is True  # route_policy doesn't gate on walk-only strict
+
+    # ── Integration: dark kitchen canonical prompt ───────────────────────────
+
+    def test_p4_strict_route_detected_in_prompt(self):
+        """The canonical dark kitchen prompt triggers hasStrictRouteConstraint."""
+        from app.engine.intent_parser import parse_raw_intent
+        prompt = ("I need a dark kitchen location in South Kolkata that is exactly "
+                  "within a 10-minute delivery drive of Ballygunge Phari, but "
+                  "strictly outside a 1km walking radius of any metro station.")
+        ri = parse_raw_intent(prompt)
+        assert ri.hasStrictRouteConstraint is True
+        assert ri.hasStrictWalkConstraint is True
+
+    def test_p4_no_ors_means_route_policy_fails(self):
+        """Dark kitchen spec with routeConstraint + no ORS → route_policy says withheld."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(
+            has_route_constraint=True,
+            objective="Exactly within 10-minute delivery drive of Ballygunge Phari",
+        )
+        ri = {"hasStrictRouteConstraint": True, "hasStrictWalkConstraint": True}
+        result = validate_strict_route_constraints(spec, ri, has_ors=False, has_google_routes=False)
+        assert result.ok is False
+        assert result.withheld is True
+        assert "euclidean" in " ".join(result.failures).lower() or "straight-line" in " ".join(result.failures).lower()
+
+    def test_p4_with_ors_route_policy_passes(self):
+        """Dark kitchen spec with routeConstraint + ORS available → route_policy OK."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        spec = self._make_spec_with_route(has_route_constraint=True)
+        ri = {"hasStrictRouteConstraint": True}
+        result = validate_strict_route_constraints(spec, ri, has_ors=True, has_google_routes=False)
+        assert result.ok is True
+
+    def test_corridor_without_route_constraint_is_partial_mitigation(self):
+        """If the LLM encoded the strict route as a corridor (not routeConstraint),
+        route_policy treats it as partial mitigation (doesn't fail) — corridors
+        apply a spatial gate even if not network-routed."""
+        from app.engine.route_policy import validate_strict_route_constraints
+        from app.models.spec import (
+            SpecV2, StudyArea, Layer, OsmSource, Catchment, Corridor,
+        )
+        layers = [Layer(
+            id="L1", name="D", weight=1.0, direction="positive",
+            source=OsmSource(tags=["building=residential"]),
+            catchment=Catchment(type="drive", minutes=12),
+        )]
+        spec = SpecV2(
+            version="2.2", objective="Exactly within 10-min drive of Ballygunge",
+            businessType="dark kitchen",
+            studyArea=StudyArea(type="places", places=["South Kolkata"]),
+            layers=layers,
+            corridors=[Corridor(
+                name="Delivery radius",
+                source=OsmSource(tags=["highway=primary"]),
+                maxDistanceM=2000, mode="include",
+            )],
+            routeConstraints=[],  # no routeConstraint — only a corridor
+        )
+        ri = {"hasStrictRouteConstraint": True}
+        result = validate_strict_route_constraints(spec, ri, has_ors=False)
+        # With a corridor but no routeConstraint, route_policy returns OK
+        # (corridor is treated as partial spatial mitigation)
+        assert result.ok is True

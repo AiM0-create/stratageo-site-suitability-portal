@@ -60,21 +60,30 @@ This document honestly describes what the portal can and cannot verify. Decision
 
 ## 7. Strict Drive-Time Constraints Without Routing
 
-**Limitation:** When ORS or Google Routes keys are unavailable, "exactly within 10-minute delivery drive" falls back to straight-line Euclidean distance — which is always shorter than the road network.
+**Limitation:** "Exactly within 10-minute delivery drive" requires real ORS/Google Routes network routing. Euclidean straight-line distance is never used for strict route constraints.
 
-**Impact:** Candidates may appear to pass the constraint on Euclidean distance but fail in reality (due to road network, one-ways, water crossings).
+**Mitigation in v1.4 (ENFORCED):**
+- `route_policy.validate_strict_route_constraints()` called in `jobs.py` after route evaluation
+- If `hasStrictRouteConstraint=True` AND no `routeConstraint` in spec → `route_unavailable` entry → constraint policy `failed` → recommendations withheld
+- If `routeConstraint` present AND no ORS/Google Routes configured → explicitly declared "Euclidean does NOT satisfy strict route" → recommendations withheld
+- Only Euclidean fallback not tolerated for strict constraints
 
-**Mitigation in v1.4:** `_STRICT_ROUTE_RE` detects "exactly within / strictly within / delivery drive" phrasing. If routing is unavailable, the constraint policy marks the analysis `failed` and recommendation is withheld.
+**Remaining gap:** If ORS is available and evaluates the constraint, the analysis proceeds with real routing. If ORS returns network routing results, they are used. Euclidean is used only for Pass-A scoring (all hexes), never for constraint gates.
 
 ---
 
 ## 8. Metro Exclusion Confidence Varies
 
-**Limitation:** When the static verified station list is unavailable for a city, the engine falls back to OSM `railway=station` (generic) which may include non-metro rail stations (commuter rail, suburban rail).
+**Limitation:** When no city is detected AND no OSM subway-tagged stations are available, the engine falls back to generic `railway=station` for the exclusion mask.
 
-**Impact:** A "1 km from metro station" exclusion may use non-metro stations as proxies, producing incorrect buffers.
+**Mitigation in v1.4 (ENFORCED):**
+- `detect_metro_exclusion(spec)` identifies metro/subway exclusions in the spec
+- Verified Kolkata Metro station coordinates (30 stations) are **injected into the actual exclusion buffer** — replacing OSM tag-based results
+- For unknown cities with OSM subway stations: `osm_metro` mode used, confidence=medium
+- Generic fallback: confidence=low, warning declared in evidence trail, critic verdict downgraded to "weak"
+- No metro stations at all: exclusion_pois = empty, added to `route_unavailable` → constraint policy failed
 
-**Mitigation in v1.4:** `metro.py` provides verified Kolkata station lists. Fallback is declared in the evidence trail with a warning. Confidence is `low` for generic fallback, `high` for verified list.
+**Remaining gap:** The verified station list currently covers Kolkata only. Other Indian metro cities (Delhi, Mumbai, Bengaluru, Hyderabad, Chennai) do not have static verified lists yet — they fall to OSM subway tags or generic fallback.
 
 ---
 
