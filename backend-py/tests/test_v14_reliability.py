@@ -1060,6 +1060,50 @@ class TestStrictRoutePolicy:
         result = validate_strict_route_constraints(spec, ri, has_ors=True, has_google_routes=False)
         assert result.ok is True
 
+    def test_hasStrictRouteConstraint_survives_spec_roundtrip(self):
+        """Regression test: hasStrictRouteConstraint must survive the
+        RawIntent.to_dict() → SpecV2.rawIntent (RawIntentMeta) → model_dump() path.
+        Previously RawIntentMeta lacked the field, so model_dump() silently dropped it
+        and route_policy.validate_strict_route_constraints() was always bypassed.
+        """
+        from app.models.spec import SpecV2, StudyArea, Layer, OsmSource, Catchment, RawIntentMeta
+        from app.engine.route_policy import validate_strict_route_constraints
+
+        # Build a spec with hasStrictRouteConstraint=True in rawIntent
+        ri_meta = RawIntentMeta(
+            rawPrompt="exactly within 10-minute delivery drive",
+            businessTypeKey="dark_kitchen",
+            hasStrictRouteConstraint=True,
+            hasStrictWalkConstraint=True,
+        )
+        layers = [Layer(
+            id="L1", name="D", weight=1.0, direction="positive",
+            source=OsmSource(tags=["building=residential"]),
+            catchment=Catchment(type="drive", minutes=12),
+        )]
+        spec = SpecV2(
+            version="2.2",
+            objective="Dark kitchen exactly within 10-minute delivery drive of Ballygunge Phari",
+            businessType="dark kitchen",
+            studyArea=StudyArea(type="places", places=["South Kolkata"]),
+            layers=layers,
+            routeConstraints=[],   # no routeConstraint to test Case A
+            rawIntent=ri_meta,
+        )
+
+        # The field must survive model_dump()
+        ri_dict = spec.rawIntent.model_dump()
+        assert ri_dict.get("hasStrictRouteConstraint") is True, (
+            "hasStrictRouteConstraint was lost in model_dump() — "
+            "RawIntentMeta field is missing"
+        )
+        assert ri_dict.get("hasStrictWalkConstraint") is True
+
+        # And route_policy must see it and fail (no routeConstraint in spec)
+        result = validate_strict_route_constraints(spec, ri_dict, has_ors=True)
+        assert result.ok is False
+        assert result.withheld is True
+
     def test_corridor_without_route_constraint_is_partial_mitigation(self):
         """If the LLM encoded the strict route as a corridor (not routeConstraint),
         route_policy treats it as partial mitigation (doesn't fail) — corridors

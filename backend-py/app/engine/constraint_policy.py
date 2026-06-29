@@ -309,20 +309,24 @@ def downgrade_status_for_unverified(
     locations: list[dict],
     policy: ConstraintPolicyResult,
 ) -> None:
-    """Downgrade RECOMMENDED → CANDIDATE_ZONE for locations when hard
-    constraints are unverifiable. Mutates in place.
+    """Downgrade RECOMMENDED → CANDIDATE_ZONE and mark all non-excluded
+    locations as provisional when hard constraints are unverifiable.
 
     Rules:
-    - If constraintEnforcementLevel is 'provisional' or 'failed', no location
-      may have recommendationStatus == 'RECOMMENDED'.
-    - Downgraded locations get a 'provisionalReasons' field.
+    - If constraintEnforcementLevel is 'provisional' or 'failed':
+      * RECOMMENDED locations → CANDIDATE_ZONE
+      * ALL non-excluded locations get provisionalBadge and provisionalReasons
+        (even locations that were already CANDIDATE_ZONE)
     """
     if not policy.hasUnverifiableConstraints:
         return
     for loc in locations:
         if loc.get("excluded"):
             continue
+        # Downgrade RECOMMENDED → CANDIDATE_ZONE
         if loc.get("recommendationStatus") == "RECOMMENDED":
             loc["recommendationStatus"] = "CANDIDATE_ZONE"
-            loc["provisionalReasons"] = policy.provisionalReasons
-            loc["provisionalBadge"] = "PROVISIONAL — field validation required"
+        # Mark ALL non-excluded candidates as provisional
+        # (they cannot be treated as confirmed even if they are CANDIDATE_ZONE)
+        loc["provisionalReasons"] = policy.provisionalReasons
+        loc["provisionalBadge"] = "PROVISIONAL — field validation required"

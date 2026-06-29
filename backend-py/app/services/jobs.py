@@ -1285,7 +1285,38 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # all (no river line and no water polygon) must withhold — never keep-all.
     wf_corridor_unenforced = is_wf and (waterfront_corridor_failed or not waterfront_corridor_enforced)
 
-    # v1.4.0: use deterministic critic verdict (which already merged with LLM critic)
+    # ── v1.4.0: Constraint policy + deterministic critic MUST come before
+    # analysis_status determination because det_critic.verdict drives it.
+    # Order: policy → det_critic → merge with LLM critic → analysis_status ──────
+
+    # Constraint policy (Phase 3).
+    # Pass route_unavailable and required_missing SEPARATELY — all_required_missing
+    # = required_missing + route_unavailable so passing all_required_missing to
+    # required_missing would cause route_unavailable entries to appear twice.
+    _policy = evaluate_constraint_policy(
+        spec=spec,
+        locations=locations,
+        route_unavailable=route_unavailable,
+        waterfront_unenforced=wf_corridor_unenforced,
+        required_missing=required_missing,   # only pure data-layer misses here
+    )
+
+    # Always-on deterministic critic (Phase 10).
+    # _metro_result was resolved early and used to build the exclusion mask.
+    _det_critic = run_deterministic_critic(
+        spec=spec,
+        locations=locations,
+        scores=scores,
+        route_unavailable=route_unavailable,
+        waterfront_unenforced=wf_corridor_unenforced,
+        required_missing=all_required_missing,
+        constraint_policy_result=_policy,
+        metro_result=_metro_result,
+    )
+    # Merge deterministic + optional LLM critic (conservative combination)
+    _det_critic = merge_with_llm_critic(_det_critic, critique)
+
+    # Now analysis_status can safely use _det_critic.verdict
     det_verdict = _det_critic.verdict
     if all_required_missing or no_eligible:
         analysis_status = "unreliable"
@@ -1300,9 +1331,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     elif det_verdict == "unreliable":
         analysis_status = "unreliable"
     elif det_verdict == "weak" or n_viable == 0:
-        # "weak" covers unverifiable constraints (det_critic flags them), so analysis_status
-        # is "weak" rather than "provisional". The separate _policy field carries the full
-        # provisional metadata for the UI.
+        # "weak" covers unverifiable constraints (det_critic flags them).
+        # The separate _policy field carries the full provisional metadata for the UI.
         analysis_status = "weak"
     else:
         analysis_status = "reliable"
@@ -1324,31 +1354,6 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
     notes.extend(fallbacks)
     notes.extend(f"Unsupported: {u.requested} → {u.fallback}" for u in spec.meta.unsupportedRequests)
-
-    # ── v1.4.0: Constraint policy evaluation (Phase 3) ─────────────────────────
-    _policy = evaluate_constraint_policy(
-        spec=spec,
-        locations=locations,
-        route_unavailable=route_unavailable,
-        waterfront_unenforced=wf_corridor_unenforced,
-        required_missing=all_required_missing,
-    )
-
-    # ── v1.4.0: Always-on deterministic critic (Phase 10) ──────────────────
-    # Note: _metro_result was resolved early in the pipeline and used to build
-    # the metro exclusion mask. It is reused here for the critic and evidence trail.
-    _det_critic = run_deterministic_critic(
-        spec=spec,
-        locations=locations,
-        scores=scores,
-        route_unavailable=route_unavailable,
-        waterfront_unenforced=wf_corridor_unenforced,
-        required_missing=all_required_missing,
-        constraint_policy_result=_policy,
-        metro_result=_metro_result,
-    )
-    # Merge deterministic + optional LLM critic (take conservative combination)
-    _det_critic = merge_with_llm_critic(_det_critic, critique)
 
     # ── v1.1.0 multi-score: relativeRankScore, absoluteViabilityScore, confidenceScore ──
     if s.enable_multi_score_output:
