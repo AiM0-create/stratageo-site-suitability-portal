@@ -114,6 +114,37 @@ async def chat_turn(
     settings = get_settings()
     client = _client()
 
+    # ── Spec staleness guard — discard inherited spec when the business type
+    # changes between turns. Without this, running multiple analyses in the same
+    # session without clicking "New Chat" causes constraints from a previous
+    # analysis (metro exclusions, waterfront corridors, rent caveats, etc.) to
+    # bleed into a completely different brief.
+    #
+    # Rule: if the latest user message parses to a non-generic business type and
+    # the incoming spec carries a DIFFERENT non-generic type, treat the spec as
+    # stale and start fresh. Short affirmation turns ("yes", "run it") are always
+    # carry-forward regardless.
+    _last_msg_preview = next(
+        (m.content for m in reversed(messages) if m.role == "user"), ""
+    )
+    _is_short_affirmation = bool(AFFIRMATION.match(_last_msg_preview) or is_go_signal(_last_msg_preview))
+    if spec and not _is_short_affirmation:
+        _cur_ri = parse_raw_intent(_last_msg_preview)
+        _spec_ri = (spec or {}).get("rawIntent") or {}
+        _spec_biz = _spec_ri.get("businessTypeKey", "generic")
+        _cur_biz = _cur_ri.businessTypeKey
+        # Both sides must be non-generic and genuinely different to trigger a reset
+        if (
+            _cur_biz not in ("generic",)
+            and _spec_biz not in ("generic",)
+            and _cur_biz != _spec_biz
+        ):
+            logger.info(
+                "Spec reset: business type changed (%s → %s) — discarding stale spec",
+                _spec_biz, _cur_biz,
+            )
+            spec = None
+
     convo = [{"role": "system", "content": chat_system_prompt()}]
     if spec:
         convo.append({
