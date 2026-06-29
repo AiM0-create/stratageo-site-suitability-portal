@@ -1,11 +1,16 @@
-"""Multi-dimensional scoring (v1.1.0 Phase 5).
+"""Multi-dimensional scoring (v1.1.0 Phase 5; v1.4.0 display policy + coverage).
 
 Computes three distinct scores per candidate:
   relativeRankScore    — percentile rank within this run's shortlist (0-10)
   absoluteViabilityScore — archetype-benchmarked viability (0-10)
   confidenceScore      — data trustworthiness (0-10)
 
-Plus recommendation mode based on all three.
+v1.4.0 additions:
+  displayScore         — rounded to nearest 0.5 for honest display
+  scoreBand            — e.g. "6.5–7.5"
+  confidenceLabel      — "High" | "Medium" | "Low"
+  confidenceReasons    — list of plain-English reasons
+  closeBandWarning     — True when all candidates are within 0.5 of each other
 
 This module is purely additive — it does NOT replace the existing compositeScore
 path. The engine calls compute_multi_scores() after the final composite is
@@ -242,3 +247,95 @@ def compute_multi_scores(
         loc["absoluteViabilityScore"] = absolute_viab
         loc["confidenceScore"]        = confidence
         loc["recommendationStatus"]   = status
+
+        # Phase 5 — score display policy (v1.4.0)
+        # Round to nearest 0.5 for display; keep internal precision in mcda_score.
+        display_score = round(composite * 2) / 2  # nearest 0.5
+        band_lo = max(0.0, display_score - 0.5)
+        band_hi = min(10.0, display_score + 0.5)
+        loc["displayScore"] = display_score
+        loc["scoreBand"] = f"{band_lo:.1f}–{band_hi:.1f}"
+        loc["scorePrecision"] = "screening_estimate"
+        conf_label = (
+            "High" if confidence >= 6.5 else
+            "Medium" if confidence >= 4.0 else "Low"
+        )
+        loc["confidenceLabel"] = conf_label
+        loc["confidenceReasons"] = _confidence_reasons(
+            n_with_data, max(n_layers_total, len(breakdown)),
+            routing_available, geometry_resolved, excluded,
+        )
+        # Close-band warning: if candidates are within 0.5 of each other, flag it.
+        loc["_compositeForBandCheck"] = composite  # used below after the loop
+
+    # Post-loop: set closeBandWarning when all non-excluded candidates are within 0.5
+    non_ex = [loc for loc in locations if not loc.get("excluded")]
+    if len(non_ex) >= 2:
+        band_vals = [loc.get("_compositeForBandCheck", 0.0) for loc in non_ex]
+        spread = max(band_vals) - min(band_vals)
+        close = spread < 0.5
+        for loc in locations:
+            loc["closeBandWarning"] = close
+            loc.pop("_compositeForBandCheck", None)
+    else:
+        for loc in locations:
+            loc["closeBandWarning"] = False
+            loc.pop("_compositeForBandCheck", None)
+
+
+def _confidence_reasons(
+    n_with_data: int,
+    n_total: int,
+    routing_available: bool,
+    geometry_resolved: bool,
+    excluded: bool,
+) -> list[str]:
+    """Return plain-English reasons for the confidence level."""
+    reasons: list[str] = []
+    if excluded:
+        reasons.append("Candidate was excluded from ranking.")
+        return reasons
+    if n_total > 0:
+        pct = n_with_data / n_total
+        if pct < 0.5:
+            reasons.append(f"Only {n_with_data}/{n_total} scoring factors have data.")
+        elif pct < 0.75:
+            reasons.append(f"{n_with_data}/{n_total} factors have data — some gaps.")
+        else:
+            reasons.append(f"All {n_with_data}/{n_total} key factors have data.")
+    if not routing_available:
+        reasons.append("Travel-time routing was unavailable — Euclidean proxy used.")
+    if not geometry_resolved:
+        reasons.append("Spatial corridor geometry could not be resolved.")
+    if not reasons:
+        reasons.append("Good data coverage and all constraints evaluated.")
+    return reasons
+
+
+def compute_data_coverage(
+    scores: dict,
+    spec_layers: list,
+) -> dict:
+    """Compute data coverage statistics for the evidence trail (Phase 6)."""
+    total_weight = sum(ls.layer.weight for ls in scores.values())
+    present_weight = sum(ls.layer.weight for ls in scores.values() if ls.has_data)
+    missing_weight = total_weight - present_weight
+    coverage_ratio = present_weight / total_weight if total_weight > 0 else 1.0
+
+    missing_critical = [
+        ls.layer.name for ls in scores.values()
+        if not ls.has_data and ls.layer.weight >= 0.20
+    ]
+    low_coverage = [
+        {"name": ls.layer.name, "weight": ls.layer.weight, "reason": "no_data"}
+        for ls in scores.values() if not ls.has_data
+    ]
+
+    return {
+        "availableWeight": round(present_weight, 3),
+        "missingWeight": round(missing_weight, 3),
+        "coverageRatio": round(coverage_ratio, 3),
+        "missingCriticalLayers": missing_critical,
+        "lowCoverageLayers": low_coverage,
+        "coveragePenalty": "high" if coverage_ratio < 0.5 else ("medium" if coverage_ratio < 0.65 else "none"),
+    }

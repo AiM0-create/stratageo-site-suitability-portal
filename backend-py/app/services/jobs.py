@@ -39,11 +39,14 @@ from . import storage
 from .critic import critique_analysis
 from ..engine.intent_parser import parse_raw_intent, validate_hard_constraints_in_spec
 from ..engine.archetypes import get_archetype
-from ..engine.multi_score import compute_multi_scores
+from ..engine.multi_score import compute_multi_scores, compute_data_coverage
 from ..engine.uploaded_candidates import (
     validate_uploaded_points, score_uploaded_points, build_no_points_result,
 )
 from ..engine.evidence_builder import QueryTracker, assemble_evidence_trail
+from ..engine.constraint_policy import evaluate_constraint_policy, downgrade_status_for_unverified
+from ..engine.reliability_critic import run_deterministic_critic, merge_with_llm_critic
+from ..engine.metro import resolve_metro_stations
 
 logger = logging.getLogger(__name__)
 
@@ -1196,7 +1199,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # all (no river line and no water polygon) must withhold — never keep-all.
     wf_corridor_unenforced = is_wf and (waterfront_corridor_failed or not waterfront_corridor_enforced)
 
-    critic_verdict = critique.get("verdict") if critique else None
+    # v1.4.0: use deterministic critic verdict (which already merged with LLM critic)
+    det_verdict = _det_critic.verdict
     if all_required_missing or no_eligible:
         analysis_status = "unreliable"
     elif wf_corridor_unenforced:
@@ -1207,10 +1211,13 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         )
     elif is_wf and n_viable < topN:
         analysis_status = "insufficient_viable_land"
-    elif critic_verdict == "unreliable":
+    elif det_verdict == "unreliable":
         analysis_status = "unreliable"
-    elif critic_verdict == "weak" or n_viable == 0:
+    elif det_verdict == "weak" or n_viable == 0:
         analysis_status = "weak"
+    elif _policy.hasUnverifiableConstraints:
+        # Unverifiable constraints → analysis runs but result is provisional
+        analysis_status = "provisional"
     else:
         analysis_status = "reliable"
 
@@ -1232,6 +1239,37 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     notes.extend(fallbacks)
     notes.extend(f"Unsupported: {u.requested} → {u.fallback}" for u in spec.meta.unsupportedRequests)
 
+    # ── v1.4.0: Constraint policy evaluation (Phase 3) ─────────────────────────
+    _policy = evaluate_constraint_policy(
+        spec=spec,
+        locations=locations,
+        route_unavailable=route_unavailable,
+        waterfront_unenforced=wf_corridor_unenforced,
+        required_missing=all_required_missing,
+    )
+
+    # ── v1.4.0: Metro resolution evidence (Phase 8) ─────────────────────────
+    _study_area_text = " ".join(spec.studyArea.places or []) if spec.studyArea.type == "places" else ""
+    _raw_prompt_text = getattr(spec, "normalizedPrompt", "") or spec.objective
+    _metro_result = resolve_metro_stations(
+        prompt_text=_raw_prompt_text,
+        study_area_text=_study_area_text,
+    )
+
+    # ── v1.4.0: Always-on deterministic critic (Phase 10) ──────────────────
+    _det_critic = run_deterministic_critic(
+        spec=spec,
+        locations=locations,
+        scores=scores,
+        route_unavailable=route_unavailable,
+        waterfront_unenforced=wf_corridor_unenforced,
+        required_missing=all_required_missing,
+        constraint_policy_result=_policy,
+        metro_result=_metro_result,
+    )
+    # Merge deterministic + optional LLM critic (take conservative combination)
+    _det_critic = merge_with_llm_critic(_det_critic, critique)
+
     # ── v1.1.0 multi-score: relativeRankScore, absoluteViabilityScore, confidenceScore ──
     if s.enable_multi_score_output:
         archetype_key = getattr(spec, "archetypeKey", None) or "generic"
@@ -1242,8 +1280,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             n_layers_total=len(spec.layers),
             routing_available=routing_available,
             geometry_resolved=not waterfront_corridor_failed,
-            critic_result=critique,
+            critic_result=_det_critic.to_dict(),
         )
+
+    # ── v1.4.0: Downgrade RECOMMENDED → CANDIDATE_ZONE for unverifiable constraints ──
+    downgrade_status_for_unverified(locations, _policy)
+
+    # ── v1.4.0: Data coverage accounting (Phase 6) ──────────────────────────
+    _data_coverage = compute_data_coverage(scores, spec.layers)
 
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
@@ -1273,6 +1317,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         relaxation_options=_relaxation_opts,
         limitations=list(fallbacks),
         created_at=_analysis_start,
+        # v1.4.0 additions
+        constraint_policy=_policy,
+        data_coverage=_data_coverage,
+        route_unavailable=route_unavailable,
+        metro_result=_metro_result,
+        deterministic_critic=_det_critic,
     )
 
     job.result = {
@@ -1287,7 +1337,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "catchments": catchments,
         "dataSufficiency": data_sufficiency,
         "dataQuality": data_quality,
-        "critique": critique,
+        "critique": _det_critic.to_dict(),  # v1.4.0: always-on deterministic critic
         "recommendationWithheld": recommendation_withheld,
         # Spatial Reliability Upgrade v1.0.3 — new optional fields (frontend-safe)
         "analysisStatus": analysis_status,
@@ -1296,9 +1346,22 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "studyAreaBoundary": _boundary_ring(polygon),
         "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
         # Phase 17 — transparency fields (v1.1.0)
-        "criticEnabled": bool(critique is not None),
-        "constraintEnforcementLevel": "advisory",
+        "criticEnabled": True,  # v1.4.0: deterministic critic always runs
+        "constraintEnforcementLevel": _policy.constraintEnforcementLevel,
         "untracedConstraints": _untraced_constraints if '_untraced_constraints' in dir() else [],
+        # v1.4.0 — constraint policy (Phase 3)
+        "constraintPolicy": _policy.to_dict(),
+        # v1.4.0 — metro resolution evidence (Phase 8)
+        "metroValidation": _metro_result.to_evidence_dict(),
+        # v1.4.0 — data coverage (Phase 6)
+        "dataCoverage": _data_coverage,
+        # v1.4.0 — site claim level (never parcel)
+        "siteClaimLevel": "micro_market_zone",
+        "disclaimer": (
+            "These are screening-level candidate zones (H3 hexagons), not exact "
+            "parcels, building addresses, or investment recommendations. "
+            "Field validation is required before any leasing or investment decision."
+        ),
         # v1.3.0 — evidence trail (secret-safe serialisation)
         "evidenceTrail": _ev_trail.safe_dict(),
     }

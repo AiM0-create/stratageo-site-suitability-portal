@@ -131,6 +131,16 @@ export interface LocationData {
   candidateSource?: 'uploaded_point' | 'h3_hex';
   uploadedPointId?: string;
   uploadedPointAttributes?: Record<string, unknown>;
+  // v1.4.0 score display policy
+  displayScore?: number;         // rounded to nearest 0.5
+  scoreBand?: string;            // e.g. "6.5–7.5"
+  scorePrecision?: 'screening_estimate';
+  confidenceLabel?: 'High' | 'Medium' | 'Low';
+  confidenceReasons?: string[];
+  closeBandWarning?: boolean;    // candidates statistically indistinguishable
+  // v1.4.0 constraint policy
+  provisionalBadge?: string;
+  provisionalReasons?: string[];
 }
 
 export interface RouteMetric {
@@ -274,6 +284,38 @@ export interface AnalysisResult {
   }>;
   // v1.3.0 evidence trail
   evidenceTrail?: EvidenceTrail;
+  // v1.4.0 reliability hardening fields
+  constraintPolicy?: {
+    constraintEnforcementLevel: 'verified' | 'provisional' | 'unverifiable' | 'failed';
+    unverifiedHardConstraints: string[];
+    failedHardConstraints: string[];
+    provisionalReasons: string[];
+    validationChecklist: Array<{
+      item: string;
+      status: 'verified' | 'unverifiable' | 'failed' | 'not_applicable' | 'partial' | 'required';
+      detail: string;
+    }>;
+    clientReady: boolean;
+    recommendationWithheldReason?: string | null;
+    siteClaimLevel: 'micro_market_zone' | 'parcel' | 'building' | 'address';
+    hasUnverifiableConstraints: boolean;
+  };
+  metroValidation?: {
+    mode: 'static_verified' | 'osm_metro' | 'generic_station_fallback' | 'unavailable';
+    stationCount: number;
+    city?: string | null;
+    confidence: 'high' | 'medium' | 'low';
+    warning?: string | null;
+  };
+  dataCoverage?: {
+    availableWeight: number;
+    missingWeight: number;
+    coverageRatio: number;
+    missingCriticalLayers: string[];
+    coveragePenalty: 'none' | 'medium' | 'high';
+  };
+  disclaimer?: string;
+  activeJobId?: string;
 }
 
 // ─── v1.3.0 Evidence Trail ───────────────────────────────────────────────────

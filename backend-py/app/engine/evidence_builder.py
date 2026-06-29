@@ -1,4 +1,4 @@
-"""Evidence Trail builder — v1.3.0.
+"""Evidence Trail builder — v1.4.0.
 
 Assembles EvidenceTrail from pipeline artefacts collected during _run_analysis().
 All functions are pure / side-effect-free and accept already-computed values.
@@ -18,13 +18,19 @@ from ..models.evidence import (
     CandidateEvidence,
     CandidateFactorEvidence,
     ConstraintCheckEvidence,
+    ConstraintValidationEvidence,
+    DataCoverageEvidence,
     DataSnapshotEvidence,
+    DeterministicCriticEvidence,
     EvidenceTrail,
     ExclusionEvidence,
     FactorEvidence,
+    MetroValidationEvidence,
     PromptEvidence,
     ProviderQueryEvidence,
     RecommendationSummaryEvidence,
+    RouteValidationEvidence,
+    ScoreDisplayPolicyEvidence,
     ScoringEvidence,
     StudyAreaEvidence,
 )
@@ -401,6 +407,12 @@ def assemble_evidence_trail(
     relaxation_options: list[dict],
     limitations: list[str],
     created_at: str | None = None,
+    # v1.4.0 additions
+    constraint_policy=None,
+    data_coverage: dict | None = None,
+    route_unavailable: list[str] | None = None,
+    metro_result=None,
+    deterministic_critic=None,
 ) -> EvidenceTrail:
     """Assemble the full EvidenceTrail from pipeline artefacts."""
     if created_at is None:
@@ -497,8 +509,66 @@ def assemble_evidence_trail(
         "Full replay depends on cached provider responses and is not yet implemented.",
     ]
 
+    # ── v1.4.0 additions ─────────────────────────────────────────────────────
+    constraint_validation_ev = ConstraintValidationEvidence()
+    if constraint_policy is not None:
+        constraint_validation_ev = ConstraintValidationEvidence(
+            unverified=constraint_policy.unverifiedHardConstraints,
+            failed=constraint_policy.failedHardConstraints,
+            provisionalReasons=constraint_policy.provisionalReasons,
+            enforcementLevel=constraint_policy.constraintEnforcementLevel,
+        )
+
+    data_coverage_ev = DataCoverageEvidence()
+    if data_coverage:
+        data_coverage_ev = DataCoverageEvidence(
+            availableWeight=data_coverage.get("availableWeight", 0.0),
+            missingWeight=data_coverage.get("missingWeight", 0.0),
+            coverageRatio=data_coverage.get("coverageRatio", 1.0),
+            missingCriticalLayers=data_coverage.get("missingCriticalLayers", []),
+            lowCoverageLayers=data_coverage.get("lowCoverageLayers", []),
+            coveragePenalty=data_coverage.get("coveragePenalty", "none"),
+        )
+
+    route_valid_ev = RouteValidationEvidence(
+        provider="ORS",
+        strict=bool(spec.routeConstraints),
+        fallbackUsed=False,
+        failures=[],
+        unavailableConstraints=route_unavailable or [],
+    )
+
+    metro_valid_ev = MetroValidationEvidence()
+    if metro_result is not None:
+        metro_valid_ev = MetroValidationEvidence(
+            mode=metro_result.mode,
+            stationCount=metro_result.station_count,
+            city=metro_result.city,
+            confidence=metro_result.confidence,
+            warning=metro_result.warning,
+        )
+
+    det_critic_ev = DeterministicCriticEvidence()
+    if deterministic_critic is not None:
+        det_critic_ev = DeterministicCriticEvidence(
+            verdict=deterministic_critic.verdict,
+            reasons=deterministic_critic.reasons,
+            recommendedAction=deterministic_critic.recommendedAction,
+            confidenceLabel=deterministic_critic.confidenceLabel,
+            availableWeight=deterministic_critic.availableWeight,
+            missingWeight=deterministic_critic.missingWeight,
+            coverageRatio=deterministic_critic.coverageRatio,
+            missingCriticalLayers=deterministic_critic.missingCriticalLayers,
+        )
+
+    extra_limitations = [
+        "Output is micro-market-zone level (H3 hexagons, ~100–700 m edge). "
+        "This is NOT a parcel-level or building-level recommendation.",
+        "Rent, floor-area, zoning, and parcel availability constraints are "
+        "UNVERIFIABLE from spatial data — field validation required.",
+    ]
+
     return EvidenceTrail(
-        evidenceVersion="1.3.0",
         analysisId="analysis_" + job_id[:8],
         jobId=job_id,
         createdAt=created_at,
@@ -513,7 +583,15 @@ def assemble_evidence_trail(
         exclusions=exclusions_ev,
         scoring=scoring_ev,
         recommendationSummary=rec_summary,
-        limitations=standard_limitations + limitations,
+        limitations=standard_limitations + limitations + extra_limitations,
+        # v1.4.0
+        constraintValidation=constraint_validation_ev,
+        dataCoverage=data_coverage_ev,
+        routeValidation=route_valid_ev,
+        metroValidation=metro_valid_ev,
+        scoreDisplayPolicy=ScoreDisplayPolicyEvidence(),
+        deterministicCritic=det_critic_ev,
+        siteClaimLevel="micro_market_zone",
     )
 
 

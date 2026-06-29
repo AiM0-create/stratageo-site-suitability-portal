@@ -134,6 +134,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
+  const [showChecklist, setShowChecklist] = useState(false);
   const [evidenceExpandedFactor, setEvidenceExpandedFactor] = useState<string | null>(null);
   const evidenceTrail: EvidenceTrail | undefined = (result as any).evidenceTrail;
   // The critic judged this ranking untrustworthy → withhold the recommendation
@@ -142,12 +143,24 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   // Spatial Reliability Upgrade v1.0.3 — viability gate surfacing.
   const analysisStatus: string | undefined = (result as any).analysisStatus;
   const insufficient = analysisStatus === 'insufficient_viable_land';
+  const isProvisional = analysisStatus === 'provisional';
   const suggestions: string[] = (result as any).suggestions || [];
   const maskStats: Record<string, number> = (result as any).maskStats || {};
   // Phase 17 — critic and constraint enforcement transparency
   const criticEnabled: boolean = (result as any).criticEnabled === true;
   const constraintEnforcementLevel: string = (result as any).constraintEnforcementLevel || 'advisory';
   const untracedConstraints: string[] = (result as any).untracedConstraints || [];
+  // v1.4.0 — constraint policy + validation checklist
+  const constraintPolicy: any = (result as any).constraintPolicy || {};
+  const unverifiedConstraints: string[] = constraintPolicy.unverifiedHardConstraints || [];
+  const provisionalReasons: string[] = constraintPolicy.provisionalReasons || [];
+  const validationChecklist: any[] = constraintPolicy.validationChecklist || [];
+  const siteClaimLevel: string = (result as any).siteClaimLevel || 'micro_market_zone';
+  const disclaimer: string = (result as any).disclaimer || '';
+  // v1.4.0 — data coverage
+  const dataCoverage: any = (result as any).dataCoverage || {};
+  const coverageRatio: number = dataCoverage.coverageRatio ?? 1.0;
+  const missingCritical: string[] = dataCoverage.missingCriticalLayers || [];
   // v1.2.0 — deterministic planning transparency
   const planningMode: string = (result as any).planningMode || '';
   const planningFingerprint: string = (result as any).planningFingerprint || '';
@@ -190,7 +203,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
     <div className={`drawer ${open ? 'drawer-open' : 'drawer-closed'}`}>
       <div className="drawer-header">
         <div>
-          <div className="drawer-title">Ranked Locations</div>
+          <div className="drawer-title">Ranked Candidate Zones</div>
           <div className="drawer-subtitle">{result.business_type} — {result.target_location}</div>
         </div>
         <button onClick={onClose} className="drawer-close" aria-label="Close">
@@ -251,6 +264,73 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 <span>Try widening riverfront corridor to 500 m</span>
               </button>
             )}
+          </div>
+        )}
+
+        {/* v1.4.0 — site claim level disclaimer (always visible) */}
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#64748b', marginBottom: 8 }}>
+          <b>Screening-level candidate zones</b> — H3 micro-market areas, not exact parcels or leasable sites. Field validation required before any leasing or investment decision.
+        </div>
+
+        {/* v1.4.0 — provisional notice when hard constraints are unverifiable */}
+        {isProvisional && unverifiedConstraints.length > 0 && (
+          <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 6, padding: '8px 12px', marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, color: '#92400e', fontSize: '13px', marginBottom: 4 }}>
+              ⚠ PROVISIONAL — field validation required
+            </div>
+            <p style={{ fontSize: '12px', color: '#78350f', margin: 0 }}>
+              The following hard constraints <b>cannot be verified</b> from spatial data alone — they require broker confirmation, property surveys, or authority approvals:
+            </p>
+            <ul style={{ margin: '6px 0 4px', paddingLeft: 18, fontSize: '12px', color: '#78350f' }}>
+              {unverifiedConstraints.map((c, i) => <li key={i}>{c}</li>)}
+            </ul>
+            <p style={{ fontSize: '11px', color: '#92400e', margin: 0 }}>
+              No candidate can be treated as <b>Recommended</b> until these are confirmed in the field.
+            </p>
+            <button className="assumptions-toggle" style={{ marginTop: 6, fontSize: '11px' }} onClick={() => setShowChecklist(!showChecklist)}>
+              {showChecklist ? 'Hide' : 'Show'} validation checklist
+            </button>
+            {showChecklist && (
+              <table style={{ width: '100%', marginTop: 6, fontSize: '11px', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #fde68a' }}>
+                    <th style={{ textAlign: 'left', padding: '2px 4px' }}>Item</th>
+                    <th style={{ textAlign: 'left', padding: '2px 4px' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {validationChecklist.map((item: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #fef3c7' }}>
+                      <td style={{ padding: '2px 4px' }}>{item.item}</td>
+                      <td style={{ padding: '2px 4px' }}>
+                        <span style={{
+                          color: item.status === 'verified' ? '#059669' :
+                                 item.status === 'unverifiable' ? '#d97706' :
+                                 item.status === 'failed' ? '#dc2626' :
+                                 item.status === 'required' ? '#7c3aed' : '#64748b',
+                          fontWeight: 600,
+                        }}>
+                          {item.status === 'verified' ? '✓ Verified' :
+                           item.status === 'unverifiable' ? '? Unverifiable' :
+                           item.status === 'failed' ? '✕ Failed' :
+                           item.status === 'required' ? '! Required' :
+                           item.status === 'not_applicable' ? '— N/A' : item.status}
+                        </span>
+                        <span style={{ color: '#94a3b8', fontSize: '10px', marginLeft: 4 }}>{item.detail}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* v1.4.0 — data coverage warning */}
+        {coverageRatio < 0.65 && missingCritical.length > 0 && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '6px 10px', marginBottom: 8, fontSize: '11px', color: '#991b1b' }}>
+            <b>Low data coverage ({Math.round(coverageRatio * 100)}%)</b> — missing high-weight factor(s): {missingCritical.join(', ')}.
+            Scores are lower-confidence proxy estimates.
           </div>
         )}
 
@@ -437,22 +517,43 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   </div>
                 )}
 
-                {/* Phase 17 — critic + constraint enforcement disclosure */}
+                {/* v1.4.0 — reliability critic (always-on deterministic) */}
                 <div className="assumption-section" style={{ marginBottom: 8 }}>
                   <span className="assumption-label">Analysis Quality</span>
                   <div style={{ fontSize: '0.82em', color: '#64748b', lineHeight: 1.5 }}>
-                    <span style={{ marginRight: 12 }}>
-                      Reliability critic: <b style={{ color: criticEnabled ? '#059669' : '#d97706' }}>
-                        {criticEnabled ? 'Enabled' : 'Disabled (low cost mode)'}
+                    <div>
+                      Reliability critic: <b style={{ color: '#059669' }}>Deterministic (always-on)</b>
+                    </div>
+                    <div>
+                      Constraint enforcement: <b style={{
+                        color: constraintEnforcementLevel === 'verified' ? '#059669' :
+                               constraintEnforcementLevel === 'provisional' ? '#d97706' : '#dc2626'
+                      }}>
+                        {constraintEnforcementLevel === 'verified' ? 'Verified' :
+                         constraintEnforcementLevel === 'provisional' ? 'Provisional' :
+                         constraintEnforcementLevel === 'failed' ? 'Failed' : constraintEnforcementLevel}
                       </b>
-                    </span>
-                    <span>
-                      Constraint enforcement: <b style={{ color: constraintEnforcementLevel === 'advisory' ? '#d97706' : '#059669' }}>
-                        {constraintEnforcementLevel === 'advisory'
-                          ? 'Advisory'
-                          : 'Hard-enforced'}
-                      </b>
-                    </span>
+                    </div>
+                    <div>
+                      Site claim: <b style={{ color: '#64748b' }}>Micro-market zone</b>
+                      <span style={{ fontSize: '0.88em', color: '#94a3b8', marginLeft: 4 }}>
+                        (not parcel / building)
+                      </span>
+                    </div>
+                    {dataCoverage.coverageRatio !== undefined && (
+                      <div>
+                        Data coverage: <b style={{
+                          color: coverageRatio >= 0.75 ? '#059669' : coverageRatio >= 0.5 ? '#d97706' : '#dc2626'
+                        }}>
+                          {Math.round(coverageRatio * 100)}%
+                        </b>
+                        {missingCritical.length > 0 && (
+                          <span style={{ color: '#dc2626', fontSize: '0.88em', marginLeft: 4 }}>
+                            (missing: {missingCritical.join(', ')})
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {untracedConstraints.length > 0 && (
                       <div style={{ color: '#dc2626', marginTop: 4 }}>
                         ⚠ {untracedConstraints.length} constraint phrase(s) not traced to a spec gate.
@@ -540,6 +641,11 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       {loc.name}
                       {loc.excluded && <span className="excluded-badge">EXCLUDED</span>}
                       {raw && <span className="excluded-badge" style={{ background: '#e2e8f0', color: '#475569' }}>RAW — NOT RECOMMENDED</span>}
+                      {!loc.excluded && !raw && (loc as any).provisionalBadge && (
+                        <span className="excluded-badge" style={{ background: '#fef3c7', color: '#92400e', borderColor: '#f59e0b' }}>
+                          PROVISIONAL — field validation required
+                        </span>
+                      )}
                     </div>
                     <div className="drawer-loc-coords">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
                   </div>
@@ -551,10 +657,39 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       </>
                     ) : (
                       <>
-                        <span className="score-number" style={raw ? { color: '#64748b' } : undefined}>{loc.mcda_score.toFixed(1)}</span>
+                        {/* v1.4.0: show displayScore (rounded 0.5) instead of raw mcda_score */}
+                        <span className="score-number" style={raw ? { color: '#64748b' } : undefined}>
+                          {(loc as any).displayScore !== undefined
+                            ? (loc as any).displayScore.toFixed(1)
+                            : loc.mcda_score.toFixed(1)}
+                        </span>
                         {!loc.excluded && (
                           <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>
                             {getRecommendationLabel(loc, withheld, raw)}
+                          </span>
+                        )}
+                        {/* v1.4.0: confidence label */}
+                        {!raw && !loc.excluded && (loc as any).confidenceLabel && (
+                          <span style={{
+                            fontSize: '0.70em',
+                            color: (loc as any).confidenceLabel === 'High' ? '#059669' :
+                                   (loc as any).confidenceLabel === 'Medium' ? '#d97706' : '#dc2626',
+                            fontWeight: 600,
+                          }}>
+                            {(loc as any).confidenceLabel} confidence
+                          </span>
+                        )}
+                        {/* v1.4.0: score band */}
+                        {!raw && !loc.excluded && (loc as any).scoreBand && (
+                          <span style={{ fontSize: '0.68em', color: '#94a3b8' }}
+                                title="Proxy-based screening score — band reflects data uncertainty">
+                            ~{(loc as any).scoreBand}
+                          </span>
+                        )}
+                        {/* v1.4.0: close-band warning */}
+                        {!raw && !loc.excluded && (loc as any).closeBandWarning && (
+                          <span style={{ fontSize: '0.68em', color: '#d97706' }}>
+                            statistically similar
                           </span>
                         )}
                         {/* v1.1.0: show secondary score pills when available */}

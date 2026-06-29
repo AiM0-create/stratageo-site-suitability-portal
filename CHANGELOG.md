@@ -4,6 +4,47 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.4.0] — 2026-06-29 — Reliability Hardening — Honest Candidate Zones
+
+### Core Principle
+The portal must never imply more certainty than the data supports. v1.4.0 enforces this structurally — not just in the UI copy.
+
+### Added
+- **Constraint policy engine** (`engine/constraint_policy.py`): `evaluate_constraint_policy()` detects unverifiable hard constraints (rent, footprint, zoning, parcel availability, ownership). Returns `ConstraintPolicyResult` with validation checklist and enforcement level.
+- **Constraint downgrade rule**: `downgrade_status_for_unverified()` mutates locations — RECOMMENDED → CANDIDATE_ZONE when any hard constraint is unverifiable. No candidate can ever be RECOMMENDED when rent/footprint/zoning is unverified.
+- **Metro station resolver** (`engine/metro.py`): verified Kolkata Metro station list (35+ stations); OSM subway-tag detection; generic fallback with confidence tiers (`high → medium → low`). City auto-detected from prompt text.
+- **Always-on deterministic reliability critic** (`engine/reliability_critic.py`): `run_deterministic_critic()` checks 10 failure modes independently of cost mode. `merge_with_llm_critic()` combines verdicts conservatively. Previously, no critic ran in `low` cost mode.
+- **Score display policy** (`multi_score.py`): `displayScore` (rounded to nearest 0.5), `scoreBand` ("6.5–7.5"), `confidenceLabel` (High/Medium/Low), `confidenceReasons`, `closeBandWarning` when candidates are statistically indistinguishable.
+- **Data coverage accounting** (`multi_score.py`): `compute_data_coverage()` returns `availableWeight`, `missingWeight`, `coverageRatio`, `missingCriticalLayers`. Coverage < 50% → unreliable; 50–65% → weak; missing ≥20% weight → weak.
+- **LARGE_FORMAT_RETAIL archetype** (`canonical_archetypes.py`): for supermarket / hypermarket / discount store prompts. Factors: arterial proximity, residential catchment, competition density, commercial land density. Grid resolution 8. Misleading variables explicitly list rent and floor area as unverifiable.
+- **Strict route detection** (`intent_parser.py`): `_STRICT_ROUTE_RE` detects "exactly within / strictly within / delivery drive"; `_STRICT_WALK_RE` detects "walking radius". New `RawIntent` fields: `hasStrictRouteConstraint`, `hasStrictWalkConstraint`, `hasStudentDemandSignal`.
+- **Student demand improvements** (`canonical_archetypes.py`): expanded OSM tags for `student_catchment_proxy` (library, dormitory, training, language school); updated proxy warning explicitly stating MEDIUM confidence and that schools are weak demand proxies.
+- **EvidenceTrail v1.4** (`models/evidence.py`): new schemas `ConstraintValidationEvidence`, `DataCoverageEvidence`, `RouteValidationEvidence`, `MetroValidationEvidence`, `ScoreDisplayPolicyEvidence`, `DeterministicCriticEvidence`. Also: `siteClaimLevel = "micro_market_zone"` and mandatory `disclaimer` field.
+- **Health endpoint capability flags** (`routers/health.py`): `evidenceVersion`, `supportsStrictRouting`, `supportsTrafficAwareRouting`, `supportsVerifiedMetroLayer`, `criticMode`.
+- **Provisional banner in UI** (`ResultsDrawer.tsx`): amber warning when constraints are unverifiable, expandable validation checklist, per-item status (✓ Verified / ? Unverifiable / ✕ Failed / ! Required / — N/A).
+- **Screening disclaimer** in drawer (always visible): "H3 micro-market areas, not exact parcels or leasable sites."
+- **State cleanup / activeJobId guard** (`App.tsx`): previous result, selectedLocations, heatmapType cleared on new analysis. `activeJobIdRef` discards stale poll responses from old jobs.
+- **56 new tests** (`tests/test_v14_reliability.py`): constraint policy, score display, data coverage, student demand, metro resolution, strict route detection, deterministic critic, 4 canonical prompts, LARGE_FORMAT_RETAIL, evidence trail v1.4, health flags.
+- **3 new documentation files**: `STRATAGEO_V1_4_RELIABILITY_FIX_REPORT.md`, `STRATAGEO_V1_4_TEST_RESULTS.md`, `STRATAGEO_V1_4_KNOWN_LIMITATIONS.md`.
+
+### Changed
+- `config.py`: APP_VERSION → 1.4.0; ENGINE_VERSION → `stratageo-engine-00047`; EVIDENCE_VERSION → 1.4.0; SPEC_VERSION → 2.3; RELEASE_NAME → "Reliability Hardening — Honest Candidate Zones".
+- `analysis_status` now derived from always-on deterministic critic + optional LLM critic (conservative combination), not LLM critic alone. New status: `"provisional"` when constraints are unverifiable.
+- Drawer title: "Ranked Locations" → "Ranked Candidate Zones".
+- Location score display: `displayScore` (rounded 0.5) instead of raw `mcda_score`.
+- `jobs.py` result payload: `constraintEnforcementLevel` now reflects actual policy result (not hardcoded `"advisory"`); `criticEnabled` is now always `true` (deterministic critic always runs); new fields `constraintPolicy`, `metroValidation`, `dataCoverage`, `siteClaimLevel`, `disclaimer`.
+- `tests/test_config_v110.py`: version assertion → 1.4.0.
+- `tests/test_evidence_trail.py`: EVIDENCE_VERSION assertion → 1.4.0.
+- `package.json`: version → 1.4.0.
+
+### Fixed
+- Supermarket prompt (`discount supermarket in Sector V`) now selects `LARGE_FORMAT_RETAIL` archetype and correctly marks rent + footprint as PROVISIONAL rather than failing with `not_feasible`.
+- Metro exclusion no longer silently uses generic `railway=station` as proxy — now uses verified Kolkata station list or explicitly declares confidence tier.
+- Score precision: "7.1/10" is now shown as "7.0" with band "6.5–7.5" — no false precision.
+- Previous analysis result no longer persists into new analysis start (state cleared deterministically).
+
+---
+
 ## [1.3.0] — 2026-06-25 — Evidence Trail & Reproducible Site Selection Reports
 
 ### Added

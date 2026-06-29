@@ -85,26 +85,45 @@ def _parse_top_n(text: str) -> dict:
 
 # ── Business / site type ───────────────────────────────────────────────────────
 _BIZ_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("premium_restaurant",  re.compile(r"\b(premium|luxury|fine.?dining|high.?end|upscale)\b.{0,40}\b(restaurant|dine|dining|eatery|bistro)\b", re.I)),
-    ("dark_kitchen",        re.compile(r"\b(dark|cloud|ghost|virtual|delivery)\b.{0,20}\b(kitchen|restaurant)\b", re.I)),
-    ("qsr_restaurant",      re.compile(r"\b(qsr|quick.?service|fast.?food|fast\s+casual)\b", re.I)),
-    ("cafe",                re.compile(r"\b(cafe|caf[eé]|coffee|bakery|patisserie)\b", re.I)),
-    ("restaurant",          re.compile(r"\b(restaurant|dining|eatery|bistro|dhaba|bar\s+and\s+grill)\b", re.I)),
-    ("maternity_clinic",    re.compile(r"\b(maternity|obstetric|prenatal|antenatal|gynec|OBGYN)\b.{0,30}\b(clinic|hospital|centre|center)\b", re.I)),
-    ("hospital",            re.compile(r"\b(hospital|healthcare\s+facility|medical\s+center|multi.?speciality)\b", re.I)),
-    ("clinic",              re.compile(r"\b(clinic|dispensary|health\s+centre|polyclinic|diagnostic\s+centre|outpatient)\b", re.I)),
-    ("preschool",           re.compile(r"\b(preschool|pre.?school|playschool|nursery|daycare|kindergarten|montessori|creche)\b", re.I)),
-    ("school",              re.compile(r"\b(school|k-12|secondary\s+school|high\s+school|academy)\b", re.I)),
-    ("gym",                 re.compile(r"\b(gym|fitness|wellness\s+centre|crossfit|yoga\s+studio|health\s+club)\b", re.I)),
-    ("warehouse",           re.compile(r"\b(warehouse|fulfillment\s+cent(?:re|er)|distribution\s+cent(?:re|er)|storage\s+facility)\b", re.I)),
-    ("logistics",           re.compile(r"\b(logistics|logistics\s+hub|freight|cargo|last.?mile|3pl)\b", re.I)),
-    ("ev_charger",          re.compile(r"\b(ev\s+charger|electric\s+vehicle\s+charg|ev\s+charging\s+station|charge\s+point)\b", re.I)),
-    ("resort",              re.compile(r"\b(resort|retreat|eco.?lodge|boutique\s+hotel|hill\s+station|wellness\s+resort)\b", re.I)),
-    ("hotel",               re.compile(r"\b(hotel|lodging|accommodation|guesthouse|inn)\b", re.I)),
-    ("office",              re.compile(r"\b(office|coworking|co.?working|commercial\s+space|business\s+park|corporate)\b", re.I)),
-    ("industrial",          re.compile(r"\b(industrial|manufacturing|factory|plant|production\s+facility|SEZ)\b", re.I)),
-    ("retail",              re.compile(r"\b(retail|store|shop|showroom|outlet|mall|market)\b", re.I)),
+    ("premium_restaurant",    re.compile(r"\b(premium|luxury|fine.?dining|high.?end|upscale)\b.{0,40}\b(restaurant|dine|dining|eatery|bistro)\b", re.I)),
+    ("dark_kitchen",          re.compile(r"\b(dark|cloud|ghost|virtual|delivery)\b.{0,20}\b(kitchen|restaurant)\b", re.I)),
+    ("qsr_restaurant",        re.compile(r"\b(qsr|quick.?service|fast.?food|fast\s+casual)\b", re.I)),
+    ("discount_supermarket",  re.compile(r"\b(discount\s+supermarket|hypermarket|big[\s\-]box|discount\s+store|cash\s+and\s+carry)\b", re.I)),
+    ("supermarket",           re.compile(r"\b(supermarket|super\s+market|grocery\s+store|grocery\s+chain)\b", re.I)),
+    ("cafe",                  re.compile(r"\b(cafe|caf[eé]|coffee|bakery|patisserie)\b", re.I)),
+    ("restaurant",            re.compile(r"\b(restaurant|dining|eatery|bistro|dhaba|bar\s+and\s+grill)\b", re.I)),
+    ("maternity_clinic",      re.compile(r"\b(maternity|obstetric|prenatal|antenatal|gynec|OBGYN)\b.{0,30}\b(clinic|hospital|centre|center)\b", re.I)),
+    ("hospital",              re.compile(r"\b(hospital|healthcare\s+facility|medical\s+center|multi.?speciality)\b", re.I)),
+    ("clinic",                re.compile(r"\b(clinic|dispensary|health\s+centre|polyclinic|diagnostic\s+centre|outpatient)\b", re.I)),
+    ("preschool",             re.compile(r"\b(preschool|pre.?school|playschool|nursery|daycare|kindergarten|montessori|creche)\b", re.I)),
+    ("school",                re.compile(r"\b(school|k-12|secondary\s+school|high\s+school|academy)\b", re.I)),
+    ("gym",                   re.compile(r"\b(gym|fitness|wellness\s+centre|crossfit|yoga\s+studio|health\s+club)\b", re.I)),
+    ("warehouse",             re.compile(r"\b(warehouse|fulfillment\s+cent(?:re|er)|distribution\s+cent(?:re|er)|storage\s+facility)\b", re.I)),
+    ("logistics",             re.compile(r"\b(logistics|logistics\s+hub|freight|cargo|last.?mile|3pl)\b", re.I)),
+    ("ev_charger",            re.compile(r"\b(ev\s+charger|electric\s+vehicle\s+charg|ev\s+charging\s+station|charge\s+point)\b", re.I)),
+    ("resort",                re.compile(r"\b(resort|retreat|eco.?lodge|boutique\s+hotel|hill\s+station|wellness\s+resort)\b", re.I)),
+    ("hotel",                 re.compile(r"\b(hotel|lodging|accommodation|guesthouse|inn)\b", re.I)),
+    ("office",                re.compile(r"\b(office|coworking|co.?working|commercial\s+space|business\s+park|corporate)\b", re.I)),
+    ("industrial",            re.compile(r"\b(industrial|manufacturing|factory|plant|production\s+facility|SEZ)\b", re.I)),
+    ("retail",                re.compile(r"\b(retail|store|shop|showroom|outlet|mall|market)\b", re.I)),
 ]
+
+# ── Strict route constraint detection (Phase 9) ───────────────────────────────
+# These phrases require real routing (ORS/Google) — Euclidean fallback is not
+# acceptable. When detected, the engine must withhold recommendations if routing
+# is unavailable.
+_STRICT_ROUTE_RE = re.compile(
+    r"\b(exactly\s+within|strictly\s+within|must\s+be\s+within|must\s+not\s+exceed"
+    r"|delivery\s+drive|10.?minute\s+drive|within\s+\d+.?min(?:ute)?s?\s+(?:drive|walk)"
+    r"|walking\s+radius|drive.?time\s+radius|strictly\s+outside|must\s+be\s+outside"
+    r"|no\s+more\s+than\s+\d+\s*min(?:ute)?s?\s+(?:drive|walk))\b",
+    re.I,
+)
+
+_STRICT_WALK_RE = re.compile(
+    r"\b(walking\s+radius|walking\s+distance|walk\s+time|on\s+foot|pedestrian\s+access)\b",
+    re.I,
+)
 
 
 def _parse_business_type(text: str) -> str:
@@ -245,26 +264,40 @@ class RawIntent:
     objectiveType: str = "demand_maximization"
     hasUploadedCandidates: bool = False
     # True when the user explicitly said "only" rank uploaded points (hard constraint).
-    # Distinct from hasUploadedCandidates which can be True even in a mixed prompt.
     uploadedCandidatesOnly: bool = False
+    # Phase 9: strict route-time detection
+    hasStrictRouteConstraint: bool = False
+    hasStrictWalkConstraint: bool = False
+    # Phase 7: student demand flag
+    hasStudentDemandSignal: bool = False
 
     def to_dict(self) -> dict:
         return {
-            "rawPrompt":             self.rawPrompt[:500],
-            "topNResolved":          self.topN.get("topNResolved", TOP_N_DEFAULT),
-            "requestedTopNRaw":      self.topN.get("requestedTopNRaw"),
-            "topNReason":            self.topN.get("topNReason"),
-            "outputCountWarning":    self.topN.get("outputCountWarning"),
-            "businessTypeKey":       self.businessTypeKey,
-            "businessTypeRaw":       self.businessTypeRaw,
-            "geography":             self.geography,
-            "hardConstraintPhrases": self.hardConstraintPhrases,
-            "spatialRelations":      self.spatialRelations,
-            "featureClasses":        self.featureClasses,
-            "objectiveType":         self.objectiveType,
-            "hasUploadedCandidates":   self.hasUploadedCandidates,
-            "uploadedCandidatesOnly":  self.uploadedCandidatesOnly,
+            "rawPrompt":                self.rawPrompt[:500],
+            "topNResolved":             self.topN.get("topNResolved", TOP_N_DEFAULT),
+            "requestedTopNRaw":         self.topN.get("requestedTopNRaw"),
+            "topNReason":               self.topN.get("topNReason"),
+            "outputCountWarning":       self.topN.get("outputCountWarning"),
+            "businessTypeKey":          self.businessTypeKey,
+            "businessTypeRaw":          self.businessTypeRaw,
+            "geography":                self.geography,
+            "hardConstraintPhrases":    self.hardConstraintPhrases,
+            "spatialRelations":         self.spatialRelations,
+            "featureClasses":           self.featureClasses,
+            "objectiveType":            self.objectiveType,
+            "hasUploadedCandidates":    self.hasUploadedCandidates,
+            "uploadedCandidatesOnly":   self.uploadedCandidatesOnly,
+            "hasStrictRouteConstraint": self.hasStrictRouteConstraint,
+            "hasStrictWalkConstraint":  self.hasStrictWalkConstraint,
+            "hasStudentDemandSignal":   self.hasStudentDemandSignal,
         }
+
+
+_STUDENT_RE = re.compile(
+    r"\bstudents?\b|\bcollege\b|\buniversity\b|\bcampus\b|\bcoaching\s+centre\b"
+    r"|\bhostel\b|\bstudent\s+hostel\b|\btuition\b",
+    re.I,
+)
 
 
 def parse_raw_intent(prompt: str) -> RawIntent:
@@ -279,6 +312,9 @@ def parse_raw_intent(prompt: str) -> RawIntent:
         objective = _extract_objective(prompt)
         uploaded = bool(_SPATIAL_PATTERNS["uploaded_candidates"].search(prompt))
         uploaded_only = bool(_UPLOADED_ONLY_RE.search(prompt))
+        has_strict_route = bool(_STRICT_ROUTE_RE.search(prompt))
+        has_strict_walk = bool(_STRICT_WALK_RE.search(prompt))
+        has_student = bool(_STUDENT_RE.search(prompt))
         return RawIntent(
             rawPrompt=prompt,
             topN=top_n,
@@ -291,6 +327,9 @@ def parse_raw_intent(prompt: str) -> RawIntent:
             objectiveType=objective,
             hasUploadedCandidates=uploaded or uploaded_only,
             uploadedCandidatesOnly=uploaded_only,
+            hasStrictRouteConstraint=has_strict_route,
+            hasStrictWalkConstraint=has_strict_walk,
+            hasStudentDemandSignal=has_student,
         )
     except Exception:
         # Never crash the caller

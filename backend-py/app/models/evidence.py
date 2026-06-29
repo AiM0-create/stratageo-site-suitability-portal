@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-EVIDENCE_VERSION = "1.3.0"
+EVIDENCE_VERSION = "1.4.0"
 
 
 class ProviderQueryEvidence(BaseModel):
@@ -150,6 +150,64 @@ class RecommendationSummaryEvidence(BaseModel):
     relaxationOptions: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ConstraintValidationEvidence(BaseModel):
+    """v1.4.0 — which hard constraints could and could not be verified."""
+    verified: list[str] = Field(default_factory=list)
+    unverified: list[str] = Field(default_factory=list)
+    failed: list[str] = Field(default_factory=list)
+    provisionalReasons: list[str] = Field(default_factory=list)
+    enforcementLevel: str = "verified"   # verified | provisional | unverifiable | failed
+
+
+class DataCoverageEvidence(BaseModel):
+    """v1.4.0 — data coverage accounting (Phase 6)."""
+    availableWeight: float = 0.0
+    missingWeight: float = 0.0
+    coverageRatio: float = 1.0
+    missingCriticalLayers: list[str] = Field(default_factory=list)
+    lowCoverageLayers: list[dict[str, Any]] = Field(default_factory=list)
+    coveragePenalty: str = "none"   # none | medium | high
+
+
+class RouteValidationEvidence(BaseModel):
+    """v1.4.0 — route constraint verification details."""
+    provider: str = "ORS"   # ORS | Google Routes | Unavailable
+    strict: bool = False
+    fallbackUsed: bool = False
+    failures: list[str] = Field(default_factory=list)
+    unavailableConstraints: list[str] = Field(default_factory=list)
+
+
+class MetroValidationEvidence(BaseModel):
+    """v1.4.0 — metro exclusion resolution details."""
+    mode: str = "unavailable"   # static_verified | osm_metro | generic_station_fallback | unavailable
+    stationCount: int = 0
+    bufferM: int | None = None
+    distanceType: str = "straight_line"
+    city: str | None = None
+    confidence: str = "low"
+    warning: str | None = None
+
+
+class ScoreDisplayPolicyEvidence(BaseModel):
+    """v1.4.0 — how scores are shown vs. stored."""
+    internalPrecision: str = "0.1"
+    displayPrecision: str = "0.5_or_band"
+    reason: str = "proxy-based screening score — false precision misleads"
+
+
+class DeterministicCriticEvidence(BaseModel):
+    """v1.4.0 — always-on deterministic critic result."""
+    verdict: str = "reliable"
+    reasons: list[str] = Field(default_factory=list)
+    recommendedAction: str = "show_recommendations"
+    confidenceLabel: str = "High"
+    availableWeight: float = 0.0
+    missingWeight: float = 0.0
+    coverageRatio: float = 1.0
+    missingCriticalLayers: list[str] = Field(default_factory=list)
+
+
 class EvidenceTrail(BaseModel):
     evidenceVersion: str = EVIDENCE_VERSION
     analysisId: str = ""
@@ -169,6 +227,32 @@ class EvidenceTrail(BaseModel):
         default_factory=RecommendationSummaryEvidence
     )
     limitations: list[str] = Field(default_factory=list)
+
+    # ── v1.4.0 additions ─────────────────────────────────────────────────────
+    constraintValidation: ConstraintValidationEvidence = Field(
+        default_factory=ConstraintValidationEvidence
+    )
+    dataCoverage: DataCoverageEvidence = Field(
+        default_factory=DataCoverageEvidence
+    )
+    routeValidation: RouteValidationEvidence = Field(
+        default_factory=RouteValidationEvidence
+    )
+    metroValidation: MetroValidationEvidence = Field(
+        default_factory=MetroValidationEvidence
+    )
+    scoreDisplayPolicy: ScoreDisplayPolicyEvidence = Field(
+        default_factory=ScoreDisplayPolicyEvidence
+    )
+    deterministicCritic: DeterministicCriticEvidence = Field(
+        default_factory=DeterministicCriticEvidence
+    )
+    siteClaimLevel: str = "micro_market_zone"
+    disclaimer: str = (
+        "These are screening-level candidate zones (H3 hexagons, ~100–700 m edge), "
+        "not exact parcels, building addresses, or investment recommendations. "
+        "Field validation is required before any leasing or investment decision."
+    )
 
     def safe_dict(self) -> dict:
         """Serialise to a secret-safe dict. Validates no secret keys slip through."""
