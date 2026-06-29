@@ -4,35 +4,6 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
-## [1.4.0] — 2026-06-26 — Google Maps Isochrones, Adaptive H3 Resolution & Chat UX
-
-### Added
-- **Google Maps isochrones (primary, ORS fallback)**: `fetch_isochrones()` now uses Google Routes `computeRouteMatrix` to sample reachability points and build a convex-hull polygon per candidate. ORS used as fallback per cell when Google fails; Euclidean proxy is the final fallback. Backward-compatible `_rate_limit` alias preserved for `routing.py`.
-- **`LARGE_FORMAT_RETAIL` canonical archetype** for supermarkets/hypermarkets/discount stores: drive-reachable residential demand (12-min), supermarket competition (10-min drive), commercial land density (euclidean 400m), office daytime demand (10-min drive). Default topN=5, grid res 8.
-- **`discount_supermarket` and `supermarket` intent parser patterns** → maps to `large_format_retail`.
-- **Adaptive H3 grid resolution by archetype**: walk/micro-market archetypes (cafe, QSR, retail, preschool) keep res 9; drive-catchment/logistics archetypes (clinic, dark kitchen, warehouse, EV charger, large-format retail) use res 8.
-- **Default OSM tags + Places types in `to_layers_dict()`**: canonical archetype layers now populate sensible default tags/types so no layer is ever submitted with an empty source (prevents 422 spec validation errors).
-- **Spec repair in `analyses.py`**: `_repair_spec_layers()` strips any remaining empty-source layers before SpecV2 validation, with a clear error if all layers are dropped.
-- **Per-message action buttons** (chat UI): copy, edit-and-resend, share-prompt appear on hover for every message.
-- **Inline "Run Analysis" prompt**: when `chatReady && chatStage === 'ready'`, a green "Run Analysis" button appears inline in the chat flow — no need to type "run".
-- **Tour auto-start for new non-admin users**: guided tour fires 1.2 s after first login; `localStorage` flag prevents repeat. Admins always skip.
-- **Responsive tour positioning**: tooltip clamps to viewport on all screen sizes; mobile collapses to bottom-center panel.
-
-### Changed
-- Business type sector picker removed from chat input bar.
-- System prompt P7: "not_feasible" example changed from the supermarket/rent scenario to a genuinely contradictory constraint; rent/financial caps explicitly documented as UNVALIDATABLE → tradeoffs, never not_feasible.
-- `APP_VERSION` / `ENGINE_VERSION` → `1.4.0`.
-- `RELEASE_NAME` updated.
-- README: version, scoring description, v1.4 highlights table.
-
-### Not changed
-- All v1.3.0 evidence trail features preserved.
-- All v1.2.0 deterministic planning features preserved.
-- Model routing defaults unchanged.
-- SPEC_VERSION remains `2.2`.
-
----
-
 ## [1.3.0] — 2026-06-25 — Evidence Trail & Reproducible Site Selection Reports
 
 ### Added

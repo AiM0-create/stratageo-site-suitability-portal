@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AnalysisStatus } from '../types';
@@ -76,8 +76,10 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
   const [input, setInput] = useState('');
+  const [showSectors, setShowSectors] = useState(false);
   const [showPromptGuide, setShowPromptGuide] = useState(false);
-  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [selectedSector, setSelectedSector] = useState('');
+  const [city, setCity] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -99,12 +101,21 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
     }
   }, [messages, isLoading, expanded]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = () => {
     const text = input.trim();
     if (!text) return;
     onRunAnalysis(text);
     setInput('');
-  }, [input, onRunAnalysis]);
+  };
+
+  const handleStructuredSubmit = () => {
+    if (!selectedSector || !city.trim()) return;
+    const label = config.sectors.find(s => s.id === selectedSector)?.label || selectedSector;
+    onRunAnalysis(`${label} in ${city.trim()}`);
+    setShowSectors(false);
+    setSelectedSector('');
+    setCity('');
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -112,26 +123,6 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
       handleSubmit();
     }
   };
-
-  // Copy message text to clipboard with brief visual feedback
-  const handleCopyMessage = useCallback((text: string, idx: number) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedIdx(idx);
-      setTimeout(() => setCopiedIdx(null), 1500);
-    }).catch(() => {});
-  }, []);
-
-  // Load a previous user message into the input for editing
-  const handleEditMessage = useCallback((text: string) => {
-    setInput(text);
-    setTimeout(() => textareaRef.current?.focus(), 50);
-  }, []);
-
-  // Share prompt as a pre-filled URL hash
-  const handleSharePrompt = useCallback((text: string) => {
-    const url = `${window.location.origin}${window.location.pathname}#prompt=${encodeURIComponent(text)}`;
-    navigator.clipboard.writeText(url).catch(() => {});
-  }, []);
 
   return (
     <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}${drawerOpen ? ' assistant-drawer-shift' : ''}`}>
@@ -274,39 +265,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
                     </div>
                   ) : (
-                    <span>{msg.text}</span>
-                  )}
-                </div>
-                {/* Per-message actions */}
-                <div className="msg-actions">
-                  <button
-                    className="msg-action-btn"
-                    title={copiedIdx === i ? 'Copied!' : 'Copy'}
-                    onClick={() => handleCopyMessage(msg.text, i)}
-                  >
-                    {copiedIdx === i ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-xs"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" /></svg>
-                    )}
-                  </button>
-                  {msg.role === 'user' && (
-                    <>
-                      <button
-                        className="msg-action-btn"
-                        title="Edit and resend"
-                        onClick={() => handleEditMessage(msg.text)}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-xs"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" /></svg>
-                      </button>
-                      <button
-                        className="msg-action-btn"
-                        title="Share prompt"
-                        onClick={() => handleSharePrompt(msg.text)}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-xs"><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" /></svg>
-                      </button>
-                    </>
+                    msg.text
                   )}
                 </div>
               </div>
@@ -324,25 +283,6 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 onConfirmExecute={onConfirmExecute ?? (() => {})}
                 onSpecEdit={onSpecEdit}
               />
-            )}
-
-            {/* Inline run prompt — appears in the conversation flow when the plan
-                is ready and the engine is waiting for a go signal. This removes the
-                need for users to know to type "run" — they can just click. */}
-            {config.isConversationalMode && chatReady && !isLoading && !isExecuting && chatStage === 'ready' && (
-              <div className="inline-run-prompt">
-                <span className="inline-run-text">Ready to run the spatial analysis.</span>
-                <button
-                  className="inline-run-btn"
-                  onClick={onConfirmExecute}
-                  title="Run the analysis now"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="icon-xs" style={{ marginRight: 4 }}>
-                    <path d="M6.3 2.84A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.27l9.344-5.891a1.5 1.5 0 0 0 0-2.538L6.3 2.84Z" />
-                  </svg>
-                  Run Analysis
-                </button>
-              </div>
             )}
 
             {isLoading && (
@@ -368,8 +308,47 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
             )}
           </div>
 
-          {/* v1.4.0: Business type picker removed. Use natural language in the text box.
-              Result count is inferred by the deterministic parser from your prompt. */}
+          {/* Structured input toggle */}
+          {showSectors && (
+            <div className="assistant-structured">
+              <div className="assistant-sector-grid">
+                {config.sectors.map(s => (
+                  <button
+                    key={s.id}
+                    className={`assistant-sector ${selectedSector === s.id ? 'active' : ''}`}
+                    onClick={() => setSelectedSector(s.id)}
+                  >
+                    <span>{s.icon}</span>
+                    <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="assistant-structured-row">
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Target city..."
+                  className="assistant-input-field"
+                  list="city-list"
+                />
+                <datalist id="city-list">
+                  {config.featuredCities.map(c => <option key={c.name} value={c.name} />)}
+                </datalist>
+                <button
+                  onClick={handleStructuredSubmit}
+                  disabled={!selectedSector || !city.trim() || isLoading}
+                  className="assistant-send"
+                >
+                  Analyze
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* v1.1.0: result count is inferred from the prompt by the deterministic
+              RawIntent parser — no dropdown needed in the chat UI.
+              Count editing remains available in SpecSummaryCard (advanced). */}
 
           {/* Context chips — show active memory items */}
           {memory.lastAnalysisTimestamp && (
@@ -420,6 +399,18 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
 
           {/* Input bar */}
           <div className="assistant-input">
+            <button
+              className="assistant-mode-btn"
+              onClick={() => setShowSectors(!showSectors)}
+              title={showSectors ? 'Free text input' : 'Pick business type'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
+                {showSectors
+                  ? <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5" />
+                  : <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
+                }
+              </svg>
+            </button>
             {/* CSV upload button */}
             <input
               ref={csvInputRef}

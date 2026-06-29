@@ -5,7 +5,6 @@ v1.1.1: refreshed model defaults to the cost-aware gpt-5.4 family.
 v1.1.2: water tag helper import fix.
 v1.2.0: deterministic planning mode — canonical archetype schemas, spec fingerprinting.
 v1.3.0: evidence trail & reproducible site-selection reports.
-v1.4.0: Google Maps isochrones (ORS fallback), adaptive H3 resolution, chat UX rework.
 """
 from functools import lru_cache
 from typing import Literal
@@ -13,11 +12,11 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.4.0"
+APP_VERSION     = "1.3.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "1.4.0"
+ENGINE_VERSION  = "1.3.0"
 SPEC_VERSION    = "2.2"
-RELEASE_NAME    = "Google Maps Isochrones, Adaptive H3 Resolution & Chat UX"
+RELEASE_NAME    = "Evidence Trail & Reproducible Site Selection Reports"
 
 
 class Settings(BaseSettings):

@@ -114,37 +114,6 @@ async def chat_turn(
     settings = get_settings()
     client = _client()
 
-    # ── Spec staleness guard — discard inherited spec when the business type
-    # changes between turns. Without this, running multiple analyses in the same
-    # session without clicking "New Chat" causes constraints from a previous
-    # analysis (metro exclusions, waterfront corridors, rent caveats, etc.) to
-    # bleed into a completely different brief.
-    #
-    # Rule: if the latest user message parses to a non-generic business type and
-    # the incoming spec carries a DIFFERENT non-generic type, treat the spec as
-    # stale and start fresh. Short affirmation turns ("yes", "run it") are always
-    # carry-forward regardless.
-    _last_msg_preview = next(
-        (m.content for m in reversed(messages) if m.role == "user"), ""
-    )
-    _is_short_affirmation = bool(AFFIRMATION.match(_last_msg_preview) or is_go_signal(_last_msg_preview))
-    if spec and not _is_short_affirmation:
-        _cur_ri = parse_raw_intent(_last_msg_preview)
-        _spec_ri = (spec or {}).get("rawIntent") or {}
-        _spec_biz = _spec_ri.get("businessTypeKey", "generic")
-        _cur_biz = _cur_ri.businessTypeKey
-        # Both sides must be non-generic and genuinely different to trigger a reset
-        if (
-            _cur_biz not in ("generic",)
-            and _spec_biz not in ("generic",)
-            and _cur_biz != _spec_biz
-        ):
-            logger.info(
-                "Spec reset: business type changed (%s → %s) — discarding stale spec",
-                _spec_biz, _cur_biz,
-            )
-            spec = None
-
     convo = [{"role": "system", "content": chat_system_prompt()}]
     if spec:
         convo.append({
@@ -331,30 +300,6 @@ async def chat_turn(
     # deterministically from the archetype playbook when the model skimps.
     if stage != "chat" and isinstance(new_spec, dict) and new_spec.get("layers"):
         _backfill_plan(new_spec)
-
-    # ── Waterfront false-positive guard (server-side) ──────────────────────
-    # The LLM sometimes sets waterfront.isWaterfront=true for non-waterfront
-    # briefs (e.g. "near EM Bypass" — the LLM knows canals run alongside it,
-    # so it marks the brief as riverside). When the engine then enforces a
-    # strict riverfront corridor, ALL hexes are removed → silent "no viable site".
-    #
-    # Fix: compare the LLM's waterfront verdict against the deterministic
-    # detect_waterfront() regex on the ORIGINAL prompt. If the regex returns
-    # False but the LLM set True, the LLM is hallucinating a riverside context —
-    # override it. Real waterfront prompts always contain keywords like
-    # "riverside", "along the Hooghly", "on the waterfront" etc. which the
-    # regex reliably matches.
-    if isinstance(new_spec, dict) and (new_spec.get("waterfront") or {}).get("isWaterfront"):
-        from ..models.spec import detect_waterfront as _detect_wf
-        _full_prompt = effective_raw_prompt if "effective_raw_prompt" in dir() else last_user
-        _det = _detect_wf(_full_prompt)
-        if not _det.get("isWaterfront"):
-            logger.warning(
-                "Waterfront false-positive: LLM set isWaterfront=true but prompt "
-                "contains no waterfront keywords — overriding to False. Prompt: %r",
-                _full_prompt[:120],
-            )
-            new_spec["waterfront"] = {"isWaterfront": False, "strictness": None, "corridorWidthM": None}
 
     # ── Feasibility-first gate (server-side, prompt-independent) ──────────
     # A not_feasible plan can NEVER execute, even on an explicit go signal —

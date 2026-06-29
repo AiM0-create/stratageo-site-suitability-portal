@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.4.0 — Google Maps Isochrones, Adaptive H3 Resolution & Chat UX**
+**Current version: v1.3.0 — Evidence Trail & Reproducible Site Selection Reports**
 
 ---
 
@@ -19,20 +19,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Critic enabled/disabled disclosure** — the post-execution self-critique runs in `balanced`/`high` cost mode; its status is always visible
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
-- **PDF export** — screening-level report with version, disclaimer, recommendation mode, and v1.3+ Evidence Appendix
-- **Downloadable evidence trail** — every recommendation is fully auditable: data sources, factor raw counts, scores, exclusion ledger, scoring formula
-
----
-
-## v1.4.0 Highlights
-
-| Feature | Details |
-|---|---|
-| **Google Maps isochrones (primary)** | Pass-B catchment refinement now uses Google Routes `computeRouteMatrix` to build approximate isochrone polygons. ORS is retained as fallback per cell; Euclidean proxy is the final fallback. |
-| **Adaptive H3 resolution** | Grid resolution is now set by archetype type. Walk/micro-market archetypes use res 9 (~0.1 km²). Drive-catchment archetypes (clinic, dark kitchen, warehouse, EV charger, large-format retail) use res 8 (~0.7 km²) — matching the spatial scale of the analysis. |
-| **Large-format retail archetype** | New `large_format_retail` canonical archetype for supermarkets/hypermarkets. Drive-demand (12-min catchment), competition, commercial land density, office demand. Arterial road enforced via corridor gate. Rent ceiling always marked unvalidatable — never blocks analysis. |
-| **Chat UX rework** | Sector picker button removed from chat input. Per-message **copy / edit / share** buttons on hover. Inline **"Run Analysis"** prompt appears naturally in the chat flow when the plan is ready — no need to type "run". |
-| **Tour auto-start** | Guided tour starts automatically for new non-admin users on first login (localStorage flag). Responsive positioning — collapses to bottom panel on mobile. Admins skip auto-start. |
+- **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
 
 ---
 
@@ -61,11 +48,11 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 
 ## How Scoring Works
 
-1. **Study area & grid** — The area is resolved to real localities (or a bounding polygon) and tiled with H3 hexagonal cells (res 8–9 depending on archetype scale).
+1. **Study area & grid** — The area is resolved to real localities (or a bounding polygon) and tiled with H3 hexagonal cells (res 9, ~0.1 km² each).
 2. **Data gathering** — OSM Overpass (batched union query) + Google Places per factor. Consumer POI layers auto-merged with ~40 m spatial dedup.
 3. **Spatial masks** — Water mask, buildability masks (railway, ghat, heritage, maidan), waterfront corridor enforcement, exclusion buffers. Applied before scoring.
 4. **Pass A scoring** — Every cell scored on each factor (BallTree Euclidean counts), normalized percentile-based, combined by weight.
-5. **Pass B refinement** — Top-K candidates re-scored with Google Maps isochrones (primary) or ORS (fallback); optional traffic-aware drive catchments.
+5. **Pass B refinement** — Top-K candidates re-scored with real ORS isochrones; optional traffic-aware drive catchments.
 6. **Route constraints** — Real ORS network routing per top-K candidate; railway-crossing detection.
 7. **Multi-score output** — relativeRankScore, absoluteViabilityScore, confidenceScore computed; recommendation status derived from all three + critic.
 8. **Viability gate** — Candidates below minimum viable score withheld; waterfront/strict briefs may return `insufficient_viable_land`.
