@@ -76,7 +76,7 @@ def test_evidence_trail_default_serialises():
     from app.models.evidence import EvidenceTrail
     et = EvidenceTrail()
     d = et.model_dump(mode="json")
-    assert d["evidenceVersion"] == "1.3.0"
+    assert d["evidenceVersion"] == "1.4.0"
     assert isinstance(d["providerQueries"], list)
     assert isinstance(d["factors"], list)
     assert isinstance(d["candidates"], list)
@@ -90,7 +90,7 @@ def test_evidence_trail_json_roundtrip():
     raw = json.dumps(et.model_dump(mode="json"))
     parsed = json.loads(raw)
     assert parsed["analysisId"] == "a1"
-    assert parsed["evidenceVersion"] == "1.3.0"
+    assert parsed["evidenceVersion"] == "1.4.0"
 
 
 # ── 3. Secret leakage — _scrub_secrets ───────────────────────────────────────
@@ -398,7 +398,7 @@ def test_assemble_evidence_trail_smoke():
         created_at="2026-06-25T10:00:00Z",
     )
 
-    assert et.evidenceVersion == "1.3.0"
+    assert et.evidenceVersion == "1.4.0"
     assert et.jobId == "test-job-id-0000"
     assert et.appVersion is not None
     assert len(et.providerQueries) == 1
@@ -467,13 +467,13 @@ def test_ruby_crossing_canonical_weights():
 
 def test_evidence_version_constant():
     from app.models.evidence import EVIDENCE_VERSION
-    assert EVIDENCE_VERSION == "1.3.0"
+    assert EVIDENCE_VERSION == "1.4.0"
 
 
 def test_evidence_trail_version_field():
     from app.models.evidence import EvidenceTrail
     et = EvidenceTrail()
-    assert et.evidenceVersion == "1.3.0"
+    assert et.evidenceVersion == "1.4.0"
 
 
 # ── 12. No secrets in safe_dict output ───────────────────────────────────────
@@ -528,7 +528,7 @@ def test_evidence_json_parseable():
     serialised = json.dumps(d, ensure_ascii=False, indent=2)
     parsed = json.loads(serialised)
     assert parsed["analysisId"] == "test-123"
-    assert parsed["evidenceVersion"] == "1.3.0"
+    assert parsed["evidenceVersion"] == "1.4.0"
 
 
 def test_evidence_json_no_unserializable():

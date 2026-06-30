@@ -39,11 +39,19 @@ from . import storage
 from .critic import critique_analysis
 from ..engine.intent_parser import parse_raw_intent, validate_hard_constraints_in_spec
 from ..engine.archetypes import get_archetype
-from ..engine.multi_score import compute_multi_scores
+from ..engine.multi_score import compute_multi_scores, compute_data_coverage
 from ..engine.uploaded_candidates import (
     validate_uploaded_points, score_uploaded_points, build_no_points_result,
 )
 from ..engine.evidence_builder import QueryTracker, assemble_evidence_trail
+from ..engine.constraint_policy import evaluate_constraint_policy, downgrade_status_for_unverified
+from ..engine.reliability_critic import run_deterministic_critic, merge_with_llm_critic
+from ..engine.metro import (
+    resolve_metro_stations,
+    detect_metro_exclusion,
+    metro_stations_to_pois,
+)
+from ..engine.route_policy import validate_strict_route_constraints
 
 logger = logging.getLogger(__name__)
 
@@ -461,6 +469,18 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     west, south, east, north = polygon.bounds
     overpass_bbox = (south, west, north, east)
 
+    # Derive prompt/area text early — needed by metro resolver and route policy
+    # before the main scoring pipeline runs.
+    _study_area_text = " ".join(spec.studyArea.places or []) if spec.studyArea.type == "places" else ""
+    _raw_prompt_text = getattr(spec, "normalizedPrompt", "") or spec.objective
+
+    # v1.4.0: Resolve metro stations early so we can override exclusion_pois below.
+    _metro_result = resolve_metro_stations(
+        prompt_text=_raw_prompt_text,
+        study_area_text=_study_area_text,
+    )
+    _metro_excl = detect_metro_exclusion(spec)
+
     # ── 2. Grid ─────────────────────────────────────────────────────
     _update(job, 12, "grid", f"Building H3 grid (res {spec.grid.resolution})...")
     hexes, res, grid_notes = polyfill(polygon, spec.grid.resolution)
@@ -558,6 +578,42 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         e.name: fetched.get(f"__exc__{e.name}", []) for e in spec.exclusions
     }
 
+    # ── v1.4.0: Metro exclusion — replace OSM generic tags with verified coords ──
+    # When a metro/subway exclusion is in the spec, the OSM fetch may have returned
+    # generic railway=station results (all rail stations, not just metro lines).
+    # Override with verified station coordinates from metro.py so the exclusion
+    # buffer uses only the correct metro stations.
+    _metro_excl_override_applied = False
+    _metro_excl_unenforced = False
+    if _metro_excl:
+        _metro_excl_name, _metro_excl_bufm = _metro_excl
+        if _metro_result.stations:
+            resolved_pois = metro_stations_to_pois(_metro_result.stations)
+            exclusion_pois[_metro_excl_name] = resolved_pois
+            _metro_excl_override_applied = True
+            notes.append(
+                f"Metro exclusion '{_metro_excl_name}': overriding OSM tags with "
+                f"{_metro_result.station_count} stations from {_metro_result.mode} source "
+                f"(confidence: {_metro_result.confidence}, buffer: {_metro_excl_bufm} m)."
+            )
+            if _metro_result.mode == "generic_station_fallback":
+                fallbacks.append(
+                    f"Metro exclusion '{_metro_excl_name}': no verified metro / subway-tagged "
+                    "stations found — using generic railway=station as fallback. "
+                    "Non-metro stations may be buffered. Confidence: LOW."
+                )
+        else:
+            # Cannot resolve any stations — exclusion is unenforced
+            _metro_excl_unenforced = True
+            exclusion_pois[_metro_excl_name] = []   # clear any OSM results
+            fallbacks.append(
+                f"Metro exclusion '{_metro_excl_name}': no metro station data could be resolved "
+                "— exclusion mask is empty (not enforced)."
+            )
+            notes.append(
+                f"Metro exclusion '{_metro_excl_name}': unenforced — no station data available."
+            )
+
     # ── 4. Pass A — Euclidean proxy scoring, all hexes ──────────────
     _update(job, 55, "score_pass_a", f"Scoring {len(hexes)} hexes (Pass A)...")
     composite, scores = scoring.pass_a(spec, hexes, layer_pois)
@@ -603,6 +659,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # to the UI (how many hexes each safeguard removed) + a shared local projection
     # centre reused by corridors, buildability, and the deterministic critic.
     mask_stats: dict[str, int] = {}
+
+    # v1.4.0: record metro exclusion metadata in mask_stats for the evidence trail
+    if _metro_excl:
+        mask_stats["metroExclusionStationCount"] = _metro_result.station_count
+        mask_stats["metroExclusionOverrideApplied"] = int(_metro_excl_override_applied)
+        mask_stats["metroExclusionUnenforced"] = int(_metro_excl_unenforced)
     cen = polygon.centroid
     lat0, lng0 = cen.y, cen.x
 
@@ -982,6 +1044,33 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 route_unavailable.append(rc.name)
                 fallbacks.append(f"Route constraint '{rc.name}' could not be computed (destination or routing unavailable).")
 
+    # ── v1.4.0: Strict route enforcement gate (Phase 9 fix) ─────────────────
+    # hasStrictRouteConstraint=True means the prompt used "exactly within",
+    # "strictly within", "delivery drive", etc. If the LLM missed encoding a
+    # routeConstraint, or if no routing provider is available, Euclidean proxy
+    # is NOT acceptable — declare unenforced and withhold.
+    _ri_dict = spec.rawIntent.model_dump() if spec.rawIntent else {}
+    _strict_route_check = validate_strict_route_constraints(
+        spec=spec,
+        raw_intent_dict=_ri_dict,
+        has_ors=bool(s.ors_api_key),
+        has_google_routes=bool(s.google_places_api_key),
+    )
+    if not _strict_route_check.ok:
+        for entry in _strict_route_check.to_route_unavailable_entries():
+            route_unavailable.append(entry[:120])
+        # fallbacks already populated by to_route_unavailable_entries content;
+        # add a summary note so the user sees it in the methodology.
+        fallbacks.append(
+            f"Strict route constraint unenforced: {_strict_route_check.reason}"
+        )
+
+    # ── v1.4.0: Metro exclusion unenforced → treat as failed spatial constraint ──
+    if _metro_excl_unenforced and _metro_excl:
+        route_unavailable.append(
+            f"Metro exclusion '{_metro_excl[0]}': no station data — exclusion not applied"
+        )
+
     def passes_required_routes(ci: int) -> bool:
         # A required route must be PROVEN to pass (passed is True). Unavailable
         # (passed=None) or failed (passed=False) → not eligible to be a winner.
@@ -1196,7 +1285,39 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # all (no river line and no water polygon) must withhold — never keep-all.
     wf_corridor_unenforced = is_wf and (waterfront_corridor_failed or not waterfront_corridor_enforced)
 
-    critic_verdict = critique.get("verdict") if critique else None
+    # ── v1.4.0: Constraint policy + deterministic critic MUST come before
+    # analysis_status determination because det_critic.verdict drives it.
+    # Order: policy → det_critic → merge with LLM critic → analysis_status ──────
+
+    # Constraint policy (Phase 3).
+    # Pass route_unavailable and required_missing SEPARATELY — all_required_missing
+    # = required_missing + route_unavailable so passing all_required_missing to
+    # required_missing would cause route_unavailable entries to appear twice.
+    _policy = evaluate_constraint_policy(
+        spec=spec,
+        locations=locations,
+        route_unavailable=route_unavailable,
+        waterfront_unenforced=wf_corridor_unenforced,
+        required_missing=required_missing,   # only pure data-layer misses here
+    )
+
+    # Always-on deterministic critic (Phase 10).
+    # _metro_result was resolved early and used to build the exclusion mask.
+    _det_critic = run_deterministic_critic(
+        spec=spec,
+        locations=locations,
+        scores=scores,
+        route_unavailable=route_unavailable,
+        waterfront_unenforced=wf_corridor_unenforced,
+        required_missing=all_required_missing,
+        constraint_policy_result=_policy,
+        metro_result=_metro_result,
+    )
+    # Merge deterministic + optional LLM critic (conservative combination)
+    _det_critic = merge_with_llm_critic(_det_critic, critique)
+
+    # Now analysis_status can safely use _det_critic.verdict
+    det_verdict = _det_critic.verdict
     if all_required_missing or no_eligible:
         analysis_status = "unreliable"
     elif wf_corridor_unenforced:
@@ -1207,9 +1328,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         )
     elif is_wf and n_viable < topN:
         analysis_status = "insufficient_viable_land"
-    elif critic_verdict == "unreliable":
+    elif det_verdict == "unreliable":
         analysis_status = "unreliable"
-    elif critic_verdict == "weak" or n_viable == 0:
+    elif det_verdict == "weak" or n_viable == 0:
+        # "weak" covers unverifiable constraints (det_critic flags them).
+        # The separate _policy field carries the full provisional metadata for the UI.
         analysis_status = "weak"
     else:
         analysis_status = "reliable"
@@ -1242,8 +1365,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             n_layers_total=len(spec.layers),
             routing_available=routing_available,
             geometry_resolved=not waterfront_corridor_failed,
-            critic_result=critique,
+            critic_result=_det_critic.to_dict(),
         )
+
+    # ── v1.4.0: Downgrade RECOMMENDED → CANDIDATE_ZONE for unverifiable constraints ──
+    downgrade_status_for_unverified(locations, _policy)
+
+    # ── v1.4.0: Data coverage accounting (Phase 6) ──────────────────────────
+    _data_coverage = compute_data_coverage(scores, spec.layers)
 
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
@@ -1273,6 +1402,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         relaxation_options=_relaxation_opts,
         limitations=list(fallbacks),
         created_at=_analysis_start,
+        # v1.4.0 additions
+        constraint_policy=_policy,
+        data_coverage=_data_coverage,
+        route_unavailable=route_unavailable,
+        metro_result=_metro_result,
+        deterministic_critic=_det_critic,
     )
 
     job.result = {
@@ -1287,7 +1422,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "catchments": catchments,
         "dataSufficiency": data_sufficiency,
         "dataQuality": data_quality,
-        "critique": critique,
+        "critique": _det_critic.to_dict(),  # v1.4.0: always-on deterministic critic
         "recommendationWithheld": recommendation_withheld,
         # Spatial Reliability Upgrade v1.0.3 — new optional fields (frontend-safe)
         "analysisStatus": analysis_status,
@@ -1296,9 +1431,22 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "studyAreaBoundary": _boundary_ring(polygon),
         "waterfront": (spec.waterfront.model_dump() if spec.waterfront else None),
         # Phase 17 — transparency fields (v1.1.0)
-        "criticEnabled": bool(critique is not None),
-        "constraintEnforcementLevel": "advisory",
+        "criticEnabled": True,  # v1.4.0: deterministic critic always runs
+        "constraintEnforcementLevel": _policy.constraintEnforcementLevel,
         "untracedConstraints": _untraced_constraints if '_untraced_constraints' in dir() else [],
+        # v1.4.0 — constraint policy (Phase 3)
+        "constraintPolicy": _policy.to_dict(),
+        # v1.4.0 — metro resolution evidence (Phase 8)
+        "metroValidation": _metro_result.to_evidence_dict(),
+        # v1.4.0 — data coverage (Phase 6)
+        "dataCoverage": _data_coverage,
+        # v1.4.0 — site claim level (never parcel)
+        "siteClaimLevel": "micro_market_zone",
+        "disclaimer": (
+            "These are screening-level candidate zones (H3 hexagons), not exact "
+            "parcels, building addresses, or investment recommendations. "
+            "Field validation is required before any leasing or investment decision."
+        ),
         # v1.3.0 — evidence trail (secret-safe serialisation)
         "evidenceTrail": _ev_trail.safe_dict(),
     }

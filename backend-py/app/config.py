@@ -12,11 +12,12 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.3.0"
+APP_VERSION     = "1.4.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "1.3.0"
-SPEC_VERSION    = "2.2"
-RELEASE_NAME    = "Evidence Trail & Reproducible Site Selection Reports"
+ENGINE_VERSION  = "stratageo-engine-00047"
+SPEC_VERSION    = "2.3"
+EVIDENCE_VERSION_PUBLIC = "1.4.0"
+RELEASE_NAME    = "Reliability Hardening — Honest Candidate Zones"
 
 
 class Settings(BaseSettings):

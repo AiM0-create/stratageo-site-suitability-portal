@@ -51,6 +51,12 @@ _DEFAULT_OSM_TAGS: dict[str, list[str]] = {
     "tourist_leisure_footfall":     ["tourism=attraction", "leisure=park", "amenity=theatre"],
     "demand_density_proxy":         ["building=yes", "landuse=commercial", "landuse=residential"],
     "generic_competition":          ["shop=supermarket", "amenity=marketplace", "shop=convenience"],
+    # Phase 7: improved student demand tags
+    "student_catchment_proxy":      [
+        "amenity=school", "amenity=college", "amenity=university",
+        "amenity=library", "amenity=language_school", "amenity=training",
+        "building=dormitory", "office=educational_institution",
+    ],
 }
 
 _DEFAULT_PLACES_TYPES: dict[str, list[str]] = {
@@ -185,7 +191,12 @@ STUDENT_QSR_CAFE = CanonicalArchetype(
             data_priority=("osm", "google_places"),
             scoring_curve="positive_linear",
             confidence_default="medium",
-            proxy_warning="Schools/colleges as student proxy; actual enrollment data unavailable.",
+            # Phase 7: expanded proxy warning — coaching/hostel stronger than schools
+            proxy_warning=(
+                "Proxy: colleges/coaching centres/hostels (stronger) and schools (weaker) "
+                "used as student demand signal. Actual enrollment data unavailable. "
+                "Confidence is MEDIUM — schools are weak proxies for QSR demand."
+            ),
         ),
         CanonicalFactor(
             key="pedestrian_transit_access",
@@ -235,7 +246,8 @@ STUDENT_QSR_CAFE = CanonicalArchetype(
     ),
     hard_exclusion_defaults=("railway=rail", "waterway=river"),
     misleading_variables=("affluence (students are not premium spenders)",
-                          "pure residential density (night population ≠ daytime student footfall)"),
+                          "pure residential density (night population ≠ daytime student footfall)",
+                          "school count alone (colleges/coaching centres are stronger demand signals)"),
 )
 
 GENERIC_QSR_CAFE = CanonicalArchetype(
@@ -709,6 +721,69 @@ PRESCHOOL_SCHOOL = CanonicalArchetype(
     ),
 )
 
+LARGE_FORMAT_RETAIL = CanonicalArchetype(
+    key="large_format_retail",
+    display_name="Large-Format Retail / Discount Supermarket / Hypermarket",
+    analysis_mode="micro_market_scoring",
+    site_claim_level="micro_market_zone",
+    recommendation_mode_default="candidate_zones",
+    top_n_default=3,
+    grid_resolution=8,  # drive-catchment business — res 8 is appropriate
+    factors=(
+        CanonicalFactor(
+            key="highway_arterial_proximity",
+            display_name="Primary arterial road proximity",
+            direction="positive",
+            weight=35,
+            catchment_type="euclidean",
+            catchment_meters=500,
+            data_priority=("osm",),
+            scoring_curve="distance_decay",
+            confidence_default="high",
+        ),
+        CanonicalFactor(
+            key="residential_delivery_demand",
+            display_name="Residential catchment density",
+            direction="positive",
+            weight=30,
+            catchment_type="drive",
+            catchment_minutes=15,
+            data_priority=("osm",),
+            scoring_curve="positive_linear",
+            confidence_default="medium",
+            proxy_warning="Residential building count proxy; actual household spend unavailable.",
+        ),
+        CanonicalFactor(
+            key="generic_competition",
+            display_name="Competing supermarket / retail density",
+            direction="negative",
+            weight=20,
+            catchment_type="drive",
+            catchment_minutes=10,
+            data_priority=("google_places", "osm"),
+            scoring_curve="inverted_u_or_penalty",
+            confidence_default="medium",
+        ),
+        CanonicalFactor(
+            key="commercial_cotenancy",
+            display_name="Commercial land density",
+            direction="positive",
+            weight=15,
+            catchment_type="euclidean",
+            catchment_meters=800,
+            data_priority=("google_places", "osm"),
+            scoring_curve="positive_linear",
+            confidence_default="medium",
+        ),
+    ),
+    hard_exclusion_defaults=("railway=rail",),
+    misleading_variables=(
+        "pedestrian footfall (drive-in destination, not walk-by)",
+        "rent ceiling (cannot be verified from spatial data — requires broker)",
+        "minimum floor area (cannot be verified at H3 resolution — requires property data)",
+    ),
+)
+
 GENERIC_FALLBACK = CanonicalArchetype(
     key="generic",
     display_name="Generic / Unknown Business Type",
@@ -764,33 +839,36 @@ _REGISTRY: dict[str, CanonicalArchetype] = {
     a.key: a for a in [
         STUDENT_QSR_CAFE, GENERIC_QSR_CAFE, PREMIUM_RESTAURANT,
         DARK_KITCHEN, CLINIC_HEALTHCARE, WAREHOUSE_LOGISTICS,
-        EV_CHARGING, RETAIL_STORE, PRESCHOOL_SCHOOL, GENERIC_FALLBACK,
+        EV_CHARGING, RETAIL_STORE, PRESCHOOL_SCHOOL, LARGE_FORMAT_RETAIL,
+        GENERIC_FALLBACK,
     ]
 }
 
 # Maps from intent_parser archetype keys to canonical registry keys
 _PARSER_TO_CANONICAL: dict[str, str] = {
-    "student_qsr_cafe":  "student_qsr_cafe",
-    "qsr_restaurant":    "generic_qsr_cafe",
-    "cafe":              "generic_qsr_cafe",
-    "restaurant":        "generic_qsr_cafe",
-    "premium_restaurant":"premium_restaurant",
-    "dark_kitchen":      "dark_kitchen",
-    "clinic":            "clinic_healthcare",
-    "maternity_clinic":  "clinic_healthcare",
-    "hospital":          "clinic_healthcare",
-    "preschool":         "preschool_school",
-    "school":            "preschool_school",
-    "warehouse":         "warehouse_logistics",
-    "logistics":         "warehouse_logistics",
-    "ev_charger":        "ev_charger",
-    "retail":            "retail_store",
-    "gym":               "generic",
-    "hotel":             "generic",
-    "resort":            "generic",
-    "office":            "generic",
-    "industrial":        "generic",
-    "generic":           "generic",
+    "student_qsr_cafe":       "student_qsr_cafe",
+    "qsr_restaurant":         "generic_qsr_cafe",
+    "cafe":                   "generic_qsr_cafe",
+    "restaurant":             "generic_qsr_cafe",
+    "premium_restaurant":     "premium_restaurant",
+    "dark_kitchen":           "dark_kitchen",
+    "clinic":                 "clinic_healthcare",
+    "maternity_clinic":       "clinic_healthcare",
+    "hospital":               "clinic_healthcare",
+    "preschool":              "preschool_school",
+    "school":                 "preschool_school",
+    "warehouse":              "warehouse_logistics",
+    "logistics":              "warehouse_logistics",
+    "ev_charger":             "ev_charger",
+    "retail":                 "retail_store",
+    "supermarket":            "large_format_retail",
+    "discount_supermarket":   "large_format_retail",
+    "gym":                    "generic",
+    "hotel":                  "generic",
+    "resort":                 "generic",
+    "office":                 "generic",
+    "industrial":             "generic",
+    "generic":                "generic",
 }
 
 

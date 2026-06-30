@@ -64,6 +64,8 @@ const App: React.FC = () => {
   const [isExecuting, setIsExecuting] = useState(false);
   // Accumulated gpt-4o tokens across chat turns; logged with the execution entry
   const chatTokensRef = useRef(0);
+  // Phase 11 — active job guard: stale poll responses from old jobIds are discarded
+  const activeJobIdRef = useRef<string | null>(null);
 
   // Restore the persisted spec draft when the session changes (refresh / switch)
   useEffect(() => {
@@ -272,8 +274,11 @@ const App: React.FC = () => {
     setIsExecuting(true);
     setIsLoading(true);
     setError(null);
+    // Phase 11 — clear previous analysis state before starting a new job
+    setResult(null);
     setSelectedLocations([]);
     setHeatmapType(null);
+    setDrawerOpen(false);
     setAnalysisStatus({ message: 'Starting analysis…', progress: 2 });
     try {
       // Phase 18: inject uploaded candidate points into the spec at execution time.
@@ -295,7 +300,13 @@ const App: React.FC = () => {
         uploadedCandidatesOnly: isUploadedOnly,
       } : chatSpec;
       const jobId = await startAnalysis(specWithPoints as any);
+      // Phase 11: register the active job so stale poll responses can be discarded
+      activeJobIdRef.current = jobId;
       const analysisResultData = await pollAnalysis(jobId, setAnalysisStatus);
+      // Discard result if a newer job was started while this was polling
+      if (activeJobIdRef.current !== jobId) {
+        return;
+      }
 
       setResult(analysisResultData);
       setSpec(analysisResultData.spec);

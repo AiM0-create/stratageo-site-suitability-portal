@@ -397,6 +397,14 @@ class RawIntentMeta(BaseModel):
     hasUploadedCandidates: bool = False
     # Phase 18: was this flagged as "uploaded points ONLY" mode?
     uploadedCandidatesOnly: bool = False
+    # v1.4.0 Phase 9 — strict route/walk constraint flags.
+    # These must be present in RawIntentMeta (the Pydantic model stored in the spec)
+    # so that spec.rawIntent.model_dump() includes them for route_policy.py to consume.
+    # The values are set by intent_parser.RawIntent.to_dict() and persisted through
+    # the LLM → SpecV2 → jobs.py pipeline.
+    hasStrictRouteConstraint: bool = False
+    hasStrictWalkConstraint: bool = False
+    hasStudentDemandSignal: bool = False
 
 
 class OutputCount(BaseModel):
