@@ -66,11 +66,35 @@ const POLL_INTERVAL_MS = 2500;
 // stuck job and a locked chat input. Previously this was 20 minutes, which
 // meant a hung job could lock the UI for 20 minutes before ever recovering.
 const MAX_POLL_MINUTES = 6;
+// v1.4.2 — watchdog: if neither progress% nor the status message changes for
+// this long, treat the job as stalled client-side rather than waiting out the
+// full MAX_POLL_MINUTES deadline.
+//
+// FIXED (was 100s, wrongly set BELOW the worst case it was meant to tolerate):
+// the backend's own buildability sub-checkpoints (added in v1.4.1) can each
+// take up to ~150s worst-case (3 Overpass mirror failovers × 50s + retry
+// sleeps) before progress/message changes. A 100s threshold would false-
+// positive on a perfectly healthy job mid-checkpoint. 220s gives ~70s of
+// margin above that measured worst case while staying comfortably below the
+// backend's own hard job ceiling (JOB_MAX_RUNTIME_SECONDS=240s — see
+// backend-py/app/config.py), so in the normal case the backend's own clean
+// "timeout" status arrives via polling before this client-side watchdog
+// would ever need to fire. This watchdog is the fallback for the case where
+// even the backend's own enforcement doesn't unstick things (e.g. polling
+// itself silently stops getting fresh data) — not the first line of defense.
+const WATCHDOG_STALL_MS = 220_000;
 
 export class AnalysisCancelledError extends Error {
   constructor(message = 'Analysis cancelled.') {
     super(message);
     this.name = 'AnalysisCancelledError';
+  }
+}
+
+export class AnalysisStalledError extends Error {
+  constructor(message = 'Analysis interrupted — progress stalled. Please retry.') {
+    super(message);
+    this.name = 'AnalysisStalledError';
   }
 }
 
@@ -91,6 +115,10 @@ export async function pollAnalysis(
   signal?: AbortSignal,
 ): Promise<AnalysisResult> {
   const deadline = Date.now() + MAX_POLL_MINUTES * 60_000;
+  // Watchdog state — local to this poll loop, no component-level ref needed.
+  let lastProgress: number | null = null;
+  let lastMessage: string | null = null;
+  let lastChangeAt = Date.now();
   for (;;) {
     if (signal?.aborted) throw new AnalysisCancelledError();
     if (Date.now() > deadline) {
@@ -98,6 +126,9 @@ export async function pollAnalysis(
         'Analysis is taking far longer than expected and the client gave up waiting. ' +
         'The server-side job may still be running — try again in a moment, or start a new analysis.',
       );
+    }
+    if (Date.now() - lastChangeAt > WATCHDOG_STALL_MS) {
+      throw new AnalysisStalledError();
     }
     await new Promise(res => setTimeout(res, POLL_INTERVAL_MS));
     if (signal?.aborted) throw new AnalysisCancelledError();
@@ -112,6 +143,11 @@ export async function pollAnalysis(
       continue; // transient network blip — keep polling
     }
     onStatus({ message: s.message, progress: s.progress });
+    if (s.progress !== lastProgress || s.message !== lastMessage) {
+      lastProgress = s.progress;
+      lastMessage = s.message;
+      lastChangeAt = Date.now();
+    }
     // Every terminal status must be handled explicitly here — silently
     // falling through to "keep polling" on an unrecognized terminal status
     // (this previously happened for 'cancelled'/'timeout', which the type

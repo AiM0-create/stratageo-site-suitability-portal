@@ -26,6 +26,7 @@ import { LoginScreen } from './components/LoginScreen';
 import { AdminDashboard } from './components/AdminDashboard';
 import { PromptLimitModal } from './components/PromptLimitModal';
 import SavedAnalyses from './components/SavedAnalyses';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 declare const html2canvas: any;
 declare const jspdf: any;
@@ -70,6 +71,13 @@ const App: React.FC = () => {
   // analysis, cancelling, or logging out can stop a stale poller immediately
   // instead of letting it keep hitting the backend in the background.
   const pollAbortRef = useRef<AbortController | null>(null);
+  // v1.4.2 — synchronous duplicate-submit guard. isLoading/isExecuting are
+  // React state: they only take effect on the NEXT render, so a fast
+  // double-click (or a queued chat "run" message arriving while a click is
+  // still being processed) can call handleConfirmExecute twice before the
+  // button's disabled={isLoading} ever applies. A plain ref is read/written
+  // synchronously and closes that window completely.
+  const isStartingRef = useRef(false);
 
   // Restore the persisted spec draft when the session changes (refresh / switch)
   useEffect(() => {
@@ -276,10 +284,30 @@ const App: React.FC = () => {
     pollAbortRef.current?.abort();
     pollAbortRef.current = null;
     activeJobIdRef.current = null;
+    // v1.4.2 — also release the duplicate-submit guard. Without this, a
+    // Cancel/logout/New-Chat that fires while handleConfirmExecute is still
+    // mid-flight (e.g. between startAnalysis() and the poll loop settling)
+    // would leave isStartingRef stuck true until that original call's own
+    // finally runs — a brief but real window where "Start analysis" looks
+    // unlocked but a click still does nothing.
+    isStartingRef.current = false;
     setIsExecuting(false);
     setIsLoading(false);
     setAnalysisStatus({ message: '', progress: 0 });
   }, []);
+
+  // v1.4.2 — defensive boot/login reset. isLoading/isExecuting/activeJobIdRef
+  // are plain React state/refs that are never persisted to localStorage or
+  // sessionStorage, so a true page reload already clears them naturally —
+  // but this makes that guarantee EXPLICIT rather than incidental, and
+  // protects against any future code path that starts persisting job state
+  // without realizing it needs the same stale-recovery treatment. Runs once
+  // on mount and again every time `user` transitions (covers login and the
+  // logout→login round trip without relying on a full page reload).
+  useEffect(() => {
+    resetAnalysisExecutionState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
   // ─── Cancel a running analysis (user-initiated recovery) ───
   const handleCancelAnalysis = useCallback(() => {
@@ -319,6 +347,15 @@ const App: React.FC = () => {
   // ─── Execute the agreed spec (consumes one prompt credit) ───
   const handleConfirmExecute = useCallback(async () => {
     if (!chatSpec) return;
+    // v1.4.2 — synchronous duplicate-submit guard, checked and set BEFORE any
+    // await. React's disabled={isLoading} only applies on the next render, so
+    // a fast double-click or a duplicate "run" message arriving while the
+    // first click is still inside `await consumePrompt()` could otherwise
+    // start two overlapping jobs. This ref closes that window completely;
+    // it is released in the outer finally below no matter how the function exits.
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+    try {
     const canProceed = await consumePrompt();
     if (!canProceed) {
       setLimitModalOpen(true);
@@ -436,6 +473,11 @@ const App: React.FC = () => {
         setIsExecuting(false);
         setIsLoading(false);
       }
+    }
+    } finally {
+      // Outer guard release — always runs, regardless of which inner path
+      // returned/threw, so the NEXT click is never permanently blocked.
+      isStartingRef.current = false;
     }
   }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch]);
 
@@ -1285,22 +1327,34 @@ const App: React.FC = () => {
 
   return (
     <div className="portal">
-      <MapView
-        locations={locations}
-        selectedLocations={selectedRecalculated}
-        onSelectLocation={handleSelectLocation}
-        basemapId={basemapId}
-        onBasemapChange={handleBasemapChange}
-        onDeselectAll={handleDeselectAll}
-        heatmapType={heatmapType}
-        userPoints={userPoints}
-        showBuffers={showBuffers}
-        bufferRadiusM={spec?.userPointConstraints?.[0]?.radiusM}
-        hexGrid={result?.hexGrid}
-        catchments={result?.catchments}
-        recommendationWithheld={result?.recommendationWithheld}
-        studyAreaBoundary={result?.studyAreaBoundary}
-      />
+      <ErrorBoundary
+        section="map"
+        compact
+        onError={() => {
+          // A map render crash must never strand the chat input mid-analysis
+          // behind a dead panel — release any execution lock so the user can
+          // still cancel/retry from the chat side even if the map itself
+          // stays broken until reload.
+          if (isExecuting || isLoading) resetAnalysisExecutionState();
+        }}
+      >
+        <MapView
+          locations={locations}
+          selectedLocations={selectedRecalculated}
+          onSelectLocation={handleSelectLocation}
+          basemapId={basemapId}
+          onBasemapChange={handleBasemapChange}
+          onDeselectAll={handleDeselectAll}
+          heatmapType={heatmapType}
+          userPoints={userPoints}
+          showBuffers={showBuffers}
+          bufferRadiusM={spec?.userPointConstraints?.[0]?.radiusM}
+          hexGrid={result?.hexGrid}
+          catchments={result?.catchments}
+          recommendationWithheld={result?.recommendationWithheld}
+          studyAreaBoundary={result?.studyAreaBoundary}
+        />
+      </ErrorBoundary>
 
       <TopBar
         mode={config.isDemoMode ? 'demo' : 'live'}
@@ -1326,59 +1380,89 @@ const App: React.FC = () => {
         } : undefined}
       />
 
-      <FloatingAssistant
-        messages={messages}
-        isLoading={isLoading}
-        analysisStatus={analysisStatus}
-        error={error}
-        onRunAnalysis={handleRunAnalysis}
-        onDismissError={() => setError(null)}
-        hasResults={locations.length > 0}
-        onToggleResults={() => setDrawerOpen(prev => !prev)}
-        drawerOpen={drawerOpen}
-        resultCount={resultCount}
-        onResultCountChange={handleResultCountChange}
-        onCSVUpload={handleCSVUpload}
-        onClearCSV={handleClearCSV}
-        csvPointCount={userPoints.length}
-        memory={currentSession.memory}
-        onNewChat={handleNewAnalysis}
-        onClearMemoryField={clearMemoryField}
-        sessionTitle={currentSession.title}
-        chatSpec={chatSpec}
-        chatSpecStatus={chatSpecStatus}
-        chatReady={chatReady}
-        chatStage={chatStage}
-        isExecuting={isExecuting}
-        onConfirmExecute={handleConfirmExecute}
-        onSpecEdit={handleSpecEdit}
-        onCancelAnalysis={handleCancelAnalysis}
-      />
+      <ErrorBoundary
+        section="chat assistant"
+        onError={() => {
+          // The chat panel IS the cancel/retry surface. If it crashes mid-
+          // analysis, the user has no other way to recover — proactively
+          // unlock execution state so a reload (or the boundary's own
+          // "Try again") doesn't leave a phantom job the user can't see
+          // or stop.
+          resetAnalysisExecutionState();
+          setError('The chat panel hit an unexpected error and was reset. Any in-progress analysis was cancelled — please try your prompt again.');
+        }}
+      >
+        <FloatingAssistant
+          messages={messages}
+          isLoading={isLoading}
+          analysisStatus={analysisStatus}
+          error={error}
+          onRunAnalysis={handleRunAnalysis}
+          onDismissError={() => setError(null)}
+          hasResults={locations.length > 0}
+          onToggleResults={() => setDrawerOpen(prev => !prev)}
+          drawerOpen={drawerOpen}
+          resultCount={resultCount}
+          onResultCountChange={handleResultCountChange}
+          onCSVUpload={handleCSVUpload}
+          onClearCSV={handleClearCSV}
+          csvPointCount={userPoints.length}
+          memory={currentSession.memory}
+          onNewChat={handleNewAnalysis}
+          onClearMemoryField={clearMemoryField}
+          sessionTitle={currentSession.title}
+          chatSpec={chatSpec}
+          chatSpecStatus={chatSpecStatus}
+          chatReady={chatReady}
+          chatStage={chatStage}
+          isExecuting={isExecuting}
+          onConfirmExecute={handleConfirmExecute}
+          onSpecEdit={handleSpecEdit}
+          onCancelAnalysis={handleCancelAnalysis}
+        />
+      </ErrorBoundary>
 
       {result && (
-        <ResultsDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          result={result}
-          spec={spec}
-          locations={locations}
-          selectedLocations={selectedRecalculated}
-          onSelectLocation={handleSelectLocation}
-          customWeights={customWeights}
-          onWeightChange={handleWeightChange}
-          heatmapType={heatmapType}
-          onHeatmapChange={setHeatmapType}
-          showBuffers={showBuffers}
-          onToggleBuffers={() => setShowBuffers(prev => !prev)}
-          csvPointCount={userPoints.length}
-          onWidenCorridor={() => {
+        <ErrorBoundary
+          section="results panel"
+          onError={() => {
+            // A malformed/partial result is the most likely render crash
+            // source (missing score fields, geometry, validation data).
+            // "Try again" on the SAME result would just re-throw immediately
+            // — clear the bad result and close the drawer so retry actually
+            // lands somewhere usable, and unlock execution state in case the
+            // crash happened right as a job completed (isExecuting/isLoading
+            // would otherwise still read true with nothing left to clear it).
+            setResult(null);
             setDrawerOpen(false);
-            handleChatTurn(
-              'Widen the riverfront band to 500 m and re-run, but keep the area strictly ' +
-              'between the same landmarks. Relax the riverfront corridor only, not the geography.'
-            );
+            resetAnalysisExecutionState();
+            setError('The results couldn’t be displayed due to an unexpected error. Please try the analysis again.');
           }}
-        />
+        >
+          <ResultsDrawer
+            open={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+            result={result}
+            spec={spec}
+            locations={locations}
+            selectedLocations={selectedRecalculated}
+            onSelectLocation={handleSelectLocation}
+            customWeights={customWeights}
+            onWeightChange={handleWeightChange}
+            heatmapType={heatmapType}
+            onHeatmapChange={setHeatmapType}
+            showBuffers={showBuffers}
+            onToggleBuffers={() => setShowBuffers(prev => !prev)}
+            csvPointCount={userPoints.length}
+            onWidenCorridor={() => {
+              setDrawerOpen(false);
+              handleChatTurn(
+                'Widen the riverfront band to 500 m and re-run, but keep the area strictly ' +
+                'between the same landmarks. Relax the riverfront corridor only, not the geography.'
+              );
+            }}
+          />
+        </ErrorBoundary>
       )}
 
       <MethodologyDialog

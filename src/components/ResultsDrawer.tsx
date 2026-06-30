@@ -23,14 +23,18 @@ interface ResultsDrawerProps {
 }
 
 const ComparisonChart: React.FC<{ locations: LocationData[] }> = ({ locations }) => {
+  // v1.4.2: null-safe over a missing/malformed criteria_breakdown — this chart
+  // renders unconditionally near the top of every results panel, so an
+  // unguarded .map()/.find() here was a near-guaranteed crash for any
+  // location whose breakdown was absent.
   const criteriaNames = useMemo(() =>
-    Array.from(new Set(locations.flatMap(loc => loc.criteria_breakdown.map(c => c.name)))),
+    Array.from(new Set(locations.flatMap(loc => (loc.criteria_breakdown ?? []).map(c => c.name)))),
     [locations]);
 
   const chartData = useMemo(() => criteriaNames.map(name => {
     const point: Record<string, any> = { criteria: name.length > 16 ? name.slice(0, 14) + '...' : name };
     locations.forEach((loc, i) => {
-      const c = loc.criteria_breakdown.find(cr => cr.name === name);
+      const c = (loc.criteria_breakdown ?? []).find(cr => cr.name === name);
       point[`loc${i}`] = c?.score ?? 0;
     });
     return point;
@@ -197,7 +201,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   // suitability choropleth (green = favorable for that factor, direction applied).
   const poiTypes = useMemo(() => {
     const names = new Set<string>();
-    locations.forEach(loc => loc.criteria_breakdown.forEach(c => {
+    locations.forEach(loc => (loc.criteria_breakdown ?? []).forEach(c => {
       if (c.score !== null && c.score !== undefined) names.add(c.name);
     }));
     return Array.from(names).slice(0, 8);
@@ -651,7 +655,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className="drawer-loc-coords">{loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}</div>
+                    <div className="drawer-loc-coords">
+                      {typeof loc.lat === 'number' ? loc.lat.toFixed(4) : '—'}, {typeof loc.lng === 'number' ? loc.lng.toFixed(4) : '—'}
+                    </div>
                   </div>
                   <div className={`drawer-loc-score ${scoreClass}`}>
                     {(loc as any).scoreWithheld ? (
@@ -661,11 +667,15 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       </>
                     ) : (
                       <>
-                        {/* v1.4.0: show displayScore (rounded 0.5) instead of raw mcda_score */}
+                        {/* v1.4.0: show displayScore (rounded 0.5) instead of raw mcda_score.
+                            v1.4.2: null-safe — a malformed/partial location must render "—"
+                            rather than throw and blank the whole results panel. */}
                         <span className="score-number" style={raw ? { color: '#64748b' } : undefined}>
-                          {(loc as any).displayScore !== undefined
+                          {typeof (loc as any).displayScore === 'number'
                             ? (loc as any).displayScore.toFixed(1)
-                            : loc.mcda_score.toFixed(1)}
+                            : typeof loc.mcda_score === 'number'
+                              ? loc.mcda_score.toFixed(1)
+                              : '—'}
                         </span>
                         {!loc.excluded && (
                           <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>
@@ -726,7 +736,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     {loc.trafficContext && (
                       <div className={`traffic-context traffic-${loc.trafficContext.label}`} title={loc.trafficContext.note}>
                         <span className="traffic-badge">Traffic: {loc.trafficContext.label}</span>
-                        <span className="traffic-ratio">×{loc.trafficContext.congestionRatio.toFixed(2)} vs free-flow</span>
+                        <span className="traffic-ratio">
+                          ×{typeof loc.trafficContext.congestionRatio === 'number' ? loc.trafficContext.congestionRatio.toFixed(2) : '—'} vs free-flow
+                        </span>
                         <span className="traffic-conf">low-confidence area-activity signal</span>
                       </div>
                     )}
@@ -757,10 +769,11 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       </div>
                     )}
 
-                    {/* Exclusion checks */}
-                    {loc.exclusions.length > 0 && (
+                    {/* Exclusion checks — v1.4.2: null-safe, a missing/malformed
+                        exclusions array must not crash the whole results panel. */}
+                    {(loc.exclusions ?? []).length > 0 && (
                       <div className="drawer-exclusions">
-                        {loc.exclusions.map((ex, ei) => (
+                        {(loc.exclusions ?? []).map((ex, ei) => (
                           <div key={ei} className={`exclusion-item ${ex.passed ? 'exclusion-pass' : 'exclusion-fail'}`}>
                             <span>{ex.passed ? '✓' : '✕'} {ex.rule}</span>
                             <EvidenceTag basis={ex.evidenceBasis} />
@@ -769,9 +782,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       </div>
                     )}
 
-                    {/* Criteria */}
+                    {/* Criteria — v1.4.2: null-safe over a missing breakdown array */}
                     <div className="drawer-criteria">
-                      {loc.criteria_breakdown.map((c, ci) => {
+                      {(loc.criteria_breakdown ?? []).map((c, ci) => {
                         const noData = c.score === null || c.score === undefined;
                         return (
                         <div key={ci} className="drawer-criterion">
@@ -805,11 +818,11 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       })}
                     </div>
 
-                    {/* OSM Signals */}
+                    {/* OSM Signals — v1.4.2: null-safe over a missing signals object */}
                     <div className="drawer-signals">
                       <div className="signals-title">Observed OSM Signals</div>
                       <div className="signals-grid">
-                        {Object.entries(loc.osmSignals).map(([key, val]) => (
+                        {Object.entries(loc.osmSignals ?? {}).map(([key, val]) => (
                           <div key={key} className="signal-item">
                             <span className="signal-key">{key.replace(/_/g, ' ')}</span>
                             <span className="signal-val">{val}</span>
