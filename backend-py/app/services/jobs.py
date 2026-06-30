@@ -206,16 +206,29 @@ def _viability_suggestions(spec) -> list[str]:
     return out
 
 
+TERMINAL_STATUSES = ("done", "error", "cancelled", "timeout")
+
+
+class JobCancelled(Exception):
+    """Raised cooperatively when a user-requested cancel is observed at a
+    stage checkpoint (every _update() call). Caught in _run_in_thread."""
+
+
 @dataclass
 class Job:
     id: str
-    status: str = "queued"            # queued | running | done | error
+    status: str = "queued"            # queued | running | done | error | cancelled | timeout
     progress: int = 0
     phase: str = "queued"
     message: str = "Queued"
     result: dict | None = None
     error: str | None = None
     created_at: float = field(default_factory=time.time)
+    # v1.4.1 — set by the cancel endpoint; checked cooperatively in _update()
+    # so cancellation takes effect at the next stage-transition checkpoint
+    # (at most ~one Overpass call's worst-case latency later) rather than
+    # requiring the whole remaining pipeline to finish first.
+    cancel_requested: bool = False
 
 
 _jobs: dict[str, Job] = {}
@@ -239,12 +252,35 @@ async def get_job_state(job_id: str) -> dict | None:
     if snap is not None:
         # An instance restart killed the worker mid-run: a snapshot that isn't
         # terminal will never progress — surface that honestly.
-        if snap.get("status") not in ("done", "error"):
+        if snap.get("status") not in TERMINAL_STATUSES:
             snap["status"] = "error"
             snap["error"] = "The analysis was interrupted by a server restart — please run it again."
             snap["message"] = snap["error"]
         return snap
     return None
+
+
+def cancel_job(job_id: str) -> dict:
+    """Mark a job cancel-requested. Always returns a safe response, even if
+    the job is unknown or already terminal — never raises.
+
+    The job store update happens immediately (synchronously), so the very
+    next poll from the frontend sees status="cancelled" and can unlock the
+    UI right away — independent of how long the background thread actually
+    takes to unwind out of its current network call.
+    """
+    job = get_job(job_id)
+    if job is None:
+        return {"ok": True, "found": False, "message": "Job not found or already expired."}
+    if job.status in TERMINAL_STATUSES:
+        return {"ok": True, "found": True, "alreadyTerminal": True, "status": job.status,
+                "message": f"Job already {job.status} — nothing to cancel."}
+    job.cancel_requested = True
+    job.status = "cancelled"
+    job.message = "Cancelling… (stopping at the next safe checkpoint)"
+    _snapshot(job)
+    logger.info("job %s cancel requested", job_id[:8])
+    return {"ok": True, "found": True, "alreadyTerminal": False, "status": "cancelled"}
 
 
 def _snapshot(job: Job) -> None:
@@ -273,14 +309,44 @@ def start_job(spec: SpecV2) -> str:
 
 
 def _run_in_thread(job: Job, spec: SpecV2) -> None:
+    settings = get_settings()
     try:
-        asyncio.run(_run_analysis(job, spec))
+        asyncio.run(asyncio.wait_for(
+            _run_analysis(job, spec), timeout=settings.job_max_runtime_seconds,
+        ))
+    except asyncio.TimeoutError:
+        # Hard ceiling hit — asyncio.wait_for cancels the in-flight coroutine,
+        # which propagates CancelledError into whatever await was suspended
+        # (e.g. a stuck Overpass POST), genuinely interrupting it rather than
+        # just stopping future stages.
+        logger.warning("job %s exceeded %ss runtime — forced to timeout at phase=%s",
+                       job.id[:8], settings.job_max_runtime_seconds, job.phase)
+        job.status = "timeout"
+        job.error = (
+            f"Analysis exceeded the {settings.job_max_runtime_seconds}s time limit "
+            f"while in stage '{job.phase}' ({job.message}). This usually means an "
+            "external data provider (OSM/Overpass) was slow or unresponsive."
+        )
+        job.message = f"Timed out during: {job.phase}"
+    except JobCancelled:
+        job.status = "cancelled"
+        job.message = f"Cancelled during: {job.phase}"
+        logger.info("job %s cancelled at phase=%s", job.id[:8], job.phase)
     except Exception as e:
         logger.exception("job %s failed", job.id)
         job.status = "error"
         job.error = str(e)[:1000]
         job.message = f"Analysis failed: {e}"
-    # Terminal snapshot (sync context — thread's loop has exited)
+    # Always write a terminal snapshot — even if storage is disabled, this
+    # keeps the in-memory job object's final state consistent and logged.
+    if job.status not in TERMINAL_STATUSES:
+        # Safety net: _run_analysis returned normally without ever setting a
+        # terminal status (should not happen, but never leave "running").
+        logger.error("job %s exited _run_analysis without a terminal status (was %s) — forcing error",
+                     job.id[:8], job.status)
+        job.status = "error"
+        job.error = job.error or "Analysis ended without producing a result."
+        job.message = job.error
     storage._put_sync(f"jobs/{job.id}.json", {
         "status": job.status, "progress": job.progress, "phase": job.phase,
         "message": job.message, "result": job.result, "error": job.error,
@@ -288,6 +354,8 @@ def _run_in_thread(job: Job, spec: SpecV2) -> None:
 
 
 def _update(job: Job, progress: int, phase: str, message: str) -> None:
+    if job.cancel_requested:
+        raise JobCancelled()
     job.status = "running"
     job.progress = progress
     job.phase = phase
@@ -834,7 +902,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 fallbacks.append(f"Buildability line fetch skipped ({tags[:1]}…): {ex}")
                 return []
 
+        # v1.4.1 — this block previously made up to 6 sequential Overpass calls
+        # (railway×2, ghat, protected, maidan, road) between a single 64% update
+        # and the next stage's update, with no visible progress and no
+        # cancellation checkpoint in between. A single call can legitimately take
+        # 30s+ and worst-case ~150s (3 mirror failovers); stacked sequentially
+        # this looked like a permanent freeze at 64%. Each sub-step now reports
+        # its own message (so polling shows real movement) and passes through
+        # _update(), which is also the cancellation checkpoint — a user-requested
+        # cancel now takes effect within one sub-step instead of the whole block.
         if bflags.get("railway"):
+            _update(job, 64, "buildability", "Checking railway land / track exclusions...")
             rail_area = await _safe_area(buildability.RAILWAY_AREA_TAGS)
             rail_lines = await _safe_line(buildability.RAILWAY_LINE_TAGS)
             rmask = buildability.centroid_in_polygon_mask(hexes, rail_area)
@@ -847,6 +925,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 notes.append(f"Railway exclusion removed {n} hex(es) (rail land + 40 m track buffer).")
 
         if bflags.get("ghat"):
+            _update(job, 65, "buildability", "Checking ghat / waterfront-access exclusions...")
             ghats = await fetch_named_features("[Gg]hat", overpass_bbox)
             gmask = buildability.point_buffer_mask(hexes, ghats, 50.0)
             gmask &= ~excluded
@@ -857,6 +936,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 notes.append(f"Ghat exclusion removed {n} hex(es) (50 m around {len(ghats)} ghat feature(s)).")
 
         if bflags.get("protected"):
+            _update(job, 66, "buildability", "Checking heritage / protected / open-space exclusions...")
             tags = list(buildability.PROTECTED_AREA_TAGS)
             if bflags.get("park_exception"):
                 tags = [t for t in tags if not t.startswith(("leisure=park", "landuse=grass", "landuse=recreation"))]
@@ -876,6 +956,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             # nodes or untagged areas — exclude by NAME (a maidan is not a buildable
             # commercial plot). Skipped when the brief is a park/open-air use.
             if not bflags.get("park_exception"):
+                _update(job, 67, "buildability", "Checking open-ground / maidan exclusions...")
                 maidans = await fetch_named_features(buildability.OPEN_GROUND_NAME_RE, overpass_bbox)
                 mmask = buildability.point_buffer_mask(hexes, maidans, 75.0)
                 mmask &= ~excluded
@@ -889,6 +970,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     )
 
         if bflags.get("commercial_proxy"):
+            _update(job, 68, "buildability", "Checking commercial road-frontage proxy...")
             road_lines = await _safe_line(buildability.ROAD_LINE_TAGS)
 
     # ── 5. Candidate selection ──────────────────────────────────────

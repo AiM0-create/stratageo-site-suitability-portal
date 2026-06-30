@@ -108,6 +108,14 @@ class Settings(BaseSettings):
     walk_speed_m_per_min: float = 80.0
     drive_speed_m_per_min: float = 400.0
     job_ttl_seconds: int = 1800
+    # v1.4.1 — hard ceiling on a single analysis job's wall-clock runtime.
+    # Without this, a stage with no per-call timeout headroom (e.g. several
+    # sequential Overpass fetches in the buildability stage, each up to ~150s
+    # worst-case across 3 mirror failovers) can leave a job "running" for
+    # 10-15+ minutes with the UI frozen at one progress percentage. When the
+    # ceiling is hit, the job is forced to a terminal "timeout" status so the
+    # frontend can stop polling and unlock the chat input.
+    job_max_runtime_seconds: int = 240
 
     # ── Feature flags (v1.1.0+) ──────────────────────────────────────────────
     enable_raw_intent_parser: bool = True       # deterministic pre-LLM parser

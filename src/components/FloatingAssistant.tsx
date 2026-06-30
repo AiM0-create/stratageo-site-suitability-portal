@@ -38,6 +38,8 @@ interface FloatingAssistantProps {
   isExecuting?: boolean;
   onConfirmExecute?: () => void;
   onSpecEdit?: (updated: SpecV2) => void;
+  /** v1.4.1 — cancel a running analysis; shown alongside the progress bar. */
+  onCancelAnalysis?: () => void;
 }
 
 const SCENARIOS = [
@@ -72,6 +74,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   isExecuting = false,
   onConfirmExecute,
   onSpecEdit,
+  onCancelAnalysis,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
@@ -295,6 +298,19 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                       <div className="assistant-progress-fill" style={{ width: `${analysisStatus.progress}%` }} />
                     </div>
                     <div className="assistant-progress-pct">{Math.round(analysisStatus.progress)}%</div>
+                    {/* v1.4.1 — always-available recovery: an analysis can legitimately
+                        take a while on a large study area, but the user must never be
+                        stuck waiting with no way out. */}
+                    {isExecuting && onCancelAnalysis && (
+                      <button
+                        type="button"
+                        className="assistant-cancel-btn"
+                        onClick={onCancelAnalysis}
+                        title="Stop this analysis and unlock the chat"
+                      >
+                        Cancel analysis
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
