@@ -98,10 +98,18 @@ export interface ChatTurnResponse {
 
 export interface AnalysisJobStatus {
   ok: boolean;
-  status: 'queued' | 'running' | 'done' | 'error';
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout';
   progress: number;
   phase: string;
   message: string;
   result: import('./index').AnalysisResult | null;
   error: string | null;
+}
+
+export interface CancelAnalysisResponse {
+  ok: boolean;
+  found: boolean;
+  alreadyTerminal?: boolean;
+  status?: string;
+  message?: string;
 }

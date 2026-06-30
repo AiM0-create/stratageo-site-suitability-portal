@@ -4,7 +4,7 @@ import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, Heatma
 import type { BasemapId } from './components/MapView';
 import { config } from './config';
 import { runDemoAnalysis, runServerAnalysis } from './services/analysisService';
-import { sendChatTurn, startAnalysis, pollAnalysis } from './services/chatService';
+import { sendChatTurn, startAnalysis, pollAnalysis, cancelAnalysis, AnalysisCancelledError } from './services/chatService';
 import type { SpecV2 } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights } from './services/mcdaEngine';
@@ -66,6 +66,10 @@ const App: React.FC = () => {
   const chatTokensRef = useRef(0);
   // Phase 11 — active job guard: stale poll responses from old jobIds are discarded
   const activeJobIdRef = useRef<string | null>(null);
+  // v1.4.1 — abort handle for the in-flight poll loop, so starting a new
+  // analysis, cancelling, or logging out can stop a stale poller immediately
+  // instead of letting it keep hitting the backend in the background.
+  const pollAbortRef = useRef<AbortController | null>(null);
 
   // Restore the persisted spec draft when the session changes (refresh / switch)
   useEffect(() => {
@@ -262,6 +266,56 @@ const App: React.FC = () => {
     dispatch({ type: 'UPDATE_SPEC', spec: updated });
   }, [dispatch]);
 
+  // v1.4.1 — single source of truth for "stop whatever analysis is in
+  // flight and unlock the UI". Used by Cancel, by starting a new analysis
+  // (to abort a stale poller before starting a fresh one), and by logout.
+  // Synchronous and immediate: it does NOT wait for the backend or for the
+  // pollAnalysis promise to settle — the chat input must unlock the instant
+  // the user asks it to, independent of network/server state.
+  const resetAnalysisExecutionState = useCallback(() => {
+    pollAbortRef.current?.abort();
+    pollAbortRef.current = null;
+    activeJobIdRef.current = null;
+    setIsExecuting(false);
+    setIsLoading(false);
+    setAnalysisStatus({ message: '', progress: 0 });
+  }, []);
+
+  // ─── Cancel a running analysis (user-initiated recovery) ───
+  const handleCancelAnalysis = useCallback(() => {
+    const jobId = activeJobIdRef.current;
+    // Unlock the UI immediately — do not wait for the cancel request or for
+    // the backend job to actually stop. This is what makes Cancel feel
+    // instant instead of "stuck while it cancels".
+    resetAnalysisExecutionState();
+    addMessage('assistant', 'Analysis cancelled.');
+    if (jobId) {
+      // Best-effort notify the backend so it stops at its next checkpoint
+      // and frees the worker thread sooner. Never blocks the UI on this.
+      cancelAnalysis(jobId).catch(() => { /* fire-and-forget */ });
+    }
+  }, [addMessage, resetAnalysisExecutionState]);
+
+  // v1.4.1 — logout previously called the raw auth `logout()` directly,
+  // which never touched isLoading/isExecuting/activeJobIdRef/result state.
+  // A job stuck mid-poll kept the chat input locked across sign-out and
+  // sign-back-in, since none of that state is auth-related and React state
+  // survives an in-SPA auth transition (no remount). Clear analysis state
+  // first, then sign out.
+  const handleLogout = useCallback(() => {
+    const staleJobId = activeJobIdRef.current;
+    resetAnalysisExecutionState();
+    if (staleJobId) {
+      cancelAnalysis(staleJobId).catch(() => { /* fire-and-forget */ });
+    }
+    setResult(null);
+    setSelectedLocations([]);
+    setHeatmapType(null);
+    setError(null);
+    setDrawerOpen(false);
+    logout();
+  }, [logout, resetAnalysisExecutionState]);
+
   // ─── Execute the agreed spec (consumes one prompt credit) ───
   const handleConfirmExecute = useCallback(async () => {
     if (!chatSpec) return;
@@ -271,6 +325,13 @@ const App: React.FC = () => {
       return;
     }
     const analysisStartTime = Date.now();
+    // v1.4.1 — abort any previous poller before starting a new one. Under
+    // normal UI flow the input is disabled while isLoading=true so this is
+    // defense-in-depth, but it matters when Cancel unlocked the input while
+    // an old poll is still unwinding and the user immediately submits again.
+    pollAbortRef.current?.abort();
+    const controller = new AbortController();
+    pollAbortRef.current = controller;
     setIsExecuting(true);
     setIsLoading(true);
     setError(null);
@@ -280,6 +341,7 @@ const App: React.FC = () => {
     setHeatmapType(null);
     setDrawerOpen(false);
     setAnalysisStatus({ message: 'Starting analysis…', progress: 2 });
+    let jobId: string | null = null;
     try {
       // Phase 18: inject uploaded candidate points into the spec at execution time.
       // userPoints live in frontend state; they must be sent as spec.userCandidatePoints
@@ -299,11 +361,12 @@ const App: React.FC = () => {
         })),
         uploadedCandidatesOnly: isUploadedOnly,
       } : chatSpec;
-      const jobId = await startAnalysis(specWithPoints as any);
+      jobId = await startAnalysis(specWithPoints as any);
       // Phase 11: register the active job so stale poll responses can be discarded
       activeJobIdRef.current = jobId;
-      const analysisResultData = await pollAnalysis(jobId, setAnalysisStatus);
-      // Discard result if a newer job was started while this was polling
+      const analysisResultData = await pollAnalysis(jobId, setAnalysisStatus, controller.signal);
+      // Discard result if a newer job was started (or this one was cancelled/
+      // reset) while this was polling.
       if (activeJobIdRef.current !== jobId) {
         return;
       }
@@ -355,12 +418,24 @@ const App: React.FC = () => {
         dispatch({ type: 'SET_TITLE', title: `${chatSpec.businessType} — ${analysisResultData.target_location || 'study area'}` });
       }
     } catch (err: any) {
+      // A cancellation already got its own "Analysis cancelled." message and
+      // state reset from handleCancelAnalysis (or resetAnalysisExecutionState
+      // via logout/new-analysis) — don't pile a second, scarier-looking
+      // error message on top of a user-initiated action.
+      if (err instanceof AnalysisCancelledError) {
+        return;
+      }
       const msg = err?.message || 'Analysis failed. Please try again.';
       setError(msg);
       addMessage('assistant', msg);
     } finally {
-      setIsExecuting(false);
-      setIsLoading(false);
+      // Only unlock state that still belongs to THIS invocation. If a newer
+      // analysis (or Cancel, or logout) has since taken over activeJobIdRef,
+      // leave its isLoading/isExecuting alone — don't stomp on it.
+      if (jobId === null || activeJobIdRef.current === jobId) {
+        setIsExecuting(false);
+        setIsLoading(false);
+      }
     }
   }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch]);
 
@@ -600,6 +675,16 @@ const App: React.FC = () => {
         userPoints,
       });
     }
+    // v1.4.1 — this is also the user-facing recovery path for a stuck/running
+    // analysis: previously this left isLoading/isExecuting/activeJobIdRef
+    // untouched, so starting a "New Chat" while a job was stuck at 60-64%
+    // cleared the conversation but kept the chat input disabled. Notify the
+    // backend (best-effort) and unlock immediately either way.
+    const staleJobId = activeJobIdRef.current;
+    resetAnalysisExecutionState();
+    if (staleJobId) {
+      cancelAnalysis(staleJobId).catch(() => { /* fire-and-forget */ });
+    }
     setResult(null);
     setSpec(null);
     setSelectedLocations([]);
@@ -613,7 +698,7 @@ const App: React.FC = () => {
     setChatReady(false);
     setChatStage('chat');
     newSession();
-  }, [newSession, result, spec, customWeights, userPoints, currentSession.id]);
+  }, [newSession, result, spec, customWeights, userPoints, currentSession.id, resetAnalysisExecutionState]);
 
   const handleExportPDF = useCallback(async () => {
     if (!result || locations.length === 0) return;
@@ -1227,7 +1312,7 @@ const App: React.FC = () => {
         currentSessionId={currentSession.id}
         onSwitchSession={handleSwitchSession}
         user={user}
-        onLogout={logout}
+        onLogout={handleLogout}
         onAdminOpen={() => setAdminOpen(true)}
         onSavedOpen={() => setSavedOpen(true)}
         darkMode={darkMode}
@@ -1267,6 +1352,7 @@ const App: React.FC = () => {
         isExecuting={isExecuting}
         onConfirmExecute={handleConfirmExecute}
         onSpecEdit={handleSpecEdit}
+        onCancelAnalysis={handleCancelAnalysis}
       />
 
       {result && (

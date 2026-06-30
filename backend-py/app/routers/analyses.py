@@ -83,6 +83,20 @@ async def get_analysis(job_id: str = Path(..., max_length=64)):
     return {"ok": True, **state}
 
 
+@router.post("/api/v2/analyses/{job_id}/cancel")
+async def cancel_analysis(job_id: str = Path(..., max_length=64)):
+    """Mark a running job cancelled. Always returns 200 with a safe payload —
+    never errors just because the job already finished, failed, or doesn't
+    exist — so the frontend can call this unconditionally on a stuck UI
+    without needing to know the job's current state first."""
+    try:
+        uuid.UUID(job_id)
+    except ValueError as e:
+        raise HTTPException(400, "invalid job id") from e
+    result = jobs.cancel_job(job_id)
+    return result
+
+
 @router.get("/api/v2/analyses/{job_id}/evidence")
 async def get_evidence(job_id: str = Path(..., max_length=64)):
     """Return the evidence trail for a completed analysis job."""
