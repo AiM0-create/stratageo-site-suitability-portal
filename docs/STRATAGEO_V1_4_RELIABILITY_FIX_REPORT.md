@@ -1,9 +1,11 @@
 # Stratageo v1.4.0 — Reliability Hardening Fix Report
 
-**Release date:** 2026-06-29  
+**Release date:** 2026-06-30  
 **Engine version:** `stratageo-engine-00047`  
 **Evidence trail version:** `1.4.0`  
-**Branch:** `v1.4-reliability-hardening`
+**Branch:** `v1.4-reliability-hardening`  
+**Latest commit:** `dc0a478`  
+**Readiness:** `READY_FOR_REVIEW_ONLY` — not production-ready (see Deployment section)
 
 ---
 
@@ -246,9 +248,12 @@ Added TypeScript types for all v1.4 fields: `constraintPolicy`, `metroValidation
 | `backend-py/app/engine/intent_parser.py` | Supermarket patterns; strict route detection; student demand signal; RawIntent new fields |
 | `backend-py/app/engine/multi_score.py` | Score display policy; confidence labels; close-band warning; data coverage function |
 | `backend-py/app/engine/evidence_builder.py` | v1.4 evidence trail assembly; new schema imports |
+| `backend-py/app/engine/metro.py` | `detect_metro_exclusion()`, `metro_stations_to_pois()` — verified coordinates injected into exclusion mask |
+| `backend-py/app/engine/constraint_policy.py` | `provisionalBadge` now set on all non-excluded locations, not only RECOMMENDED→CANDIDATE_ZONE downgrades |
 | `backend-py/app/models/evidence.py` | EvidenceTrail v1.4 schemas; EVIDENCE_VERSION → 1.4.0 |
+| `backend-py/app/models/spec.py` | `RawIntentMeta` — added `hasStrictRouteConstraint`, `hasStrictWalkConstraint`, `hasStudentDemandSignal` (bug fix #2) |
 | `backend-py/app/routers/health.py` | Capability flags; evidenceVersion |
-| `backend-py/app/services/jobs.py` | Constraint policy; deterministic critic; metro resolution; data coverage; v1.4 result fields |
+| `backend-py/app/services/jobs.py` | Constraint policy; deterministic critic; metro resolution; data coverage; v1.4 result fields; ordering fix (bug #1); required_missing fix (bug #4) |
 | `backend-py/tests/test_config_v110.py` | Version assertion → v1.4.0 |
 | `backend-py/tests/test_evidence_trail.py` | Evidence version assertion → 1.4.0 |
 
@@ -273,14 +278,15 @@ Added TypeScript types for all v1.4 fields: `constraintPolicy`, `metroValidation
 ## Test Results
 
 ```
-419 passed, 5 warnings in 7.68s
+420 passed, 5 warnings in ~8s
   └─ 335 original tests
   └─ 56 v1.4.0 reliability tests
   └─ 28 critical fix tests (metro geometry + strict route enforcement)
+  └─ 1 regression test (hasStrictRouteConstraint spec round-trip)
 ```
 
 TypeScript: `npx tsc --noEmit` — 0 errors  
-Build: `npm run build` — succeeds (10.3s)
+Build: `npm run build` — succeeds
 
 ---
 
@@ -297,8 +303,23 @@ Build: `npm run build` — succeeds (10.3s)
 | Missing data coverage not accounted for | `compute_data_coverage()` + deterministic critic checks coverage ratio |
 | Student demand over-reliant on schools | Expanded OSM tags (library, dormitory, training); proxy warning updated |
 | Supermarket prompt not running | LARGE_FORMAT_RETAIL archetype + parser patterns |
-| Strict route constraint satisfied by Euclidean | `route_policy.py` — `validate_strict_route_constraints()` called after route eval in jobs.py. If strict phrase + no routeConstraint in spec: `route_unavailable` entry → recommendations withheld. If strict + routeConstraints + no ORS: explicitly declares Euclidean not acceptable → withheld. |
+| Strict route constraint satisfied by Euclidean | `route_policy.py` — `validate_strict_route_constraints()` called after route eval in jobs.py. If strict phrase + no routeConstraint in spec: `route_unavailable` entry → recommendations withheld. If strict + routeConstraints + no ORS: explicitly declares Euclidean not acceptable → withheld. **Metro verified coordinates are injected directly into the actual exclusion mask** (not just reported as metadata) — `detect_metro_exclusion()` + `metro_stations_to_pois()` replace OSM-fetched POIs with the verified station list before `scoring.exclusion_mask()` runs. **Strict route constraints cannot pass through Euclidean fallback** — `validate_strict_route_constraints()` explicitly withholds recommendations when no routing provider is configured, regardless of how the Euclidean-proxy Pass-A score comes out. |
 | Provisional banner never showed | Fixed: `isProvisional` now reads `constraintPolicy.hasUnverifiableConstraints` directly, not `analysisStatus === 'provisional'` (which was dead code). |
+
+---
+
+## Bugs Found and Fixed During Staging-Style Backend Execution (commit `dc0a478`)
+
+After the critical fixes above were implemented, the full analysis pipeline was executed directly against the real backend (bypassing the UI, since the local OpenAI key was expired and ORS/Google Places were not configured — see Deployment section). Running the actual `_run_analysis()` code path surfaced four bugs that unit tests alone had not caught:
+
+| # | Bug | Severity | Fix |
+|---|-----|----------|-----|
+| 1 | `_det_critic` referenced before assignment (`UnboundLocalError`, hard crash) — the `analysis_status` block read `_det_critic.verdict` before `_det_critic = run_deterministic_critic(...)` had executed | Critical (crash) | Reordered `jobs.py` so constraint-policy evaluation and the deterministic critic run **before** `analysis_status` is determined |
+| 2 | `RawIntentMeta` (the Pydantic model embedded in `SpecV2.rawIntent`) was missing `hasStrictRouteConstraint` / `hasStrictWalkConstraint` / `hasStudentDemandSignal` — these fields existed only on the intermediate `RawIntent` dataclass and were silently dropped by `model_dump()`, so `route_policy.validate_strict_route_constraints()` never saw them and the strict-route gate was permanently bypassed | Critical (silent bypass of Fix 2) | Added the three fields to `RawIntentMeta` in `models/spec.py`; added `test_hasStrictRouteConstraint_survives_spec_roundtrip` regression test |
+| 3 | `provisionalBadge` was only set when a location was downgraded from `RECOMMENDED`. Locations that were already `CANDIDATE_ZONE` (e.g. from the multi-score viability gate) never got the badge, even with unverifiable hard constraints present | Moderate | `downgrade_status_for_unverified()` now sets `provisionalBadge` + `provisionalReasons` on **every** non-excluded location when `hasUnverifiableConstraints` is true, not only ones downgraded from RECOMMENDED |
+| 4 | `constraintPolicy.unverifiedHardConstraints` contained duplicate entries — `jobs.py` passed `required_missing=all_required_missing` (which already included `route_unavailable`) into `evaluate_constraint_policy()`, so each `route_unavailable` entry was double-counted under both the "Route constraint:" and "Required data layer:" labels | Minor | `jobs.py` now passes `required_missing=required_missing` (the pure data-layer-only list) and keeps `route_unavailable` as a separate parameter |
+
+All four fixes are in commit `dc0a478`. 420/420 tests pass after the fixes (1 new regression test added for bug #2).
 
 ---
 
@@ -316,17 +337,34 @@ Key limitations that remain:
 
 ---
 
-## Deployment
+## Deployment Readiness: `READY_FOR_REVIEW_ONLY`
 
-Ready for review. To deploy:
+**Full UI staging validation was NOT completed.** The local OpenAI API key was expired (401 Unauthorized) so chat turns could not build a spec through the conversational UI, and ORS / Google Places keys were not configured locally, so live routing and Places data were unavailable. To work around this, the four canonical prompts were executed by injecting hand-built specs directly into the `_run_analysis()` pipeline, bypassing the chat layer entirely. This validated all backend enforcement logic (constraint policy, metro exclusion geometry, route policy, deterministic critic) against real OSM data, but did **not** validate:
+- The conversational spec-building flow end-to-end
+- The ResultsDrawer UI rendering (provisional banner, validation checklist, score bands) in a live browser
+- Real ORS/Google Routes drive-time evaluation
+- Real Google Places competitor/co-tenancy data
+
+This pipeline-level execution is what surfaced the four bugs documented above — they would not have been caught by unit tests alone, but they are also not equivalent to a full UI staging pass.
+
+**Before this can move to `READY_FOR_STAGING_VALIDATED`:**
+1. Configure a valid `OPENAI_API_KEY`, `ORS_API_KEY`, and `GOOGLE_PLACES_API_KEY` in the staging environment.
+2. Run the four canonical prompts through the actual chat UI end-to-end.
+3. Visually confirm the provisional banner, validation checklist, displayScore/scoreBand, and confidence labels render correctly.
+4. Confirm a strict route constraint is evaluated with real ORS/Google Routes data (not just the "unavailable" withhold path).
+
+**Before this can move to `READY_FOR_PRODUCTION_CANDIDATE`:** the above staging validation must pass, plus a full regression pass against the four canonical prompts with no withheld/degraded results due to missing API keys.
+
+To run validation locally:
 ```bash
 # Backend
 cd backend-py
-pytest -q  # must pass 391/391
+pytest -q  # must pass 420/420
 
 # Frontend
-npm run build  # must succeed
+npx tsc --noEmit  # must be clean
+npm run build     # must succeed
 
-# Deploy backend to Cloud Run (use existing pipeline)
+# Deploy backend to Cloud Run (use existing pipeline) — NOT recommended until staging validation above is complete
 # Frontend deploys automatically via GitHub Pages on push to master after PR merge
 ```

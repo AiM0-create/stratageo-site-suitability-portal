@@ -1,5 +1,7 @@
 # Stratageo v1.4.0 — Known Limitations
 
+**Branch:** `v1.4-reliability-hardening` · **Latest commit:** `dc0a478` · **Readiness:** `READY_FOR_REVIEW_ONLY`
+
 This document honestly describes what the portal can and cannot verify. Decisions made without understanding these limitations can lead to poor site selection.
 
 ---
@@ -124,6 +126,23 @@ This document honestly describes what the portal can and cannot verify. Decision
 **Mitigation in v1.4:** The deterministic reliability critic (`reliability_critic.py`) always runs, regardless of cost mode. The LLM critic (`critic.py`) is the optional upgrade for `balanced/high` modes.
 
 **Remaining gap:** The LLM critic can detect geographic sanity issues (e.g. a "South Kolkata" result landing in North Kolkata) that the deterministic critic cannot.
+
+---
+
+## 14. Full UI Staging Validation Was Not Completed
+
+**Limitation:** All v1.4.0 backend enforcement (constraint policy, metro exclusion geometry, strict route policy, deterministic critic, data coverage) was validated by running the real `_run_analysis()` pipeline directly against live OSM data — but **not** through the actual conversational UI.
+
+**Why:** The local `OPENAI_API_KEY` was expired (401 Unauthorized), so the chat→spec-building flow could not be exercised. `ORS_API_KEY` and `GOOGLE_PLACES_API_KEY` were not configured locally, so real network routing and real Places competitor data were never evaluated — only the "provider unavailable, withhold" path was exercised.
+
+**Impact:** The following are implemented and unit-tested but not yet confirmed in a live browser session:
+- Provisional banner rendering for rent/footprint-constrained prompts
+- Validation checklist expand/collapse behavior
+- `displayScore` (vs. raw `mcda_score`) actually rendering in location cards
+- State cleanup (`activeJobIdRef` guard) observed across consecutive analyses in a real session
+- Strict route constraints evaluated against real ORS/Google Routes responses (only the "no provider configured" withhold path has been exercised)
+
+**Current readiness: `READY_FOR_REVIEW_ONLY`** — not `READY_FOR_STAGING_VALIDATED` and not production-ready. A full staging pass with valid `OPENAI_API_KEY`, `ORS_API_KEY`, and `GOOGLE_PLACES_API_KEY`, run through the actual chat UI for all four canonical prompts, is required before this label can change.
 
 ---
 
