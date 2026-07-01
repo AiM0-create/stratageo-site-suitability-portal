@@ -15,6 +15,30 @@ const jsonHeaders = (): Record<string, string> => {
   return h;
 };
 
+/** v1.4.5 — chat.py now returns a structured `detail` object
+ * ({message, errorCode, requestId}) for the chat/planning endpoint instead of
+ * a bare string, so a provider outage (rate limit/quota, auth, timeout) is
+ * distinguishable in the UI from a generic server exception. Older/other
+ * endpoints may still return a plain string `detail` — handle both. */
+export interface ApiError extends Error {
+  httpStatus: number;
+  errorCode?: string;
+  requestId?: string;
+}
+
+function buildApiError(status: number, body: any, fallback: string): ApiError {
+  const detail = body?.detail;
+  const isStructured = detail && typeof detail === 'object';
+  const message = isStructured ? (detail.message || fallback) : (typeof detail === 'string' ? detail : fallback);
+  const err = new Error(message) as ApiError;
+  err.httpStatus = status;
+  if (isStructured) {
+    err.errorCode = detail.errorCode;
+    err.requestId = detail.requestId;
+  }
+  return err;
+}
+
 export async function checkPyHealth(): Promise<boolean> {
   try {
     const r = await fetch(`${base()}/health`, { signal: AbortSignal.timeout(8000) });
@@ -36,8 +60,8 @@ export async function sendChatTurn(
     body: JSON.stringify({ messages, spec, context: context ?? null }),
   });
   if (!r.ok) {
-    const detail = await r.json().catch(() => null);
-    throw new Error(detail?.detail || `Chat failed (HTTP ${r.status})`);
+    const body = await r.json().catch(() => null);
+    throw buildApiError(r.status, body, `Chat failed (HTTP ${r.status})`);
   }
   return r.json();
 }

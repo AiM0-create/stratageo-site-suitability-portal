@@ -313,7 +313,15 @@ const App: React.FC = () => {
       setAnalysisPhase(nowReady ? 'spec_ready' : 'planning');
     } catch (err: any) {
       clearTimeout(coldStartTimer);
-      const msg = err?.message || 'Chat failed. Please try again.';
+      // v1.4.5 — surface the debuggable parts (HTTP status, backend error
+      // code, request ID) instead of just the human-readable message, so a
+      // provider outage (rate limit/quota/auth/timeout) is distinguishable
+      // in the UI from a generic server exception. See chatService.ts's
+      // buildApiError() / chat.py's structured error `detail`.
+      const parts = [err?.message || 'Chat failed. Please try again.'];
+      if (err?.errorCode) parts.push(`[${err.errorCode}]`);
+      if (err?.httpStatus) parts.push(`(HTTP ${err.httpStatus}${err.requestId ? `, ref ${err.requestId}` : ''})`);
+      const msg = parts.join(' ');
       setError(msg);
       addMessage('assistant', msg);
       // v1.4.4 — do NOT touch analysisPhase here. A transient planning-call
