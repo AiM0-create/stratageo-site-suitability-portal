@@ -310,7 +310,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                       <button
                         type="button"
                         className="assistant-cancel-btn"
-                        onClick={onCancelAnalysis}
+                        onClick={() => onCancelAnalysis()}
                         title="Stop this analysis and unlock the chat"
                       >
                         Cancel analysis
@@ -332,7 +332,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 <button
                   type="button"
                   className="assistant-retry-btn"
-                  onClick={onRetryAnalysis}
+                  onClick={() => onRetryAnalysis()}
                 >
                   Retry analysis
                 </button>

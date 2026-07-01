@@ -31,6 +31,23 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 declare const html2canvas: any;
 declare const jspdf: any;
 
+/** v1.4.3 — a DOM/React event object must never be treated as an analysis
+ * spec. A bare `onClick={handleConfirmExecute}` (or `onClick={onConfirmExecute}`
+ * one layer up) passes the click's SyntheticEvent as the first argument;
+ * without this guard it flows straight into the backend payload and
+ * JSON.stringify() throws "Converting circular structure to JSON" on the
+ * event's `__reactFiber...`/`nativeEvent` back-references. Checks for the
+ * event's own shape first (cheap, catches the bug even if `layers` is ever
+ * renamed), then confirms the real SpecV2 shape. */
+export function isAnalysisSpecWithPoints(value: unknown): value is SpecV2 {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if ('nativeEvent' in v || 'currentTarget' in v || 'target' in v || 'preventDefault' in v) {
+    return false;
+  }
+  return typeof v.objective === 'string' && typeof v.businessType === 'string' && Array.isArray(v.layers);
+}
+
 const App: React.FC = () => {
   const { user, loading: authLoading, logout, consumePrompt } = useAuth();
   const { state: sessionState, addMessage, updateMemory, newSession, switchSession, clearMemoryField, dispatch } = useSession();
@@ -351,9 +368,12 @@ const App: React.FC = () => {
 
   // ─── Execute the agreed spec (consumes one prompt credit) ───
   // specOverride: pass the stored spec directly for Retry without re-entering the chat flow.
-  const handleConfirmExecute = useCallback(async (specOverride?: any) => {
-    const specToUse = specOverride ?? chatSpec;
-    if (!specToUse) return;
+  const handleConfirmExecute = useCallback(async (specOverride?: unknown) => {
+    const specToUse = isAnalysisSpecWithPoints(specOverride) ? specOverride : chatSpec;
+    if (!specToUse) {
+      setError('No analysis plan is ready yet. Please describe what you need first.');
+      return;
+    }
     setCanRetry(false);
     // v1.4.2 — synchronous duplicate-submit guard, checked and set BEFORE any
     // await. React's disabled={isLoading} only applies on the next render, so
@@ -407,6 +427,9 @@ const App: React.FC = () => {
         uploadedCandidatesOnly: isUploadedOnly,
       } : specToUse;
       lastSpecWithPointsRef.current = specWithPoints;
+      // v1.4.3 — visible proof the payload is a plain spec object, not a
+      // MouseEvent/HTMLButtonElement that slipped past isAnalysisSpecWithPoints.
+      console.debug('[analysis] spec payload', specWithPoints);
       jobId = await startAnalysis(specWithPoints as any);
       // Phase 11: register the active job so stale poll responses can be discarded
       activeJobIdRef.current = jobId;

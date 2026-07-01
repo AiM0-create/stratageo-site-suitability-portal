@@ -260,7 +260,12 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
       )}
 
       {readyToExecute && !blocked && (
-        <button className="spec-card-execute" onClick={onConfirmExecute} disabled={isExecuting}>
+        <button
+          type="button"
+          className="spec-card-execute"
+          onClick={() => onConfirmExecute()}
+          disabled={isExecuting}
+        >
           {isExecuting ? 'Running analysis…' : '▶ Start analysis'}
         </button>
       )}
