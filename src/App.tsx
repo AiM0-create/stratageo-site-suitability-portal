@@ -48,6 +48,25 @@ export function isAnalysisSpecWithPoints(value: unknown): value is SpecV2 {
   return typeof v.objective === 'string' && typeof v.businessType === 'string' && Array.isArray(v.layers);
 }
 
+/** v1.4.4 — single source of truth for where the conversational flow is:
+ * planning (talking to the LLM to build a spec), spec_ready (a valid spec
+ * exists and is awaiting confirmation), executing (a backend job is
+ * running), completed/failed (last execution's outcome). This replaces the
+ * previous behavior of routing EVERY typed message — including "yes"/"run"
+ * — through the chat/planning endpoint, which sometimes regenerated a whole
+ * new framework instead of executing, and sometimes surfaced a raw
+ * chat-endpoint failure as "assistant unavailable" for what was really just
+ * an execution request. */
+export type AnalysisPhase = 'idle' | 'planning' | 'spec_ready' | 'executing' | 'completed' | 'failed';
+
+const CONFIRMATION_PHRASES = new Set([
+  'yes', 'y', 'ok', 'okay', 'run', 'start', 'start analysis', 'proceed', 'go ahead',
+]);
+
+function isConfirmationPhrase(text: string): boolean {
+  return CONFIRMATION_PHRASES.has(text.trim().toLowerCase());
+}
+
 const App: React.FC = () => {
   const { user, loading: authLoading, logout, consumePrompt } = useAuth();
   const { state: sessionState, addMessage, updateMemory, newSession, switchSession, clearMemoryField, dispatch } = useSession();
@@ -82,6 +101,11 @@ const App: React.FC = () => {
   const [isExecuting, setIsExecuting] = useState(false);
   // v1.4.2 — true after a non-cancelled analysis failure, enabling the Retry button
   const [canRetry, setCanRetry] = useState(false);
+  // v1.4.4 — explicit planning/execution state machine (see AnalysisPhase above)
+  const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>('idle');
+  useEffect(() => {
+    console.debug('[phase]', analysisPhase);
+  }, [analysisPhase]);
   // Accumulated gpt-4o tokens across chat turns; logged with the execution entry
   const chatTokensRef = useRef(0);
   // Phase 11 — active job guard: stale poll responses from old jobIds are discarded
@@ -107,6 +131,7 @@ const App: React.FC = () => {
     setChatSpecStatus(persisted ? 'draft' : 'empty');
     setChatReady(false);
     setChatStage(persisted ? 'framework' : 'chat');
+    setAnalysisPhase(persisted ? 'planning' : 'idle');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSession.id]);
 
@@ -256,6 +281,11 @@ const App: React.FC = () => {
     addMessage('user', rawPrompt, { intent: 'query' });
     setIsLoading(true);
     setAnalysisStatus({ message: 'Thinking…', progress: 30 });
+    // v1.4.4 — a planning turn that starts from an already-ready spec (e.g. a
+    // refinement like "make the radius bigger") stays visually "spec_ready"
+    // while in flight; only drop to "planning" if we weren't already ready,
+    // so a slow/failed refinement call never hides a still-valid spec card.
+    if (analysisPhase !== 'spec_ready') setAnalysisPhase('planning');
     // Cold start (Cloud Run scale-to-zero): explain the wait if it drags
     const coldStartTimer = setTimeout(() => {
       setAnalysisStatus({ message: 'Waking the analysis engine (cold start, ~15s)…', progress: 50 });
@@ -278,16 +308,22 @@ const App: React.FC = () => {
         dispatch({ type: 'UPDATE_SPEC', spec: resp.spec });
       }
       setChatStage(resp.stage || 'chat');
-      setChatReady(resp.readyToExecute && resp.specValid);
+      const nowReady = !!resp.spec && resp.readyToExecute && resp.specValid;
+      setChatReady(nowReady);
+      setAnalysisPhase(nowReady ? 'spec_ready' : 'planning');
     } catch (err: any) {
       clearTimeout(coldStartTimer);
       const msg = err?.message || 'Chat failed. Please try again.';
       setError(msg);
       addMessage('assistant', msg);
+      // v1.4.4 — do NOT touch analysisPhase here. A transient planning-call
+      // failure must never clobber an already-valid spec_ready state — that
+      // was exactly how "assistant unavailable" ended up masking a spec that
+      // was already ready to execute (requirement 8 of the routing fix).
     } finally {
       setIsLoading(false);
     }
-  }, [currentSession.messages, chatSpec, resultCount, userPoints.length, addMessage, dispatch]);
+  }, [currentSession.messages, chatSpec, resultCount, userPoints.length, addMessage, dispatch, analysisPhase]);
 
   // User edited the plan directly (e.g. a layer weight in the spec card)
   const handleSpecEdit = useCallback((updated: SpecV2) => {
@@ -338,13 +374,16 @@ const App: React.FC = () => {
     // the backend job to actually stop. This is what makes Cancel feel
     // instant instead of "stuck while it cancels".
     resetAnalysisExecutionState();
+    // v1.4.4 — a cancelled run still has a valid, unexecuted spec: return to
+    // spec_ready (Start analysis available again) rather than a dead end.
+    setAnalysisPhase(chatReady ? 'spec_ready' : (chatSpec ? 'planning' : 'idle'));
     addMessage('assistant', 'Analysis cancelled.');
     if (jobId) {
       // Best-effort notify the backend so it stops at its next checkpoint
       // and frees the worker thread sooner. Never blocks the UI on this.
       cancelAnalysis(jobId).catch(() => { /* fire-and-forget */ });
     }
-  }, [addMessage, resetAnalysisExecutionState]);
+  }, [addMessage, resetAnalysisExecutionState, chatReady, chatSpec]);
 
   // v1.4.1 — logout previously called the raw auth `logout()` directly,
   // which never touched isLoading/isExecuting/activeJobIdRef/result state.
@@ -363,6 +402,7 @@ const App: React.FC = () => {
     setHeatmapType(null);
     setError(null);
     setDrawerOpen(false);
+    setAnalysisPhase('idle');
     logout();
   }, [logout, resetAnalysisExecutionState]);
 
@@ -381,7 +421,10 @@ const App: React.FC = () => {
     // first click is still inside `await consumePrompt()` could otherwise
     // start two overlapping jobs. This ref closes that window completely;
     // it is released in the outer finally below no matter how the function exits.
-    if (isStartingRef.current) return;
+    // v1.4.4 — also check analysisPhase directly (requirement 6): the ref
+    // guard is the synchronous safety net, the phase check is the declared
+    // state-machine rule that a job already executing can't be re-entered.
+    if (analysisPhase === 'executing' || isStartingRef.current) return;
     isStartingRef.current = true;
     try {
     const canProceed = await consumePrompt();
@@ -400,6 +443,8 @@ const App: React.FC = () => {
     setIsExecuting(true);
     setIsLoading(true);
     setError(null);
+    setAnalysisPhase('executing');
+    console.debug('[executing spec]', specToUse);
     // Phase 11 — clear previous analysis state before starting a new job
     setResult(null);
     setSelectedLocations([]);
@@ -430,6 +475,7 @@ const App: React.FC = () => {
       // v1.4.3 — visible proof the payload is a plain spec object, not a
       // MouseEvent/HTMLButtonElement that slipped past isAnalysisSpecWithPoints.
       console.debug('[analysis] spec payload', specWithPoints);
+      console.debug('[creating backend analysis job]');
       jobId = await startAnalysis(specWithPoints as any);
       // Phase 11: register the active job so stale poll responses can be discarded
       activeJobIdRef.current = jobId;
@@ -449,6 +495,7 @@ const App: React.FC = () => {
       }
       setDrawerOpen(true);
       setChatReady(false);
+      setAnalysisPhase('completed');
 
       const top = analysisResultData.locations.filter(l => !l.excluded)[0];
       addMessage('assistant', top
@@ -494,11 +541,15 @@ const App: React.FC = () => {
       if (err instanceof AnalysisCancelledError) {
         return;
       }
+      // v1.4.4 — this is a backend job error (startAnalysis/pollAnalysis
+      // failure), never the chat/planning "assistant unavailable" message —
+      // those two error paths are fully separate (see handleChatTurn's catch).
       const msg = err?.message || 'Analysis failed. Please try again.';
       setError(msg);
       addMessage('assistant', msg);
       // v1.4.2 — enable Retry button so the user can re-run without re-typing
       if (lastSpecWithPointsRef.current) setCanRetry(true);
+      setAnalysisPhase('failed');
     } finally {
       // Only unlock state that still belongs to THIS invocation. If a newer
       // analysis (or Cancel, or logout) has since taken over activeJobIdRef,
@@ -513,7 +564,7 @@ const App: React.FC = () => {
       // returned/threw, so the NEXT click is never permanently blocked.
       isStartingRef.current = false;
     }
-  }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch]);
+  }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch, analysisPhase]);
 
   // v1.4.2 — retry the last failed analysis with the same spec, no re-typing needed.
   const handleRetryAnalysis = useCallback(() => {
@@ -525,6 +576,45 @@ const App: React.FC = () => {
     // ─── Conversational mode: route to multi-turn chat, no immediate execution ───
     if (config.isConversationalMode) {
       setLastPrompt(rawPrompt);
+
+      // v1.4.4 — requirement 6: a job already running must swallow further
+      // input rather than kick off a second planning turn or execution.
+      if (analysisPhase === 'executing') {
+        console.debug('[phase] ignoring input while executing:', rawPrompt);
+        return;
+      }
+
+      // v1.4.4 — requirement 3: once a valid spec exists, "yes"/"run"/etc.
+      // must execute it directly. This is intercepted BEFORE it ever reaches
+      // handleChatTurn/sendChatTurn — sending confirmation words to the LLM
+      // as a fresh turn was the root cause of both symptoms in the bug
+      // report: the assistant sometimes regenerated another framework, and
+      // sometimes the chat call itself failed and showed "assistant
+      // unavailable" for what was purely an execute request. Also allowed
+      // from 'failed' — a failed execution still has a valid spec, so "yes"
+      // here reasonably means "try again", the same action as Retry.
+      const canInterceptFromPhase = analysisPhase === 'spec_ready' || analysisPhase === 'failed';
+      if (canInterceptFromPhase && isConfirmationPhrase(rawPrompt)) {
+        console.debug('[confirmation intercepted]', rawPrompt);
+        addMessage('user', rawPrompt);
+        handleConfirmExecute();
+        return;
+      }
+
+      // v1.4.4 — requirement 7: a fresh (non-confirmation) prompt arriving
+      // after a finished cycle (completed or failed) starts a clean planning
+      // round instead of leaving the previous framework/cards/Retry button
+      // hanging around to confuse the next confirmation.
+      if (analysisPhase === 'completed' || analysisPhase === 'failed') {
+        setChatSpec(null);
+        setChatSpecStatus('empty');
+        setChatReady(false);
+        setChatStage('chat');
+        setCanRetry(false);
+        setAnalysisStatus({ message: '', progress: 0 });
+        setAnalysisPhase('planning');
+      }
+
       return handleChatTurn(rawPrompt);
     }
 
@@ -702,7 +792,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [resultCount, userPoints, currentSession.memory, currentSession.messages, currentSession.title, addMessage, updateMemory, dispatch, consumePrompt, user, handleChatTurn]);
+  }, [resultCount, userPoints, currentSession.memory, currentSession.messages, currentSession.title, addMessage, updateMemory, dispatch, consumePrompt, user, handleChatTurn, analysisPhase, handleConfirmExecute]);
 
   const handleSelectLocation = useCallback((location: LocationData) => {
     const lat = Number(location.lat);
@@ -779,6 +869,7 @@ const App: React.FC = () => {
     setChatSpecStatus('empty');
     setChatReady(false);
     setChatStage('chat');
+    setAnalysisPhase('idle');
     newSession();
   }, [newSession, result, spec, customWeights, userPoints, currentSession.id, resetAnalysisExecutionState]);
 
@@ -1375,7 +1466,10 @@ const App: React.FC = () => {
           // behind a dead panel — release any execution lock so the user can
           // still cancel/retry from the chat side even if the map itself
           // stays broken until reload.
-          if (isExecuting || isLoading) resetAnalysisExecutionState();
+          if (isExecuting || isLoading) {
+            resetAnalysisExecutionState();
+            setAnalysisPhase('failed');
+          }
         }}
       >
         <MapView
@@ -1429,6 +1523,7 @@ const App: React.FC = () => {
           // "Try again") doesn't leave a phantom job the user can't see
           // or stop.
           resetAnalysisExecutionState();
+          setAnalysisPhase('failed');
           setError('The chat panel hit an unexpected error and was reset. Any in-progress analysis was cancelled — please try your prompt again.');
         }}
       >
@@ -1478,6 +1573,7 @@ const App: React.FC = () => {
             setResult(null);
             setDrawerOpen(false);
             resetAnalysisExecutionState();
+            setAnalysisPhase('failed');
             setError('The results couldn’t be displayed due to an unexpected error. Please try the analysis again.');
           }}
         >
