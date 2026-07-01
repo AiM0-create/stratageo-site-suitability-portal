@@ -22,7 +22,7 @@ OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",  # fast mirror
     "https://overpass-api.de/api/interpreter",                  # canonical (strict)
 ]
-HTTP_TIMEOUT = 50          # per endpoint; one attempt each → worst case ~2.5 min
+HTTP_TIMEOUT = 25          # per endpoint; one attempt each → worst case ~77s (was 50s/152s)
 USER_AGENT = "stratageo-engine/1.0.2 (site-suitability analysis; stratageo.in)"
 FALLBACK_CONCURRENCY = 2   # parallel per-layer fetches if the union query fails
 
@@ -124,6 +124,7 @@ async def fetch_line_geometries(
             return ways
 
     query = _build_geom_query(tags, bbox)
+    logger.debug("Overpass geom query (%d tag(s)): %s", len(tags), query[:400])
     last_err: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
         try:
@@ -153,7 +154,7 @@ async def fetch_line_geometries(
         except Exception as e:
             last_err = e
             logger.warning("Overpass geom attempt failed (%s): %s", endpoint, e)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     raise RuntimeError(f"Overpass geom fetch failed for tags={tags}: {last_err}")
 
 
@@ -204,6 +205,7 @@ async def fetch_area_geometries(
         ]
 
     query = _build_area_query(tags, bbox)
+    logger.debug("Overpass area query (%d tag(s)): %s", len(tags), query[:400])
     last_err: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
         try:
@@ -235,7 +237,7 @@ async def fetch_area_geometries(
         except Exception as e:
             last_err = e
             logger.warning("Overpass area attempt failed (%s): %s", endpoint, e)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     raise RuntimeError(f"Overpass area fetch failed for tags={tags}: {last_err}")
 
 
@@ -269,6 +271,7 @@ async def fetch_named_features(
         f"[out:json][timeout:45];"
         f"(node{sel}({s},{w},{n},{e});way{sel}({s},{w},{n},{e}););out center;"
     )
+    logger.debug("Overpass named query (%r): %s", name_regex, query[:400])
     last_err: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
         try:
@@ -296,7 +299,7 @@ async def fetch_named_features(
         except Exception as ex:
             last_err = ex
             logger.warning("Overpass named fetch failed (%s): %s", endpoint, ex)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     logger.warning("Overpass named fetch failed for %r: %s", name_regex, last_err)
     return []   # buildability is best-effort — never hard-fail the analysis
 
@@ -325,6 +328,7 @@ async def fetch_layer_pois(
             return pois
 
     query = _build_query(tags, bbox)
+    logger.debug("Overpass POI query (%d tag(s)): %s", len(tags), query[:400])
     last_err: Exception | None = None
     for endpoint in OVERPASS_ENDPOINTS:
         try:
@@ -353,5 +357,5 @@ async def fetch_layer_pois(
         except Exception as e:
             last_err = e
             logger.warning("Overpass attempt failed (%s): %s", endpoint, e)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     raise RuntimeError(f"Overpass fetch failed for tags={tags}: {last_err}")

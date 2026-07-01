@@ -63,6 +63,8 @@ const App: React.FC = () => {
   const [chatReady, setChatReady] = useState(false);
   const [chatStage, setChatStage] = useState<'chat' | 'framework' | 'ready'>('chat');
   const [isExecuting, setIsExecuting] = useState(false);
+  // v1.4.2 — true after a non-cancelled analysis failure, enabling the Retry button
+  const [canRetry, setCanRetry] = useState(false);
   // Accumulated gpt-4o tokens across chat turns; logged with the execution entry
   const chatTokensRef = useRef(0);
   // Phase 11 — active job guard: stale poll responses from old jobIds are discarded
@@ -78,6 +80,8 @@ const App: React.FC = () => {
   // button's disabled={isLoading} ever applies. A plain ref is read/written
   // synchronously and closes that window completely.
   const isStartingRef = useRef(false);
+  // v1.4.2 — holds the last specWithPoints submitted so Retry can reuse it
+  const lastSpecWithPointsRef = useRef<any>(null);
 
   // Restore the persisted spec draft when the session changes (refresh / switch)
   useEffect(() => {
@@ -294,6 +298,7 @@ const App: React.FC = () => {
     setIsExecuting(false);
     setIsLoading(false);
     setAnalysisStatus({ message: '', progress: 0 });
+    setCanRetry(false);
   }, []);
 
   // v1.4.2 — defensive boot/login reset. isLoading/isExecuting/activeJobIdRef
@@ -345,8 +350,11 @@ const App: React.FC = () => {
   }, [logout, resetAnalysisExecutionState]);
 
   // ─── Execute the agreed spec (consumes one prompt credit) ───
-  const handleConfirmExecute = useCallback(async () => {
-    if (!chatSpec) return;
+  // specOverride: pass the stored spec directly for Retry without re-entering the chat flow.
+  const handleConfirmExecute = useCallback(async (specOverride?: any) => {
+    const specToUse = specOverride ?? chatSpec;
+    if (!specToUse) return;
+    setCanRetry(false);
     // v1.4.2 — synchronous duplicate-submit guard, checked and set BEFORE any
     // await. React's disabled={isLoading} only applies on the next render, so
     // a fast double-click or a duplicate "run" message arriving while the
@@ -383,13 +391,13 @@ const App: React.FC = () => {
       // Phase 18: inject uploaded candidate points into the spec at execution time.
       // userPoints live in frontend state; they must be sent as spec.userCandidatePoints
       // so the engine can enforce "uploaded candidates only" mode deterministically.
-      const rawIntent = (chatSpec as any).rawIntent;
+      const rawIntent = (specToUse as any).rawIntent;
       const isUploadedOnly =
         rawIntent?.uploadedCandidatesOnly === true ||
         (rawIntent?.hasUploadedCandidates && userPoints.length > 0 &&
-          (chatSpec as any).uploadedCandidatesOnly === true);
+          (specToUse as any).uploadedCandidatesOnly === true);
       const specWithPoints = userPoints.length > 0 ? {
-        ...chatSpec,
+        ...specToUse,
         userCandidatePoints: userPoints.map((p, i) => ({
           lat: p.lat, lng: p.lng,
           name: p.name || `Point-${i + 1}`,
@@ -397,7 +405,8 @@ const App: React.FC = () => {
           attributes: p.category ? { category: p.category } : {},
         })),
         uploadedCandidatesOnly: isUploadedOnly,
-      } : chatSpec;
+      } : specToUse;
+      lastSpecWithPointsRef.current = specWithPoints;
       jobId = await startAnalysis(specWithPoints as any);
       // Phase 11: register the active job so stale poll responses can be discarded
       activeJobIdRef.current = jobId;
@@ -424,12 +433,12 @@ const App: React.FC = () => {
         : analysisResultData.summary);
 
       if (user) {
-        saveAnalysis(user.uid, user.email, lastPrompt || chatSpec.objective, analysisResultData, analysisResultData.spec).catch(() => {});
+        saveAnalysis(user.uid, user.email, lastPrompt || specToUse.objective, analysisResultData, analysisResultData.spec).catch(() => {});
         logPrompt({
           userId: user.uid,
           email: user.email,
-          prompt: chatSpec.objective,
-          sector: chatSpec.businessType,
+          prompt: specToUse.objective,
+          sector: specToUse.businessType,
           city: analysisResultData.target_location || '',
           latencyMs: Date.now() - analysisStartTime,
           resultCount: analysisResultData.locations.length,
@@ -443,16 +452,16 @@ const App: React.FC = () => {
       }
 
       updateMemory({
-        businessType: chatSpec.businessType,
+        businessType: specToUse.businessType,
         city: analysisResultData.target_location || null,
         sectorId: 'conversational_v2',
-        constraints: (chatSpec.exclusions || []).map(e => e.name),
+        constraints: (specToUse.exclusions || []).map((e: any) => e.name),
         lastResultCount: analysisResultData.locations.length,
         lastSearchRadiusM: analysisResultData.locations[0]?.searchRadiusM || null,
         lastAnalysisTimestamp: new Date().toISOString(),
       });
       if (currentSession.title === 'New Analysis') {
-        dispatch({ type: 'SET_TITLE', title: `${chatSpec.businessType} — ${analysisResultData.target_location || 'study area'}` });
+        dispatch({ type: 'SET_TITLE', title: `${specToUse.businessType} — ${analysisResultData.target_location || 'study area'}` });
       }
     } catch (err: any) {
       // A cancellation already got its own "Analysis cancelled." message and
@@ -465,6 +474,8 @@ const App: React.FC = () => {
       const msg = err?.message || 'Analysis failed. Please try again.';
       setError(msg);
       addMessage('assistant', msg);
+      // v1.4.2 — enable Retry button so the user can re-run without re-typing
+      if (lastSpecWithPointsRef.current) setCanRetry(true);
     } finally {
       // Only unlock state that still belongs to THIS invocation. If a newer
       // analysis (or Cancel, or logout) has since taken over activeJobIdRef,
@@ -480,6 +491,12 @@ const App: React.FC = () => {
       isStartingRef.current = false;
     }
   }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch]);
+
+  // v1.4.2 — retry the last failed analysis with the same spec, no re-typing needed.
+  const handleRetryAnalysis = useCallback(() => {
+    if (!lastSpecWithPointsRef.current) return;
+    handleConfirmExecute(lastSpecWithPointsRef.current);
+  }, [handleConfirmExecute]);
 
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
     // ─── Conversational mode: route to multi-turn chat, no immediate execution ───
@@ -1419,6 +1436,8 @@ const App: React.FC = () => {
           onConfirmExecute={handleConfirmExecute}
           onSpecEdit={handleSpecEdit}
           onCancelAnalysis={handleCancelAnalysis}
+          canRetry={canRetry}
+          onRetryAnalysis={handleRetryAnalysis}
         />
       </ErrorBoundary>
 

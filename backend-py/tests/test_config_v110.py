@@ -9,7 +9,7 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 def test_version_is_120():
     # Updated to v1.4.0 — reliability hardening
     assert APP_VERSION == "1.4.0"
-    assert ENGINE_VERSION == "stratageo-engine-00047"
+    assert ENGINE_VERSION == "stratageo-engine-00049"
 
 
 # ── Model defaults (v1.1.1 — gpt-5.4 family) ─────────────────────────────────

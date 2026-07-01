@@ -885,21 +885,75 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # where OSM positively says no-build, and we report every removal.
     bflags = _buildability_flags(spec)
     road_lines: list[dict] = []
+    _buildability_degraded: list[str] = []   # checks skipped due to provider timeout
     if any(bflags.values()):
         _update(job, 64, "buildability", "Applying buildability / no-construction masks...")
+        _bov_timeout = s.buildability_overpass_timeout
 
-        async def _safe_area(tags):
+        async def _safe_area(tags, label: str = "unknown"):
             try:
-                return await fetch_area_geometries(tags, overpass_bbox)
+                return await asyncio.wait_for(
+                    fetch_area_geometries(tags, overpass_bbox),
+                    timeout=_bov_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "job %s: buildability '%s' area timed out after %ss — skipped",
+                    job.id[:8], label, _bov_timeout,
+                )
+                fallbacks.append(
+                    f"Buildability '{label}': Overpass timed out after {_bov_timeout}s "
+                    "— exclusion mask skipped (graceful degradation)."
+                )
+                _buildability_degraded.append(label)
+                return []
             except Exception as ex:
-                fallbacks.append(f"Buildability fetch skipped ({tags[:1]}…): {ex}")
+                fallbacks.append(f"Buildability '{label}' fetch failed: {ex}")
+                _buildability_degraded.append(label)
                 return []
 
-        async def _safe_line(tags):
+        async def _safe_line(tags, label: str = "unknown"):
             try:
-                return await fetch_line_geometries(tags, overpass_bbox)
+                return await asyncio.wait_for(
+                    fetch_line_geometries(tags, overpass_bbox),
+                    timeout=_bov_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "job %s: buildability '%s' line timed out after %ss — skipped",
+                    job.id[:8], label, _bov_timeout,
+                )
+                fallbacks.append(
+                    f"Buildability '{label}': Overpass line timed out after {_bov_timeout}s "
+                    "— line exclusion mask skipped (graceful degradation)."
+                )
+                _buildability_degraded.append(label)
+                return []
             except Exception as ex:
-                fallbacks.append(f"Buildability line fetch skipped ({tags[:1]}…): {ex}")
+                fallbacks.append(f"Buildability '{label}' line fetch failed: {ex}")
+                _buildability_degraded.append(label)
+                return []
+
+        async def _safe_named(regex: str, label: str = "unknown"):
+            try:
+                return await asyncio.wait_for(
+                    fetch_named_features(regex, overpass_bbox),
+                    timeout=_bov_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "job %s: buildability '%s' named timed out after %ss — skipped",
+                    job.id[:8], label, _bov_timeout,
+                )
+                fallbacks.append(
+                    f"Buildability '{label}': Overpass named fetch timed out after {_bov_timeout}s "
+                    "— exclusion mask skipped (graceful degradation)."
+                )
+                _buildability_degraded.append(label)
+                return []
+            except Exception as ex:
+                fallbacks.append(f"Buildability '{label}' named fetch failed: {ex}")
+                _buildability_degraded.append(label)
                 return []
 
         # v1.4.1 — this block previously made up to 6 sequential Overpass calls
@@ -913,8 +967,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         # cancel now takes effect within one sub-step instead of the whole block.
         if bflags.get("railway"):
             _update(job, 64, "buildability", "Checking railway land / track exclusions...")
-            rail_area = await _safe_area(buildability.RAILWAY_AREA_TAGS)
-            rail_lines = await _safe_line(buildability.RAILWAY_LINE_TAGS)
+            rail_area = await _safe_area(buildability.RAILWAY_AREA_TAGS, "railway_area")
+            rail_lines = await _safe_line(buildability.RAILWAY_LINE_TAGS, "railway_lines")
             rmask = buildability.centroid_in_polygon_mask(hexes, rail_area)
             rmask |= buildability.line_buffer_mask(hexes, rail_lines, 40.0, lat0, lng0)
             rmask &= ~excluded
@@ -926,7 +980,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
         if bflags.get("ghat"):
             _update(job, 65, "buildability", "Checking ghat / waterfront-access exclusions...")
-            ghats = await fetch_named_features("[Gg]hat", overpass_bbox)
+            ghats = await _safe_named("[Gg]hat", "ghat")
             gmask = buildability.point_buffer_mask(hexes, ghats, 50.0)
             gmask &= ~excluded
             n = int(gmask.sum())
@@ -940,7 +994,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             tags = list(buildability.PROTECTED_AREA_TAGS)
             if bflags.get("park_exception"):
                 tags = [t for t in tags if not t.startswith(("leisure=park", "landuse=grass", "landuse=recreation"))]
-            prot = await _safe_area(tags)
+            prot = await _safe_area(tags, "protected_area")
             pmask = buildability.centroid_in_polygon_mask(hexes, prot)
             pmask &= ~excluded
             n = int(pmask.sum())
@@ -957,7 +1011,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             # commercial plot). Skipped when the brief is a park/open-air use.
             if not bflags.get("park_exception"):
                 _update(job, 67, "buildability", "Checking open-ground / maidan exclusions...")
-                maidans = await fetch_named_features(buildability.OPEN_GROUND_NAME_RE, overpass_bbox)
+                maidans = await _safe_named(buildability.OPEN_GROUND_NAME_RE, "maidan")
                 mmask = buildability.point_buffer_mask(hexes, maidans, 75.0)
                 mmask &= ~excluded
                 nm = int(mmask.sum())
@@ -971,7 +1025,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
         if bflags.get("commercial_proxy"):
             _update(job, 68, "buildability", "Checking commercial road-frontage proxy...")
-            road_lines = await _safe_line(buildability.ROAD_LINE_TAGS)
+            road_lines = await _safe_line(buildability.ROAD_LINE_TAGS, "road_frontage")
+
+        if _buildability_degraded:
+            mask_stats["buildabilityDegraded"] = _buildability_degraded
+            notes.append(
+                "Buildability checks degraded (Overpass provider timeout after "
+                + str(_bov_timeout) + "s): "
+                + ", ".join(_buildability_degraded)
+                + ". Affected land-type exclusion masks were skipped — "
+                "candidate zones may overlap these land types. Confidence reduced."
+            )
 
     # ── 5. Candidate selection ──────────────────────────────────────
     top_k = min(spec.execution.refineTopK, s.refine_top_k)

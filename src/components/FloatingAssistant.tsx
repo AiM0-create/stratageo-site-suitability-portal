@@ -40,6 +40,9 @@ interface FloatingAssistantProps {
   onSpecEdit?: (updated: SpecV2) => void;
   /** v1.4.1 — cancel a running analysis; shown alongside the progress bar. */
   onCancelAnalysis?: () => void;
+  /** v1.4.2 — retry the last failed analysis with the same spec, no re-typing. */
+  canRetry?: boolean;
+  onRetryAnalysis?: () => void;
 }
 
 const SCENARIOS = [
@@ -75,6 +78,8 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   onConfirmExecute,
   onSpecEdit,
   onCancelAnalysis,
+  canRetry = false,
+  onRetryAnalysis,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
@@ -320,6 +325,17 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               <div className="assistant-error">
                 <span>{error}</span>
                 <button onClick={onDismissError} className="assistant-error-dismiss">&times;</button>
+              </div>
+            )}
+            {canRetry && onRetryAnalysis && !isLoading && (
+              <div className="assistant-retry-row">
+                <button
+                  type="button"
+                  className="assistant-retry-btn"
+                  onClick={onRetryAnalysis}
+                >
+                  Retry analysis
+                </button>
               </div>
             )}
           </div>

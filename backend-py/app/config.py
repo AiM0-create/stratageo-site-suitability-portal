@@ -14,7 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # ── Version metadata (single source of truth) ─────────────────────────────────
 APP_VERSION     = "1.4.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00047"
+ENGINE_VERSION  = "stratageo-engine-00049"
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
 RELEASE_NAME    = "Reliability Hardening — Honest Candidate Zones"
@@ -116,6 +116,14 @@ class Settings(BaseSettings):
     # ceiling is hit, the job is forced to a terminal "timeout" status so the
     # frontend can stop polling and unlock the chat input.
     job_max_runtime_seconds: int = 240
+    # v1.4.2 — per-call timeout for each individual Overpass fetch inside the
+    # buildability stage. The stage previously made up to 6 sequential calls
+    # with no individual call ceiling, meaning one slow Overpass mirror (up to
+    # ~50s per endpoint × 3 mirrors = ~150s) could consume the entire 240s
+    # analysis budget before the hard job ceiling even fired. 30s caps any
+    # single buildability call; on timeout the check degrades gracefully
+    # (empty mask, confidence note) rather than failing the whole analysis.
+    buildability_overpass_timeout: int = 30
 
     # ── Feature flags (v1.1.0+) ──────────────────────────────────────────────
     enable_raw_intent_parser: bool = True       # deterministic pre-LLM parser
