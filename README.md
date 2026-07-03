@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.3.0 — Evidence Trail & Reproducible Site Selection Reports**
+**Current version: v1.4.8 — Result Contract Stability & Google Provider Intelligence**
 
 ---
 
@@ -20,6 +20,17 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.4.8 Highlights
+
+- **Google Places API (New) provider layer** — Nearby Search / Text Search (New) as the primary POI source, with the legacy Nearby Search API and OSM/Overpass retained as automatic fallback if the New API is unavailable or errors.
+- **Places Aggregate (Area Insights) for density/count intelligence** — authoritative POI counts refine the top shortlisted candidates' competition/co-tenancy/amenity scores. Self-disables and falls back to Places/OSM-derived counts if the Aggregate API is not enabled, out of quota, or lacks permission on the current key/project — never blocks an analysis.
+- **Google Routes as the primary route validator**, ORS Directions retained as fallback; a route constraint that can't be computed by either provider is marked **unavailable/provisional**, never silently replaced by straight-line distance.
+- **Typed provider contract** (`ProviderResult`) for every external call: strict timeout, bounded retry with backoff only for retryable errors, per-provider circuit breaker, per-job Google budget, and per-job caching — a slow or failing provider degrades gracefully with a visible note instead of crashing the analysis.
+- **Result contract unchanged and enforced**: every analysis still ends in exactly one of `SUCCESS` / `NO_VIABLE_SITE` / `FAILED`, now with `providerDiagnostics` (including per-call Google provider status) attached to the payload.
+- Place Details (New) enrich a capped set of top evidence POIs (rating, review count, price level) — evidence only, never used in MCDA scoring.
 
 ---
 

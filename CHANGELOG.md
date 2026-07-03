@@ -4,6 +4,36 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.4.8] — 2026-07-03 — Result Contract Stability & Google Provider Intelligence
+
+**Tests:** 502 backend passed · 41 frontend passed · **Readiness:** deployed to production
+
+This bump folds in the accumulated v1.4.1–v1.4.7 reliability fixes (shipped across several commits without an `APP_VERSION` bump) together with the new v1.4.8 Google provider integration.
+
+### v1.4.7 — result contract stability (root-cause fix)
+- **Root cause fixed**: `evidence_builder._build_excluded_mask` summed *every* value in `mask_stats`, but `buildabilityDegraded` / `providerDegraded` are lists — any degraded run (the common case after v1.4.6) crashed with `TypeError: unsupported operand type(s) for +: 'int' and 'list'` at evidence assembly, after the analysis had already computed. Fixed with an explicit whitelist of hex-removal counters (`safe_int_sum`).
+- **Numeric scoring contract** (`engine/contracts.py`): `FactorValue`/`FactorResult`, `to_finite_float`, `normalize_0_1`, `aggregate_provider_values`, `validate_factor_result` — no list/dict/NaN/inf can reach a numeric scoring field; every factor is validated before final ranking.
+- **Three-state result payload**: every terminal analysis is now exactly `status: "success" | "no_viable_site" | "failed"`. A `FAILED` payload carries `stage`, `errorCode`, `userMessage`, `retryable`, `jobRef` — no raw Python exception ever becomes the user-facing result.
+- **Provider retry + circuit breaker**: `_degradable_call` gained bounded retry with jittered exponential backoff (never on timeout) and a per-job circuit breaker per provider family.
+- **Frontend**: `resultNormalizer` renders the three states distinctly (`malformed` payload shows a `jobRef`); follow-up questions about existing results ("why is zone 2 lower?") no longer clear the results drawer — only a new analysis brief does.
+
+### v1.4.8 — Google provider integration
+- **Google Places API (New) provider layer** (`app/providers/`): Nearby Search / Text Search (New) as the primary POI source, legacy Nearby Search and OSM/Overpass retained as automatic fallback.
+- **Places Aggregate (Area Insights)** refines top-candidate counts with `computeInsights(INSIGHT_COUNT)`. Self-disables (HTTP 403/404) and falls back to Places/OSM-derived counts if the Aggregate API is not enabled, out of quota, or lacks permission — never blocks an analysis.
+- **Google Routes primary** for route-constraint validation (`computeRoutes`), ORS Directions retained as fallback; unavailable on both → constraint marked provisional/unavailable, **never** silently replaced by Euclidean distance.
+- **Place Details (New)** enrich a capped set (`google_details_max_places_per_job`, default 6) of top evidence POIs with rating/review count/price level — evidence only, never scored.
+- **Typed `ProviderResult` contract** for every external call: strict timeout, bounded retry (429/5xx/network only, exponential backoff + jitter, never on timeout), per-provider circuit breaker, per-job Google time budget, per-job request cache. No API keys or request headers are ever logged. Explicit minimal field masks everywhere (never `*`).
+- New config flags (`enable_google_places_new`, `enable_google_places_aggregate`, `enable_google_place_details_new`, `enable_google_routes_validation`, plus off-by-default `enable_google_place_photos` / `enable_google_autocomplete` / `enable_google_search_along_route` / `enable_google_ai_summaries`) and timeout/budget settings.
+- `providerDiagnostics.googleCalls` (provider/feature/status/elapsedMs/degradationReason) attached to every terminal payload.
+- **28 new backend tests** (`tests/test_v148_google_providers.py`): field-mask audit, retry/backoff/breaker/budget/cache policy, fallback chains never raise, Aggregate→`FactorValue`, Text Search for ambiguous queries, Details cap, polyline decode, route-unavailable→provisional, photos/AI-summaries excluded from scoring, full end-to-end payload-contract check.
+- Product correctness preserved: rent/footprint remain unverified for supermarket briefs; dark-kitchen drive-time never silently falls back to Euclidean; results remain candidate zones, never exact parcels.
+
+### Changed
+- `config.py`: `APP_VERSION` → `1.4.8`; `ENGINE_VERSION` fallback → `stratageo-engine-00053`; `RELEASE_NAME` → "Result Contract Stability & Google Provider Intelligence". `SPEC_VERSION` and `EVIDENCE_VERSION_PUBLIC` intentionally **not** bumped — neither wire schema changed structurally.
+- `package.json` / `package-lock.json`: version → `1.4.8`.
+
+---
+
 ## [1.4.0] — 2026-06-30 — Reliability Hardening — Honest Candidate Zones
 
 **Branch:** `v1.4-reliability-hardening` · **Latest commit:** `dc0a478` · **Tests:** 420 passed · **Readiness:** `READY_FOR_REVIEW_ONLY`

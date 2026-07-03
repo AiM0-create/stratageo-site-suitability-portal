@@ -138,7 +138,10 @@ def build_factor_evidence(
             weighted = round(float(ls.layer.weight * norm) / pw * 10, 2) if pw > 0 else 0.0
             norm_score = round(norm * 10, 2)
 
-            refinement = "isochrone" if ci in ls.refined else "euclidean_proxy"
+            refinement = (
+                getattr(ls, "refined_source", "isochrone")
+                if ci in ls.refined else "euclidean_proxy"
+            )
             explanation = (
                 f"{raw_count} feature(s) counted within {catchment_label} "
                 f"({refinement}). Normalized: {norm_score}/10. "

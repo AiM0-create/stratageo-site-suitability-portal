@@ -491,11 +491,31 @@ def _run_pipeline(spec, *, river_line: bool = False):
     async def fake_write_explanations(spec_, locations, ds=None):
         return "test summary", ["r"] * len(locations)
 
+    # v1.4.8 — the Places priority chain (New → legacy) is stubbed to call the
+    # legacy fetch directly so these tests exercise the SAME degradation path
+    # as before and never touch the network. All-provider failure returns the
+    # ("none" source) sentinel, which jobs maps to providerDegraded.
+    async def fake_pois_with_fallback(types, keyword, bbox, *, legacy_fetch, ctx=None):
+        try:
+            pois = await legacy_fetch(types or [], keyword, bbox)
+            return pois, "google_places_legacy", []
+        except Exception as ex:
+            return [], "none", [f"legacy failed: {ex}"]
+
+    from app.providers.base import ProviderResult as _PR
+
+    async def fake_aggregate_count(center, radius_m, included_types, *, ctx=None):
+        return _PR(provider="gaggregate", feature="insight_count",
+                   status="disabled", data={},
+                   degradation_reason="api_not_available_http_403")
+
     from app.engine import results as results_mod
 
     with patch.object(jobs_mod, "resolve_study_area", fake_resolve_study_area), \
          patch.object(jobs_mod, "fetch_all_layers", fake_fetch_all_layers), \
          patch.object(jobs_mod, "fetch_places_pois", fake_fetch_places_pois), \
+         patch.object(jobs_mod.gp_new, "fetch_pois_with_fallback", fake_pois_with_fallback), \
+         patch.object(jobs_mod.gp_agg, "compute_count", fake_aggregate_count), \
          patch.object(jobs_mod, "fetch_area_geometries", fake_fetch_area_geometries), \
          patch.object(jobs_mod, "fetch_line_geometries", fake_fetch_line_geometries), \
          patch.object(jobs_mod, "fetch_named_features", fake_fetch_named_features), \

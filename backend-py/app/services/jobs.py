@@ -18,6 +18,10 @@ from ..config import get_settings
 from ..models.spec import SpecV2, _is_water_tag
 from ..engine import buildability
 from ..engine import contracts
+from ..providers.base import ProviderBudget, ProviderContext
+from ..providers import google_places_new as gp_new
+from ..providers import google_places_aggregate as gp_agg
+from ..providers import google_place_enrichment as gp_details
 from ..engine import corridors
 from ..engine import poi_merge
 from ..engine import results as results_mod
@@ -577,6 +581,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     _opt_timeout = s.optional_provider_timeout
     # v1.4.7 — per-job circuit breaker across optional provider families.
     _breaker = ProviderBreaker(threshold=3)
+    # v1.4.8 — per-job Google provider context: total budget across all Google
+    # calls, per-job request cache, shared circuit breaker, call diagnostics.
+    _pctx = ProviderContext(
+        budget=ProviderBudget(s.google_places_total_budget_seconds_per_job),
+        breaker=_breaker,
+    )
     _qt = QueryTracker()          # v1.3.0 — evidence trail provider query tracker
     import datetime as _dt
     _analysis_start = _dt.datetime.utcnow().isoformat() + "Z"
@@ -866,15 +876,29 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 _update(job, 40, "fetch", f"Google Places back-up for: {layer.name}...")
                 # v1.4.6 — bounded: a slow/broken Places API degrades this
                 # back-up merge to OSM-only, it must not kill the job.
-                places_pois = await _degradable_call(
-                    lambda pt=ptype: fetch_places_pois([pt], None, overpass_bbox),
-                    timeout=_opt_timeout, label=f"places_backup_{layer.id}",
-                    job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
-                    retries=1, breaker=_breaker,
+                # v1.4.8 — priority: Places (New) → legacy Nearby → OSM-only.
+                # Retries/backoff/budget live inside the provider layer, so
+                # this degradable wrapper only provides the outer ceiling.
+                places_pois, _pp_src, _pp_notes = await _degradable_call(
+                    lambda pt=ptype: gp_new.fetch_pois_with_fallback(
+                        [pt], None, overpass_bbox,
+                        legacy_fetch=fetch_places_pois, ctx=_pctx,
+                    ),
+                    timeout=max(_opt_timeout, 90), label=f"places_backup_{layer.id}",
+                    job=job, fallbacks=fallbacks, degraded=_provider_degraded,
+                    default=([], "none", []), breaker=_breaker,
                 )
+                notes.extend(_pp_notes)
+                if _pp_src == "none":
+                    # every Places provider failed — degradation, not silence
+                    _provider_degraded.append(f"places_backup_{layer.id}")
+                    fallbacks.append(
+                        f"All Places providers failed for layer '{layer.name}' — "
+                        "OSM data only for this factor."
+                    )
                 places_fetches += 1
                 _qt.record_places(
-                    purpose=f"backup_for_{layer.id}",
+                    purpose=f"backup_for_{layer.id} [source={_pp_src}]",
                     place_types=[ptype],
                     bbox=overpass_bbox,
                     feature_count=len(places_pois),
@@ -891,15 +915,27 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             _update(job, 40, "fetch", f"Fetching Google Places for: {layer.name}...")
             # v1.4.6 — bounded: on timeout/failure this layer degrades to the
             # OSM supplement (or no-data, excluded from scoring) with a note.
-            places_pois = await _degradable_call(
-                lambda l=layer: fetch_places_pois(l.source.types, l.source.keyword, overpass_bbox),
-                timeout=_opt_timeout, label=f"places_primary_{layer.id}",
-                job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
-                retries=1, breaker=_breaker,
+            # v1.4.8 — priority: Text/Nearby Search (New) → legacy → OSM-only.
+            places_pois, _pp_src, _pp_notes = await _degradable_call(
+                lambda l=layer: gp_new.fetch_pois_with_fallback(
+                    l.source.types, l.source.keyword, overpass_bbox,
+                    legacy_fetch=fetch_places_pois, ctx=_pctx,
+                ),
+                timeout=max(_opt_timeout, 90), label=f"places_primary_{layer.id}",
+                job=job, fallbacks=fallbacks, degraded=_provider_degraded,
+                default=([], "none", []), breaker=_breaker,
             )
+            notes.extend(_pp_notes)
+            if _pp_src == "none":
+                # every Places provider failed — degradation, not silence
+                _provider_degraded.append(f"places_primary_{layer.id}")
+                fallbacks.append(
+                    f"All Places providers failed for layer '{layer.name}' — "
+                    "OSM supplement only for this factor."
+                )
             places_fetches += 1
             _qt.record_places(
-                purpose=f"primary_{layer.id}",
+                purpose=f"primary_{layer.id} [source={_pp_src}]",
                 place_types=layer.source.types or [],
                 bbox=overpass_bbox,
                 feature_count=len(places_pois),
@@ -1393,9 +1429,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "failedGates": _failed_gates,
             "relaxationSuggestions": _viability_suggestions(spec),
             "degradationNotes": list(fallbacks),
-            "providerDiagnostics": _provider_diagnostics(
-                _provider_degraded, fallbacks, len(_qt.records),
-            ),
+            "providerDiagnostics": {
+                **_provider_diagnostics(_provider_degraded, fallbacks, len(_qt.records)),
+                "googleCalls": _pctx.call_log[:80],
+            },
             # legacy shape (frontend wire contract) — unchanged below
             "summary": ("No reliable recommendation: no buildable site remained after the "
                         + wf_band + "water, railway, ghat, heritage and open-space masks were applied."),
@@ -1470,6 +1507,62 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     # keep geometry for map display of the eventual winners
                     iso_polygons[(layer.id, ci)] = poly
 
+    # ── 6a1. Places Aggregate count refinement (v1.4.8) ─────────────────────
+    # For google_places factor layers, replace the sampled-POI count at each
+    # top candidate with Google's authoritative place count (computeInsights)
+    # within a circle ≈ the factor's catchment radius. Better count
+    # intelligence exactly where ranking happens; bounded (≤8 candidates ×
+    # google layers), cached, budgeted. On disabled/degraded the existing
+    # isochrone/Euclidean values are simply kept.
+    _agg_layers = [l for l in spec.layers
+                   if l.source.provider == "google_places" and l.source.types]
+    if _agg_layers and s.enable_google_places_aggregate and s.google_places_api_key:
+        _AGG_CAND_CAP = 8
+        _agg_pairs = [(ci, hexes[ci]) for ci in candidates[:_AGG_CAND_CAP]]
+        _update(job, 74, "aggregate_counts",
+                f"Refining counts via Places Aggregate for top {len(_agg_pairs)} candidates...")
+        _agg_stop = False
+        _agg_hits: dict[str, int] = {}
+        for layer in _agg_layers:
+            if _agg_stop:
+                break
+            _agg_radius = scoring.proxy_radius_m(layer)
+            for ci, cell in _agg_pairs:
+                pr = await gp_agg.compute_count(
+                    (cell.lat, cell.lng), _agg_radius, layer.source.types, ctx=_pctx,
+                )
+                if pr.status == "disabled":
+                    fallbacks.append(
+                        "Google Places Aggregate is not available for this key/project — "
+                        "candidate counts kept from Places/OSM POIs."
+                    )
+                    _agg_stop = True
+                    break
+                if pr.status == "degraded":   # circuit open / budget exhausted
+                    _provider_degraded.append("aggregate_counts")
+                    fallbacks.append(
+                        f"Places Aggregate degraded ({pr.degradation_reason}) — "
+                        "remaining candidate counts kept from Places/OSM POIs."
+                    )
+                    _agg_stop = True
+                    break
+                if pr.status == "ok":
+                    _cnt = contracts.to_finite_float(
+                        pr.data.get("count"), default=None,
+                        label=f"aggregate_count_{layer.id}", warnings=fallbacks,
+                    )
+                    if _cnt is not None:
+                        scores[layer.id].refined[ci] = _cnt
+                        scores[layer.id].refined_source = "google_places_aggregate"
+                        refined_any = True
+                        _agg_hits[layer.name] = _agg_hits.get(layer.name, 0) + 1
+                # failed/timeout/empty → keep the existing value for this candidate
+        for _ln, _n in _agg_hits.items():
+            notes.append(
+                f"Factor '{_ln}': counts for {_n} shortlisted candidate(s) refined with "
+                "Google Places Aggregate (authoritative index count, circle ≈ catchment)."
+            )
+
     # ── 6a2. Traffic-aware drive catchment (Google Routes, destination biz) ──
     # For drive layers flagged trafficAware, replace the isochrone count with the
     # count of this layer's demand POIs reachable within `minutes` in typical
@@ -1533,6 +1626,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                     )
                     if _reach is not None:
                         scores[layer.id].refined[ci] = _reach
+                        scores[layer.id].refined_source = "google_routes_traffic"
                         refined_any = True
                 _cong = contracts.to_finite_float(
                     congestion, default=None, label=f"traffic_congestion_{layer.id}",
@@ -1808,6 +1902,36 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             not loc.get("excluded") and not loc.get("scoreWithheld") and in_corridor
         )
 
+    # ── 8c. Evidence-POI enrichment via Place Details (New) (v1.4.8) ────────
+    # For each non-excluded winner, enrich up to 2 nearby evidence POIs (that
+    # carry a placeId from Places New) with rating / review count / price
+    # level. HARD CAP per job (google_details_max_places_per_job) — details
+    # are fetched only for selected top evidence, never every raw result.
+    # Evidence only: never enters MCDA scoring.
+    if s.enable_google_place_details_new and s.google_places_api_key and locations:
+        _details_cap = s.google_details_max_places_per_job
+        _enriched_total = 0
+        for loc in locations:
+            if _enriched_total >= _details_cap:
+                break
+            if loc.get("excluded"):
+                continue
+            _near = sorted(
+                (p for p in all_poi_points if p.get("placeId")),
+                key=lambda p: scoring.haversine_m(loc["lat"], loc["lng"], p["lat"], p["lng"]),
+            )
+            _got = await gp_details.enrich_top_pois(
+                _near, cap=min(2, _details_cap - _enriched_total), ctx=_pctx,
+            )
+            if _got:
+                loc["poiEvidence"] = _got
+                _enriched_total += len(_got)
+        if _enriched_total:
+            notes.append(
+                f"Enriched {_enriched_total} evidence POI(s) with Google Place Details "
+                "(rating / review count / price level) — evidence only, not scored."
+            )
+
     # PATCH 4: cap competition-whitespace benefit where demand/F&B baseline is weak
     # (runs before the viability gate so capped scores feed `recommended`).
     _cap_competition_whitespace(spec, locations)
@@ -2068,9 +2192,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "factorScores": _factor_scores_public,
         "constraintValidation": _policy.to_dict(),
         "degradationNotes": list(fallbacks),
-        "providerDiagnostics": _provider_diagnostics(
-            _provider_degraded, fallbacks, len(_qt.records),
-        ),
+        "providerDiagnostics": {
+            **_provider_diagnostics(_provider_degraded, fallbacks, len(_qt.records)),
+            # v1.4.8 — per-call Google provider log: provider, feature, status,
+            # elapsedMs, degradationReason (never keys/URLs).
+            "googleCalls": _pctx.call_log[:80],
+        },
         **({
             "reason": data_sufficiency.get(
                 "note", "Recommendation withheld — insufficient viable land.",

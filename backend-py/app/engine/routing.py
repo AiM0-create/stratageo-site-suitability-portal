@@ -100,9 +100,34 @@ async def route(
     avoid_geojson: dict | None = None,
     cache_tag: str = "",
 ) -> dict | None:
-    """ORS Directions → {distanceM, durationMin, geometry: LineString} or None.
-    Cached in GCS by (origin, dest, mode, avoid_tag)."""
+    """Network route → {distanceM, durationMin, geometry: LineString, provider}
+    or None when no provider can compute it (the caller then marks the
+    constraint 'unavailable' — NEVER a silent Euclidean substitute).
+
+    v1.4.8 priority: Google Routes (flag + key) → ORS Directions fallback.
+    avoid_geojson (barrier avoidance) is ORS-specific, so those requests go
+    straight to ORS. ORS results stay GCS-cached as before."""
     s = get_settings()
+
+    if (
+        s.enable_google_routes_validation
+        and s.google_places_api_key
+        and not avoid_geojson
+    ):
+        from ..providers.google_routes import compute_route
+        pr = await compute_route(origin, dest, mode)
+        if pr.status == "ok" and pr.data.get("geomCoords"):
+            return {
+                "distanceM": pr.data["distanceM"],
+                "durationMin": pr.data["durationMin"],
+                "geometry": LineString(pr.data["geomCoords"]),
+                "provider": "google_routes",
+            }
+        logger.warning(
+            "google routes %s (%s) — falling back to ORS",
+            pr.status, pr.degradation_reason or "no route",
+        )
+
     if not s.ors_api_key:
         return None
 
@@ -138,7 +163,7 @@ async def route(
         }
         if storage.enabled():
             await storage.put_json(key, result)
-        return {**result, "geometry": LineString(coords)}
+        return {**result, "geometry": LineString(coords), "provider": "ors"}
     except Exception as ex:
         # avoid_polygons with no possible route → ORS 2010; treat as "no route"
         logger.warning("ORS route failed (%s %s→%s): %s", mode, origin, dest, ex)
@@ -205,6 +230,8 @@ async def evaluate_route_constraint(
             "crossesRailway": crosses,
             "passed": passed,
             "reason": "; ".join(reasons) if reasons else "all conditions met",
+            # v1.4.8 — which routing provider validated this (evidence trail)
+            "routeProvider": r.get("provider", "ors"),
         }
 
     await asyncio.gather(*(one(i, c) for i, c in enumerate(candidates)))

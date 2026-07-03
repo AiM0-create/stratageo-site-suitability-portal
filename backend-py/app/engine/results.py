@@ -110,8 +110,15 @@ def build_location(
 
         raw = d["raw"]
         norm_score = round(d["normScore"] * 10, 1)
+        # v1.4.8 — honest per-source refinement label (evidence trail parity)
+        _rsrc = d.get("refinedSource", "isochrone")
+        _rsrc_label = {
+            "isochrone": f"true {_catchment_label(layer)} isochrone",
+            "google_places_aggregate": f"Google Places Aggregate count, circle ≈ {_catchment_label(layer)}",
+            "google_routes_traffic": f"traffic-aware {_catchment_label(layer)} via Google Routes",
+        }.get(_rsrc, _rsrc)
         refinement_note = (
-            f" (true {_catchment_label(layer)} isochrone)" if d["refined"]
+            f" ({_rsrc_label})" if d["refined"]
             else (f" (Euclidean proxy ≈{int(d['proxyRadiusM'])}m)" if layer.catchment.type in ("walk", "drive") else "")
         )
         just = f"{int(raw)} features within {_catchment_label(layer)}{refinement_note}."

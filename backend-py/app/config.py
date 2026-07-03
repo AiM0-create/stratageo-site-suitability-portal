@@ -5,6 +5,12 @@ v1.1.1: refreshed model defaults to the cost-aware gpt-5.4 family.
 v1.1.2: water tag helper import fix.
 v1.2.0: deterministic planning mode — canonical archetype schemas, spec fingerprinting.
 v1.3.0: evidence trail & reproducible site-selection reports.
+v1.4.1-1.4.7: execution-flow reliability, provider degradation, results-crash
+  safety, numeric scoring contract (contracts.py), three-state result payload
+  (success/no_viable_site/failed) — shipped across several commits without an
+  APP_VERSION bump; folded into this bump.
+v1.4.8: typed Google provider layer (Places API New, Places Aggregate,
+  Routes, Place Details) with legacy Places / OSM / ORS retained as fallback.
 """
 from functools import lru_cache
 from typing import Literal
@@ -12,12 +18,17 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.4.0"
+APP_VERSION     = "1.4.8"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00049"
+ENGINE_VERSION  = "stratageo-engine-00053"
+# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.4.8 — the
+# SpecV2 wire schema and the EvidenceTrail schema are structurally unchanged;
+# only internal engine values (LayerScores.refined_source) and additive
+# result-payload keys (factorScores, providerDiagnostics.googleCalls,
+# locations[].poiEvidence) were added outside these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Reliability Hardening — Honest Candidate Zones"
+RELEASE_NAME    = "Result Contract Stability & Google Provider Intelligence"
 
 
 class Settings(BaseSettings):
@@ -157,6 +168,28 @@ class Settings(BaseSettings):
     # When true, every completed analysis includes a full EvidenceTrail in the
     # result payload and the /evidence endpoint is active.
     enable_evidence_trail: bool = True
+
+    # ── v1.4.8: Google Places API (New) / Aggregate / Routes integration ──────
+    # Analysis-critical features default ON (they self-disable without a key
+    # and degrade to legacy Places / OSM / ORS on failure). UI-only or
+    # cost/attribution-sensitive features default OFF until wired safely.
+    enable_google_places_new: bool = True          # Nearby/Text Search (New) as primary POI source
+    enable_google_places_aggregate: bool = True    # Aggregate counts for top-K candidate refinement
+    enable_google_place_details_new: bool = True   # capped evidence-POI enrichment (rating/price)
+    enable_google_place_photos: bool = False       # UI-only; never in scoring
+    enable_google_autocomplete: bool = False       # frontend UX only; never in backend scoring
+    enable_google_search_along_route: bool = False # provider capability; no product trigger yet
+    enable_google_routes_validation: bool = True   # Google Routes primary for route constraints (ORS fallback)
+    enable_google_ai_summaries: bool = False       # narrative-only; region availability varies
+
+    # Timeouts / budgets for the v1.4.8 provider layer.
+    google_places_timeout_seconds: float = 12.0
+    google_places_max_retries: int = 2             # bounded; retryable 429/5xx/network only
+    google_places_total_budget_seconds_per_job: float = 45.0
+    google_places_aggregate_timeout_seconds: float = 12.0
+    google_routes_timeout_seconds: float = 15.0
+    google_details_max_places_per_job: int = 6
+    google_photos_max_places_per_job: int = 3
 
     @property
     def origins_list(self) -> list[str]:

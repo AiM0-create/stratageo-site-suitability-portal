@@ -39,6 +39,9 @@ class LayerScores:
     refined_low: float | None = None
     refined_high: float | None = None
     discriminating: bool = True          # False if values are ~constant across candidates
+    # v1.4.8 — which provider produced the refined values (evidence labels):
+    # "isochrone" (ORS), "google_places_aggregate", "google_routes_traffic".
+    refined_source: str = "isochrone"
 
 
 def proxy_radius_m(layer: Layer) -> float:
@@ -244,6 +247,7 @@ def composite_for_hex(
         detail[lid] = {
             "raw": raw, "normScore": norm, "hasData": True,
             "refined": hex_index in ls.refined,
+            "refinedSource": getattr(ls, "refined_source", "isochrone"),
             "discriminating": ls.discriminating,
             "proxyRadiusM": ls.proxy_radius_m,
         }
