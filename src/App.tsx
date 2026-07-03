@@ -5,7 +5,9 @@ import type { BasemapId } from './components/MapView';
 import { config } from './config';
 import { runDemoAnalysis, runServerAnalysis } from './services/analysisService';
 import { sendChatTurn, startAnalysis, pollAnalysis, cancelAnalysis, AnalysisCancelledError } from './services/chatService';
-import type { SpecV2 } from './types/chat';
+import { isAnalysisSpecWithPoints, isConfirmationPhrase } from './services/analysisFlow';
+import { normalizeAnalysisResult } from './services/resultNormalizer';
+import type { SpecV2, AnalysisPhase } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
@@ -31,41 +33,12 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 declare const html2canvas: any;
 declare const jspdf: any;
 
-/** v1.4.3 — a DOM/React event object must never be treated as an analysis
- * spec. A bare `onClick={handleConfirmExecute}` (or `onClick={onConfirmExecute}`
- * one layer up) passes the click's SyntheticEvent as the first argument;
- * without this guard it flows straight into the backend payload and
- * JSON.stringify() throws "Converting circular structure to JSON" on the
- * event's `__reactFiber...`/`nativeEvent` back-references. Checks for the
- * event's own shape first (cheap, catches the bug even if `layers` is ever
- * renamed), then confirms the real SpecV2 shape. */
-export function isAnalysisSpecWithPoints(value: unknown): value is SpecV2 {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
-  if ('nativeEvent' in v || 'currentTarget' in v || 'target' in v || 'preventDefault' in v) {
-    return false;
-  }
-  return typeof v.objective === 'string' && typeof v.businessType === 'string' && Array.isArray(v.layers);
-}
-
-/** v1.4.4 — single source of truth for where the conversational flow is:
- * planning (talking to the LLM to build a spec), spec_ready (a valid spec
- * exists and is awaiting confirmation), executing (a backend job is
- * running), completed/failed (last execution's outcome). This replaces the
- * previous behavior of routing EVERY typed message — including "yes"/"run"
- * — through the chat/planning endpoint, which sometimes regenerated a whole
- * new framework instead of executing, and sometimes surfaced a raw
- * chat-endpoint failure as "assistant unavailable" for what was really just
- * an execution request. */
-export type AnalysisPhase = 'idle' | 'planning' | 'spec_ready' | 'executing' | 'completed' | 'failed';
-
-const CONFIRMATION_PHRASES = new Set([
-  'yes', 'y', 'ok', 'okay', 'run', 'start', 'start analysis', 'proceed', 'go ahead',
-]);
-
-function isConfirmationPhrase(text: string): boolean {
-  return CONFIRMATION_PHRASES.has(text.trim().toLowerCase());
-}
+// v1.4.6 — the pure flow logic (spec-shape guard, confirmation phrases) and
+// the AnalysisPhase type moved to importable modules so they can be
+// unit-tested without pulling in this component tree. Re-exported here for
+// backward compatibility with existing imports.
+export { isAnalysisSpecWithPoints } from './services/analysisFlow';
+export type { AnalysisPhase } from './types/chat';
 
 const App: React.FC = () => {
   const { user, loading: authLoading, logout, consumePrompt } = useAuth();
@@ -166,7 +139,7 @@ const App: React.FC = () => {
         setIsLoading(true);
         fetchSharedAnalysis(shareId).then(analysis => {
           if (analysis) {
-            setResult(analysis.result);
+            setResult(normalizeAnalysisResult(analysis.result));
             setSpec(analysis.spec);
             setDrawerOpen(true);
             setIsSharedView(true);
@@ -487,7 +460,12 @@ const App: React.FC = () => {
       jobId = await startAnalysis(specWithPoints as any);
       // Phase 11: register the active job so stale poll responses can be discarded
       activeJobIdRef.current = jobId;
-      const analysisResultData = await pollAnalysis(jobId, setAnalysisStatus, controller.signal);
+      // v1.4.6 — normalize/sanitize BEFORE any field is read: a malformed or
+      // partial backend result must degrade (dropped/incomplete candidates,
+      // warnings banner) rather than crash the results panel.
+      const analysisResultData = normalizeAnalysisResult(
+        await pollAnalysis(jobId, setAnalysisStatus, controller.signal),
+      );
       // Discard result if a newer job was started (or this one was cancelled/
       // reset) while this was polling.
       if (activeJobIdRef.current !== jobId) {
@@ -613,6 +591,11 @@ const App: React.FC = () => {
       // after a finished cycle (completed or failed) starts a clean planning
       // round instead of leaving the previous framework/cards/Retry button
       // hanging around to confuse the next confirmation.
+      // v1.4.6 — extended to ALSO clear old results/errors/progress: a new
+      // business prompt after completion/failure must not leave the previous
+      // run's drawer, map layers, or error banner on screen. (Results are
+      // still cached per-session by the session-switch cache; and a follow-up
+      // that IS a confirmation phrase never reaches this branch.)
       if (analysisPhase === 'completed' || analysisPhase === 'failed') {
         setChatSpec(null);
         setChatSpecStatus('empty');
@@ -620,6 +603,12 @@ const App: React.FC = () => {
         setChatStage('chat');
         setCanRetry(false);
         setAnalysisStatus({ message: '', progress: 0 });
+        setResult(null);
+        setSpec(null);
+        setSelectedLocations([]);
+        setHeatmapType(null);
+        setDrawerOpen(false);
+        setError(null);
         setAnalysisPhase('planning');
       }
 
@@ -698,6 +687,8 @@ const App: React.FC = () => {
       const analysisResult = config.isDemoMode
         ? await runDemoAnalysis(rawPrompt, setAnalysisStatus)
         : await runServerAnalysis(promptToSend, resultCount, setAnalysisStatus, sessionContext);
+      // v1.4.6 — same crash-safety boundary as the conversational path
+      (analysisResult as any).result = normalizeAnalysisResult(analysisResult.result);
 
       const parsedSpec = analysisResult.spec;
       const csvNote = userPoints.length > 0 ? ` with ${userPoints.length} CSV point(s)` : '';
@@ -1564,6 +1555,7 @@ const App: React.FC = () => {
           onCancelAnalysis={handleCancelAnalysis}
           canRetry={canRetry}
           onRetryAnalysis={handleRetryAnalysis}
+          analysisPhase={analysisPhase}
         />
       </ErrorBoundary>
 

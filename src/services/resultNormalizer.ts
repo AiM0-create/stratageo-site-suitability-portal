@@ -1,0 +1,223 @@
+// ─── Backend-result normalization / sanitization layer (v1.4.6) ───
+//
+// Every AnalysisResult that reaches React components MUST pass through
+// normalizeAnalysisResult() first. Rationale: during live dark-kitchen testing
+// the analysis executed successfully but the results panel crashed with a
+// render error, because ResultsDrawer/MapView dereference dozens of nested
+// fields (candidates, lat/lng, mcda_score, criteria_breakdown, osmSignals,
+// exclusions, traffic context, route/evidence data, map layers) that the
+// backend may omit or malform in degraded runs. Per-line `??` guards can't
+// keep up with a 1000+ line component — instead the data is repaired ONCE at
+// the boundary: bad candidates are dropped or marked incomplete, missing
+// arrays/objects become empty, non-finite numbers get safe defaults, and an
+// irreparable evidence trail is removed (the drawer renders "(unavailable)").
+//
+// Repairs are recorded in `normalizationWarnings` so degraded data is visible
+// in the UI instead of silently patched.
+
+import type { AnalysisResult, LocationData } from '../types';
+
+const isObj = (v: unknown): v is Record<string, any> =>
+  !!v && typeof v === 'object' && !Array.isArray(v);
+
+const asArr = <T = any>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+const asStr = (v: unknown, d = ''): string => (typeof v === 'string' ? v : d);
+
+const asNum = (v: unknown, d: number): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+/** Finite number or null — for fields where null is meaningful ("no data"). */
+const asNumOrNull = (v: unknown): number | null => {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+function normalizeLocation(raw: unknown, index: number, warnings: string[]): LocationData | null {
+  if (!isObj(raw)) {
+    warnings.push(`Candidate #${index + 1} was not an object — dropped.`);
+    return null;
+  }
+  const lat = Number(raw.lat);
+  const lng = Number(raw.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    warnings.push(`Candidate "${asStr(raw.name, `#${index + 1}`)}" has invalid coordinates — dropped.`);
+    return null;
+  }
+
+  const out: any = { ...raw };
+  out.lat = lat;
+  out.lng = lng;
+  out.name = asStr(raw.name) || `Zone-${index + 1}`;
+  if (!Number.isFinite(Number(raw.mcda_score))) {
+    warnings.push(`Candidate "${out.name}": missing score — shown as 0.0 (incomplete).`);
+    out._incomplete = true;
+  }
+  out.mcda_score = asNum(raw.mcda_score, 0);
+  out.excluded = raw.excluded === true;
+  out.reasoning = asStr(raw.reasoning);
+  out.searchRadiusM = asNum(raw.searchRadiusM, 0);
+  out.osmSignals = isObj(raw.osmSignals) ? raw.osmSignals : {};
+  out.pois = asArr(raw.pois);
+
+  out.criteria_breakdown = asArr(raw.criteria_breakdown)
+    .filter(isObj)
+    .map((c: any) => ({
+      ...c,
+      name: asStr(c.name, 'factor'),
+      score: asNumOrNull(c.score),           // null = "no data", must survive
+      weight: asNum(c.weight, 0),
+      direction: c.direction === 'negative' ? 'negative' : 'positive',
+      rawValue: c.rawValue ?? '',
+      justification: asStr(c.justification),
+      evidenceBasis: asStr(c.evidenceBasis, 'template-default'),
+    }));
+
+  out.exclusions = asArr(raw.exclusions)
+    .filter(isObj)
+    .map((e: any) => ({
+      ...e,
+      rule: asStr(e.rule, 'exclusion'),
+      passed: e.passed === true,
+      evidenceBasis: asStr(e.evidenceBasis, 'constraint-rule'),
+    }));
+
+  if (raw.routeMetrics !== undefined && !isObj(raw.routeMetrics)) {
+    out.routeMetrics = undefined;
+  }
+  if (raw.trafficContext !== undefined) {
+    out.trafficContext = isObj(raw.trafficContext)
+      ? {
+          ...raw.trafficContext,
+          label: asStr(raw.trafficContext.label, 'unknown'),
+          note: asStr(raw.trafficContext.note),
+          congestionRatio: asNumOrNull(raw.trafficContext.congestionRatio),
+        }
+      : undefined;
+  }
+  return out as LocationData;
+}
+
+/** Repair the evidence trail in place, or return undefined when irreparable
+ * (the drawer then shows "Evidence Trail (unavailable)" instead of crashing). */
+function normalizeEvidenceTrail(raw: unknown, warnings: string[]): any {
+  if (raw === null || raw === undefined) return undefined;
+  if (!isObj(raw)) {
+    warnings.push('Evidence trail was malformed — hidden.');
+    return undefined;
+  }
+  const t: any = { ...raw };
+  t.evidenceVersion = asStr(t.evidenceVersion, '?');
+  t.appVersion = asStr(t.appVersion, '?');
+  t.engineVersion = asStr(t.engineVersion, '?');
+  t.jobId = asStr(t.jobId);
+  t.analysisId = asStr(t.analysisId);
+  t.createdAt = asStr(t.createdAt);
+  t.prompt = isObj(t.prompt) ? t.prompt : {};
+  t.studyArea = isObj(t.studyArea) ? t.studyArea : {};
+  t.dataSnapshot = isObj(t.dataSnapshot) ? t.dataSnapshot : {};
+  t.providerQueries = asArr(t.providerQueries).filter(isObj);
+  t.factors = asArr(t.factors).filter(isObj).map((f: any) => ({
+    ...f,
+    factorKey: asStr(f.factorKey, 'factor'),
+    displayName: asStr(f.displayName, f.factorKey || 'factor'),
+    weight: asNum(f.weight, 0),
+    dataSources: asArr(f.dataSources),
+    appliedToCandidates: asArr(f.appliedToCandidates).filter(isObj),
+  }));
+  t.candidates = asArr(t.candidates).filter(isObj).map((c: any) => ({
+    ...c,
+    candidateId: asStr(c.candidateId, 'candidate'),
+    label: asStr(c.label, c.candidateId || 'candidate'),
+    recommendationStatus: asStr(c.recommendationStatus, 'unknown'),
+    exclusionReasons: asArr(c.exclusionReasons),
+    factorBreakdown: asArr(c.factorBreakdown).filter(isObj),
+  }));
+  t.exclusions = asArr(t.exclusions).filter(isObj);
+  t.limitations = asArr(t.limitations);
+  const sc = isObj(t.scoring) ? t.scoring : {};
+  t.scoring = {
+    ...sc,
+    formulaDescription: asStr(sc.formulaDescription),
+    totalWeight: asNum(sc.totalWeight, 0),
+    totalPresentWeight: asNum(sc.totalPresentWeight, 0),
+    viableCandidates: asNum(sc.viableCandidates, 0),
+    missingDataHandling: asStr(sc.missingDataHandling),
+  };
+  return t;
+}
+
+export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
+  const warnings: string[] = [];
+  const src: Record<string, any> = isObj(raw) ? raw : {};
+  if (!isObj(raw)) {
+    warnings.push('Analysis result payload was not an object — showing an empty result.');
+  }
+
+  const out: any = { ...src };
+
+  out.summary = asStr(src.summary, 'Analysis completed, but the summary could not be read.');
+  out.business_type = asStr(src.business_type, '—');
+  out.target_location = asStr(src.target_location, '—');
+  out.methodology = asStr(src.methodology);
+  out.grounding_sources = asArr(src.grounding_sources).filter(isObj).map((s: any) => ({
+    ...s,
+    title: asStr(s.title, 'Source'),
+    uri: asStr(s.uri),
+    reliability: asStr(s.reliability),
+  }));
+
+  const rawLocs = asArr(src.locations);
+  out.locations = rawLocs
+    .map((l, i) => normalizeLocation(l, i, warnings))
+    .filter((l): l is LocationData => l !== null);
+  if (rawLocs.length > 0 && out.locations.length === 0) {
+    warnings.push('All candidates were malformed — no candidate zones can be shown.');
+  }
+
+  // spec — ResultsDrawer iterates these arrays unconditionally
+  const spec = isObj(src.spec) ? { ...src.spec } : {};
+  spec.businessType = asStr(spec.businessType, out.business_type);
+  spec.constraints = asArr(spec.constraints).filter(isObj);
+  spec.positiveCriteria = asArr(spec.positiveCriteria);
+  spec.negativeCriteria = asArr(spec.negativeCriteria);
+  spec.parsingNotes = asArr(spec.parsingNotes);
+  spec.confidence = asStr(spec.confidence, 'low');
+  if (spec.userPointConstraints !== undefined) {
+    spec.userPointConstraints = asArr(spec.userPointConstraints).filter(isObj);
+  }
+  out.spec = spec;
+
+  // critique — issues/whatWouldStrengthen are mapped unconditionally
+  if (isObj(src.critique) && typeof src.critique.verdict === 'string') {
+    out.critique = {
+      ...src.critique,
+      headline: asStr(src.critique.headline),
+      confidence: asStr(src.critique.confidence, 'low'),
+      issues: asArr(src.critique.issues),
+      whatWouldStrengthen: asArr(src.critique.whatWouldStrengthen),
+    };
+  } else if (src.critique !== undefined && src.critique !== null) {
+    out.critique = null;
+    warnings.push('Analyst critique was malformed — hidden.');
+  }
+
+  // map layers — MapView guards per-cell, but the containers must be arrays
+  if (src.hexGrid !== undefined) out.hexGrid = asArr(src.hexGrid).filter(isObj);
+  if (src.catchments !== undefined) out.catchments = asArr(src.catchments).filter(isObj);
+  if (src.studyAreaBoundary !== undefined && !Array.isArray(src.studyAreaBoundary)) {
+    out.studyAreaBoundary = undefined;
+  }
+  out.maskStats = isObj(src.maskStats) ? src.maskStats : {};
+  out.suggestions = asArr(src.suggestions);
+
+  out.evidenceTrail = normalizeEvidenceTrail(src.evidenceTrail, warnings);
+
+  if (warnings.length > 0) {
+    out.normalizationWarnings = warnings;
+  }
+  return out as AnalysisResult;
+}

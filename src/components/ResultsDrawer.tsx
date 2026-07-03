@@ -70,19 +70,25 @@ function getScoreQualityLabel(score: number): string {
 }
 
 // v1.1.0: resolve recommendation label from status field (or fall back to score)
+// v1.4.6: `demoted` — when critical constraints are unverified, feasibility is
+// compromised, or provider checks degraded, a backend "RECOMMENDED" must be
+// downgraded to "Candidate Zone": an overconfident green badge over unverified
+// rent/footprint/routing claims is a product-correctness bug, not a style choice.
 function getRecommendationLabel(
   loc: import('../types').LocationData,
   withheld: boolean,
   raw: boolean,
+  demoted: boolean,
 ): string {
   if (loc.excluded) return 'Excluded';
   if (raw || withheld) return 'Not recommended';
   const rs = loc.recommendationStatus;
-  if (rs === 'RECOMMENDED') return 'Recommended';
+  if (rs === 'RECOMMENDED') return demoted ? 'Candidate Zone' : 'Recommended';
   if (rs === 'CANDIDATE_ZONE') return 'Candidate Zone';
   if (rs === 'WEAK_CANDIDATE') return 'Weak Candidate';
   if (rs === 'RAW_DIAGNOSTIC') return 'Diagnostic Only';
   if (rs === 'NO_RELIABLE_RECOMMENDATION') return 'Not recommended';
+  if (demoted && typeof loc.mcda_score === 'number' && loc.mcda_score >= 7.5) return 'Candidate Zone';
   return getScoreQualityLabel(loc.mcda_score);
 }
 
@@ -165,6 +171,21 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
     || unverifiedConstraints.length > 0;
   const siteClaimLevel: string = (result as any).siteClaimLevel || 'micro_market_zone';
   const disclaimer: string = (result as any).disclaimer || '';
+  // v1.4.6 — degraded provider checks (buildability masks skipped on timeout
+  // in v1.4.2; generalised providerDegraded in v1.4.6) + normalization repairs
+  const buildabilityDegraded: string[] = ((result as any).maskStats?.buildabilityDegraded as string[]) || [];
+  const providerDegraded: string[] = ((result as any).maskStats?.providerDegraded as string[]) || [];
+  const normalizationWarnings: string[] = (result as any).normalizationWarnings || [];
+  // v1.4.6 — gate the green "Recommended" badge: any unverified critical
+  // constraint, non-verified enforcement level, or degraded provider check
+  // demotes RECOMMENDED to "Candidate Zone" (see getRecommendationLabel).
+  const demoteRecommended =
+    unverifiedConstraints.length > 0
+    || (result as any).constraintPolicy?.hasUnverifiableConstraints === true
+    || buildabilityDegraded.length > 0
+    || providerDegraded.length > 0
+    || constraintEnforcementLevel === 'provisional'
+    || constraintEnforcementLevel === 'failed';
   // v1.4.0 — data coverage
   const dataCoverage: any = (result as any).dataCoverage || {};
   const coverageRatio: number = dataCoverage.coverageRatio ?? 1.0;
@@ -280,6 +301,24 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           <b>Screening-level candidate zones</b> — H3 micro-market areas, not exact parcels or leasable sites. Field validation required before any leasing or investment decision.
         </div>
 
+        {/* v1.4.6 — data repaired by the normalization layer (incomplete backend fields) */}
+        {normalizationWarnings.length > 0 && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#92400e', marginBottom: 8 }}>
+            <b>Some result data was incomplete</b> and has been repaired or hidden:
+            <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+              {normalizationWarnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {/* v1.4.6 — degraded provider checks (timeouts) that were skipped */}
+        {(buildabilityDegraded.length > 0 || providerDegraded.length > 0) && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#92400e', marginBottom: 8 }}>
+            <b>Degraded checks</b> (provider slow/unavailable — skipped, confidence reduced):{' '}
+            {[...buildabilityDegraded, ...providerDegraded].join(', ')}
+          </div>
+        )}
+
         {/* v1.4.0 — provisional notice when hard constraints are unverifiable */}
         {isProvisional && unverifiedConstraints.length > 0 && (
           <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 6, padding: '8px 12px', marginBottom: 8 }}>
@@ -353,23 +392,23 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
               <span className="review-conf">confidence: {result.critique.confidence}</span>
             </div>
             <p className="review-headline">{result.critique.headline}</p>
-            {result.critique.issues.length > 0 && (
+            {(result.critique.issues ?? []).length > 0 && (
               <div className="review-section">
                 <div className="review-label">Issues</div>
-                <ul>{result.critique.issues.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                <ul>{(result.critique.issues ?? []).map((x, i) => <li key={i}>{x}</li>)}</ul>
               </div>
             )}
-            {result.critique.whatWouldStrengthen.length > 0 && (
+            {(result.critique.whatWouldStrengthen ?? []).length > 0 && (
               <div className="review-section">
                 <div className="review-label">What would make this stronger</div>
-                <ul>{result.critique.whatWouldStrengthen.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                <ul>{(result.critique.whatWouldStrengthen ?? []).map((x, i) => <li key={i}>{x}</li>)}</ul>
               </div>
             )}
           </div>
         )}
 
-        {/* Benchmark comparison */}
-        {!withheld && spec && ranked[0] && !ranked[0].excluded && (() => {
+        {/* Benchmark comparison — v1.4.6: score must be a real number */}
+        {!withheld && spec && ranked[0] && !ranked[0].excluded && typeof ranked[0].mcda_score === 'number' && (() => {
           const bench = compareToBenchmark(ranked[0].mcda_score, spec.sectorId, spec.geography?.city);
           if (!bench) return null;
           const deltaClass = bench.delta > 0.5 ? 'above' : bench.delta < -0.5 ? 'below' : 'at';
@@ -415,11 +454,11 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 <p className="assumption-note" style={{ marginTop: '-2px', marginBottom: '6px', fontSize: '10px', color: '#64748b' }}>
                   Measures data pipeline quality, not location quality
                 </p>
-                {spec.constraints.length > 0 && (
+                {(spec.constraints ?? []).length > 0 && (
                   <div className="assumption-section">
                     <span className="assumption-label">Constraints</span>
                     <div className="assumption-chips">
-                      {spec.constraints.map((c, i) => (
+                      {(spec.constraints ?? []).map((c, i) => (
                         <span key={i} className={`constraint-chip ${c.type}`}>
                           {c.direction === 'away' ? '✕ ' : '✓ '}{c.label}
                         </span>
@@ -450,26 +489,26 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     ))}
                   </div>
                 )}
-                {spec.positiveCriteria.length > 0 && (
+                {(spec.positiveCriteria ?? []).length > 0 && (
                   <div className="assumption-section">
                     <span className="assumption-label">Positive Signals</span>
                     <div className="assumption-chips">
-                      {spec.positiveCriteria.map((c, i) => <span key={i} className="constraint-chip proximity">▲ {c}</span>)}
+                      {(spec.positiveCriteria ?? []).map((c, i) => <span key={i} className="constraint-chip proximity">▲ {c}</span>)}
                     </div>
                   </div>
                 )}
-                {spec.negativeCriteria.length > 0 && (
+                {(spec.negativeCriteria ?? []).length > 0 && (
                   <div className="assumption-section">
                     <span className="assumption-label">Negative Signals</span>
                     <div className="assumption-chips">
-                      {spec.negativeCriteria.map((c, i) => <span key={i} className="constraint-chip exclusion">▼ {c}</span>)}
+                      {(spec.negativeCriteria ?? []).map((c, i) => <span key={i} className="constraint-chip exclusion">▼ {c}</span>)}
                     </div>
                   </div>
                 )}
-                {spec.parsingNotes.length > 0 && (
+                {(spec.parsingNotes ?? []).length > 0 && (
                   <div className="assumption-section">
                     <span className="assumption-label">Notes</span>
-                    {spec.parsingNotes.map((n, i) => <p key={i} className="assumption-note">{n}</p>)}
+                    {(spec.parsingNotes ?? []).map((n, i) => <p key={i} className="assumption-note">{n}</p>)}
                   </div>
                 )}
 
@@ -573,7 +612,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 {/* Sources */}
                 <div className="assumption-section">
                   <span className="assumption-label">Data Sources</span>
-                  {result.grounding_sources.map((s, i) => (
+                  {(result.grounding_sources ?? []).map((s, i) => (
                     <div key={i} className="source-row">
                       <a href={s.uri} target="_blank" rel="noopener noreferrer" className="source-link">{s.title}</a>
                       <span className="source-reliability">{s.reliability}</span>
@@ -679,7 +718,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                         </span>
                         {!loc.excluded && (
                           <span className="score-quality-label" style={raw ? { color: '#64748b' } : undefined}>
-                            {getRecommendationLabel(loc, withheld, raw)}
+                            {getRecommendationLabel(loc, withheld, raw, demoteRecommended)}
                           </span>
                         )}
                         {/* v1.4.0: confidence label */}
@@ -865,9 +904,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 <span className="assumption-label" style={{ color: '#059669', fontWeight: 600 }}>Analysis Identity</span>
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '3px 8px', fontSize: '0.8em', color: '#374151' }}>
                   <span style={{ color: '#64748b' }}>Version</span><span>{evidenceTrail.appVersion} (engine {evidenceTrail.engineVersion})</span>
-                  <span style={{ color: '#64748b' }}>Job ID</span><span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{evidenceTrail.jobId.slice(0, 16)}…</span>
+                  <span style={{ color: '#64748b' }}>Job ID</span><span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{(evidenceTrail.jobId || '').slice(0, 16)}…</span>
                   <span style={{ color: '#64748b' }}>Analysis ID</span><span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{evidenceTrail.analysisId}</span>
-                  <span style={{ color: '#64748b' }}>Created</span><span>{evidenceTrail.createdAt.replace('T', ' ').replace('Z', ' UTC')}</span>
+                  <span style={{ color: '#64748b' }}>Created</span><span>{(evidenceTrail.createdAt || '').replace('T', ' ').replace('Z', ' UTC')}</span>
                   <span style={{ color: '#64748b' }}>Archetype</span><span style={{ fontFamily: 'monospace' }}>{evidenceTrail.prompt.archetypeKey || '—'}</span>
                   <span style={{ color: '#64748b' }}>Planning</span><span>{evidenceTrail.prompt.planningMode}</span>
                   {evidenceTrail.prompt.planningFingerprint && (
@@ -925,7 +964,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                           {f.direction === 'positive' ? '▲' : '▼'} {f.displayName}
                         </span>
                         <span style={{ fontSize: '0.72em', color: '#64748b' }}>
-                          weight {Math.round(f.weight * 100)}% · {f.catchment} · {f.dataSources[0] || 'Internal'}
+                          weight {Math.round((f.weight ?? 0) * 100)}% · {f.catchment} · {f.dataSources?.[0] || 'Internal'}
                         </span>
                       </button>
                       {evidenceExpandedFactor === f.factorKey && (
@@ -933,7 +972,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                           <div style={{ color: '#64748b', marginBottom: 4 }}>
                             {f.rawValueDescription} · Normalization: {f.normalizationMethod} · Missing: {f.missingDataPolicy}
                           </div>
-                          {f.appliedToCandidates.length > 0 && (
+                          {(f.appliedToCandidates ?? []).length > 0 && (
                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                               <thead>
                                 <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
@@ -944,7 +983,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                                 </tr>
                               </thead>
                               <tbody>
-                                {f.appliedToCandidates.map((cf, ci) => (
+                                {(f.appliedToCandidates ?? []).map((cf, ci) => (
                                   <tr key={ci} title={cf.explanation} style={{ borderBottom: '1px solid #f1f5f9' }}>
                                     <td style={{ padding: '2px 4px', color: '#374151' }}>{cf.candidateId}</td>
                                     <td style={{ padding: '2px 4px', textAlign: 'right' }}>{cf.rawCount ?? cf.rawValue ?? '—'}</td>
@@ -969,14 +1008,14 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   {evidenceTrail.candidates.map((c) => (
                     <div key={c.candidateId} style={{ marginBottom: 6, fontSize: '0.78em', padding: '4px 6px', background: c.recommendationStatus === 'excluded_candidate' ? '#fef2f2' : '#f0fdf4', borderRadius: 4, borderLeft: `3px solid ${c.recommendationStatus === 'excluded_candidate' ? '#dc2626' : c.recommendationStatus === 'recommended' ? '#059669' : '#d97706'}` }}>
                       <div style={{ fontWeight: 600, marginBottom: 2 }}>
-                        {c.rank ? `#${c.rank} ` : ''}{c.label} — {c.recommendationStatus.replace(/_/g, ' ')}
-                        {c.totalScore != null && <span style={{ float: 'right', color: '#64748b' }}>{c.totalScore.toFixed(1)}/10</span>}
+                        {c.rank ? `#${c.rank} ` : ''}{c.label} — {(c.recommendationStatus || 'unknown').replace(/_/g, ' ')}
+                        {typeof c.totalScore === 'number' && <span style={{ float: 'right', color: '#64748b' }}>{c.totalScore.toFixed(1)}/10</span>}
                       </div>
-                      {c.exclusionReasons.length > 0 && (
-                        <div style={{ color: '#dc2626' }}>Excluded: {c.exclusionReasons.join('; ')}</div>
+                      {(c.exclusionReasons ?? []).length > 0 && (
+                        <div style={{ color: '#dc2626' }}>Excluded: {(c.exclusionReasons ?? []).join('; ')}</div>
                       )}
                       {/* Top drivers */}
-                      {c.factorBreakdown.filter(f => f.weightedScore != null).sort((a, b) => Math.abs(b.weightedScore!) - Math.abs(a.weightedScore!)).slice(0, 3).map((f, i) => (
+                      {(c.factorBreakdown ?? []).filter(f => f.weightedScore != null).sort((a, b) => Math.abs(b.weightedScore!) - Math.abs(a.weightedScore!)).slice(0, 3).map((f, i) => (
                         <div key={i} style={{ color: '#374151' }} title={f.explanation}>
                           {(f.weightedScore ?? 0) >= 0 ? '+' : ''}{f.weightedScore?.toFixed(2)} {f.candidateId.replace('cand_', 'layer ')}
                         </div>
@@ -1007,7 +1046,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   {evidenceTrail.scoring.formulaDescription}
                 </p>
                 <div style={{ fontSize: '0.78em', color: '#64748b' }}>
-                  Total weight: {evidenceTrail.scoring.totalWeight.toFixed(2)} · Present weight: {evidenceTrail.scoring.totalPresentWeight.toFixed(2)}
+                  Total weight: {(evidenceTrail.scoring.totalWeight ?? 0).toFixed(2)} · Present weight: {(evidenceTrail.scoring.totalPresentWeight ?? 0).toFixed(2)}
                   {evidenceTrail.scoring.minViableScore != null && <> · Min viable: {evidenceTrail.scoring.minViableScore}/10</>}
                   {' · '}{evidenceTrail.scoring.viableCandidates} viable candidate(s)
                 </div>
@@ -1034,7 +1073,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `stratageo-evidence-${evidenceTrail.jobId.slice(0, 8)}.json`;
+                    a.download = `stratageo-evidence-${(evidenceTrail.jobId || 'unknown').slice(0, 8)}.json`;
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
@@ -1044,11 +1083,11 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
               </div>
 
               {/* Limitations */}
-              {evidenceTrail.limitations.length > 0 && (
+              {(evidenceTrail.limitations ?? []).length > 0 && (
                 <div className="assumption-section">
                   <span className="assumption-label" style={{ color: '#d97706' }}>Known Limitations</span>
                   <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {evidenceTrail.limitations.slice(0, 6).map((l, i) => (
+                    {(evidenceTrail.limitations ?? []).slice(0, 6).map((l, i) => (
                       <li key={i} className="assumption-note" style={{ fontSize: '0.75em', color: '#78350f' }}>{l}</li>
                     ))}
                   </ul>

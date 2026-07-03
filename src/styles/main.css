@@ -269,6 +269,18 @@ body {
 }
 .assistant-error-dismiss { background: none; border: none; cursor: pointer; color: var(--red-600); font-size: 16px; line-height: 1; }
 
+/* v1.4.6 — sticky Start-analysis action bar (outside the scrollable body) */
+.assistant-action-bar {
+  padding: 8px 12px; border-top: 1px solid var(--gray-200);
+  flex-shrink: 0;
+}
+.assistant-start-btn {
+  width: 100%; padding: 9px 12px; border: none; border-radius: var(--radius);
+  background: var(--blue-600); color: #fff; font-size: 13px; font-weight: 700;
+  cursor: pointer; transition: background 0.15s;
+}
+.assistant-start-btn:hover { background: var(--blue-700, #1d4ed8); }
+
 /* v1.4.2 — Retry button shown after a failed analysis */
 .assistant-retry-row { margin-top: 6px; }
 .assistant-retry-btn {

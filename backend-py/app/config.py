@@ -124,6 +124,19 @@ class Settings(BaseSettings):
     # single buildability call; on timeout the check degrades gracefully
     # (empty mask, confidence note) rather than failing the whole analysis.
     buildability_overpass_timeout: int = 30
+    # v1.4.6 — per-call ceiling for every OPTIONAL provider call OUTSIDE the
+    # buildability stage (Google Places, water/corridor geometry, isochrones,
+    # traffic catchments, route targets, railway barriers). The v1.4.2 fix only
+    # covered buildability; live supermarket testing still hit the 240s job
+    # ceiling because the remaining stages could each stack ~30-180s of
+    # un-capped provider latency. On timeout each check degrades (default
+    # value + note + confidence reduction) instead of killing the job.
+    optional_provider_timeout: int = 45
+    # The main combined OSM fetch is critical (all layer data in one query) so
+    # it gets a generous ceiling — but still bounded well below the 240s job
+    # cap so a hung Overpass mirror can't consume the whole budget before the
+    # degradation path ("OSM layers scored as zero") gets a chance to run.
+    main_fetch_timeout: int = 120
 
     # ── Feature flags (v1.1.0+) ──────────────────────────────────────────────
     enable_raw_intent_parser: bool = True       # deterministic pre-LLM parser

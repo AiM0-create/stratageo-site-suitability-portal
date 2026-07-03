@@ -80,6 +80,13 @@ export interface SpecV2 {
 
 export type ChatStage = 'chat' | 'framework' | 'ready';
 
+/** v1.4.4/v1.4.6 — single source of truth for where the conversational flow is:
+ * planning (LLM building a spec), spec_ready (valid spec awaiting confirmation),
+ * executing (backend job running), completed/failed (last execution's outcome).
+ * Lives here (not App.tsx) so presentational components and unit tests can
+ * import it without pulling in the whole App component tree. */
+export type AnalysisPhase = 'idle' | 'planning' | 'spec_ready' | 'executing' | 'completed' | 'failed';
+
 export interface ChatTurnResponse {
   ok: boolean;
   reply: string;

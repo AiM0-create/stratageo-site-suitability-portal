@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter
 
 from ..config import (
@@ -21,7 +23,12 @@ async def health():
         # ── Version metadata ────────────────────────────────────────────────
         "appVersion":      APP_VERSION,
         "apiVersion":      API_VERSION,
-        "engineVersion":   ENGINE_VERSION,
+        # v1.4.6 — report the ACTUAL Cloud Run revision. K_REVISION is injected
+        # by Cloud Run into every container; the hardcoded ENGINE_VERSION
+        # constant went stale twice (stuck at 00047 while 00048 was live, then
+        # at 00049 while 00050 was live) because nothing ties it to deploys.
+        # Falls back to the constant for local/dev where K_REVISION is unset.
+        "engineVersion":   os.environ.get("K_REVISION", ENGINE_VERSION),
         "specVersion":     SPEC_VERSION,
         "evidenceVersion": EVIDENCE_VERSION_PUBLIC,
         "releaseName":     RELEASE_NAME,

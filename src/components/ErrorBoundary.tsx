@@ -34,12 +34,14 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   error: Error | null;
+  /** v1.4.6 — component stack of the crash, for the diagnostic summary */
+  componentStack: string | null;
 }
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  state: ErrorBoundaryState = { error: null, componentStack: null };
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { error };
   }
 
@@ -53,6 +55,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       error,
       '\nComponent stack:', info.componentStack,
     );
+    this.setState({ componentStack: info.componentStack ?? null });
     try {
       this.props.onError?.(error, info);
     } catch (handlerErr) {
@@ -64,25 +67,37 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   private reset = () => {
-    this.setState({ error: null });
+    this.setState({ error: null, componentStack: null });
   };
 
   render() {
     if (this.state.error) {
+      const err = this.state.error;
       if (this.props.compact) {
         return (
-          <div className="error-boundary-compact">
+          <div className="error-boundary-compact" title={`${err.name}: ${err.message}`}>
             <span>This section hit an unexpected error.</span>
             <button onClick={this.reset}>Retry</button>
           </div>
         );
       }
+      // v1.4.6 — useful diagnostic summary, not just a generic retry: the
+      // error type + message + first frames of the component stack tell a bug
+      // report (or a screenshot of it) exactly which render path broke.
+      const stackSnippet = (this.state.componentStack || '')
+        .split('\n').filter(Boolean).slice(0, 4).join('\n');
       return (
         <div className="error-boundary-panel">
           <div className="error-boundary-title">Something went wrong in {this.props.section}.</div>
           <p className="error-boundary-detail">
-            {this.state.error.message || 'An unexpected error occurred while rendering this section.'}
+            {err.message || 'An unexpected error occurred while rendering this section.'}
           </p>
+          <details className="error-boundary-diagnostics" style={{ fontSize: '11px', color: '#64748b', margin: '6px 0' }}>
+            <summary style={{ cursor: 'pointer' }}>Diagnostic details (include in bug reports)</summary>
+            <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0 0', fontSize: '10px' }}>
+              {`section: ${this.props.section}\nerror: ${err.name}: ${err.message}${stackSnippet ? `\ncomponent stack:\n${stackSnippet}` : ''}`}
+            </pre>
+          </details>
           <div className="error-boundary-actions">
             <button onClick={this.reset} className="error-boundary-retry">Try again</button>
             <button onClick={() => window.location.reload()} className="error-boundary-reload">

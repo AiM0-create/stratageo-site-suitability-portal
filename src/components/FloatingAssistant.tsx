@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AnalysisStatus } from '../types';
 import type { WorkingMemory } from '../types/session';
-import type { SpecV2 } from '../types/chat';
+import type { SpecV2, AnalysisPhase } from '../types/chat';
 import { config } from '../config';
 import { demoScenarios } from '../data/demoScenarios';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,6 +43,8 @@ interface FloatingAssistantProps {
   /** v1.4.2 — retry the last failed analysis with the same spec, no re-typing. */
   canRetry?: boolean;
   onRetryAnalysis?: () => void;
+  /** v1.4.6 — drives the always-visible sticky Start-analysis action bar. */
+  analysisPhase?: AnalysisPhase;
 }
 
 const SCENARIOS = [
@@ -80,6 +82,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   onCancelAnalysis,
   canRetry = false,
   onRetryAnalysis,
+  analysisPhase,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
@@ -339,6 +342,26 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               </div>
             )}
           </div>
+
+          {/* v1.4.6 — sticky Start-analysis action bar. Whenever a valid spec
+              is ready (phase spec_ready), a clearly visible Start button lives
+              HERE, outside the scrollable conversation body, so it can never
+              disappear behind internal scroll (the SpecSummaryCard's own
+              button scrolls with the chat). Same execution path as the card:
+              onConfirmExecute() directly — never a new /api/v2/chat turn,
+              never the click event as an argument. */}
+          {analysisPhase === 'spec_ready' && chatSpec && !isLoading && !isExecuting
+            && chatSpec.feasibility?.status !== 'not_feasible' && onConfirmExecute && (
+            <div className="assistant-action-bar">
+              <button
+                type="button"
+                className="assistant-start-btn"
+                onClick={() => onConfirmExecute()}
+              >
+                ▶ Start analysis
+              </button>
+            </div>
+          )}
 
           {/* Structured input toggle */}
           {showSectors && (

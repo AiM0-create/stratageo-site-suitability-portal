@@ -322,10 +322,14 @@ def _run_in_thread(job: Job, spec: SpecV2) -> None:
         logger.warning("job %s exceeded %ss runtime — forced to timeout at phase=%s",
                        job.id[:8], settings.job_max_runtime_seconds, job.phase)
         job.status = "timeout"
+        # v1.4.6 — structured detail (stage / provider hint / job ref) so the
+        # frontend can show actionable error text and a user report can be
+        # correlated to the exact Cloud Run log line.
         job.error = (
             f"Analysis exceeded the {settings.job_max_runtime_seconds}s time limit "
-            f"while in stage '{job.phase}' ({job.message}). This usually means an "
-            "external data provider (OSM/Overpass) was slow or unresponsive."
+            f"while in stage '{job.phase}' ({job.message}). An external data "
+            "provider (OSM/Overpass, Google Places, or routing) was slow or "
+            f"unresponsive. [stage={job.phase}; jobRef={job.id[:8]}]"
         )
         job.message = f"Timed out during: {job.phase}"
     except JobCancelled:
@@ -364,10 +368,60 @@ def _update(job: Job, progress: int, phase: str, message: str) -> None:
     _snapshot(job)
 
 
+async def _degradable_call(
+    coro,
+    *,
+    timeout: float,
+    label: str,
+    job: Job,
+    fallbacks: list[str],
+    degraded: list[str],
+    default,
+):
+    """v1.4.6 — run one OPTIONAL provider call with a hard per-call ceiling.
+
+    Generalises the v1.4.2 buildability pattern to every optional provider
+    stage: on timeout or failure the call degrades to `default`, records a
+    human-readable note in `fallbacks`, and appends `label` to `degraded`
+    (surfaced as maskStats["providerDegraded"] for the UI/evidence trail).
+    A slow optional mask must never kill the whole job.
+
+    Never swallows JobCancelled (user cancel) or CancelledError (the outer
+    240s watchdog — a BaseException, so `except Exception` can't catch it).
+    """
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except JobCancelled:
+        raise
+    except asyncio.TimeoutError:
+        logger.warning(
+            "job %s: provider call '%s' timed out after %ss — degraded",
+            job.id[:8], label, timeout,
+        )
+        fallbacks.append(
+            f"Provider call '{label}' timed out after {int(timeout)}s — "
+            "this check was skipped (graceful degradation)."
+        )
+        degraded.append(label)
+        return default
+    except Exception as ex:
+        logger.warning("job %s: provider call '%s' failed: %s", job.id[:8], label, ex)
+        fallbacks.append(
+            f"Provider call '{label}' failed ({str(ex)[:160]}) — "
+            "this check was skipped (graceful degradation)."
+        )
+        degraded.append(label)
+        return default
+
+
 async def _run_analysis(job: Job, spec: SpecV2) -> None:
     s = get_settings()
     notes: list[str] = []
     fallbacks: list[str] = []
+    # v1.4.6 — optional provider checks that timed out / failed and were
+    # skipped (see _degradable_call). Reported via maskStats["providerDegraded"].
+    _provider_degraded: list[str] = []
+    _opt_timeout = s.optional_provider_timeout
     _qt = QueryTracker()          # v1.3.0 — evidence trail provider query tracker
     import datetime as _dt
     _analysis_start = _dt.datetime.utcnow().isoformat() + "Z"
@@ -442,9 +496,16 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         if osm_tag_sets or exc_tag_sets:
             try:
                 from ..engine.data_osm import fetch_all_layers as _fal
-                fetched = await _fal({**osm_tag_sets, **exc_tag_sets}, overpass_bbox)
+                # v1.4.6 — bounded like the main-path fetch
+                fetched = await asyncio.wait_for(
+                    _fal({**osm_tag_sets, **exc_tag_sets}, overpass_bbox),
+                    timeout=s.main_fetch_timeout,
+                )
+            except JobCancelled:
+                raise
             except Exception as e:
-                notes.append(f"OSM fetch failed for uploaded candidates — scored with zero POI data ({e}).")
+                _err_txt = str(e)[:160] or f"timed out after {s.main_fetch_timeout}s"
+                notes.append(f"OSM fetch failed for uploaded candidates — scored with zero POI data ({_err_txt}).")
 
         layer_pois: dict[str, list[dict]] = {l.id: fetched.get(l.id, []) for l in spec.layers}
         exclusion_pois: dict[str, list[dict]] = {e.name: fetched.get(f"__exc__{e.name}", []) for e in spec.exclusions}
@@ -579,7 +640,21 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     if osm_tag_sets or exc_tag_sets or sup_tag_sets:
         _osm_warn = None
         try:
-            fetched = await fetch_all_layers({**osm_tag_sets, **exc_tag_sets, **sup_tag_sets}, overpass_bbox)
+            # v1.4.6 — generous but hard ceiling on the critical combined fetch,
+            # so a hung mirror degrades ("scored as zero") instead of eating
+            # the whole 240s job budget.
+            fetched = await asyncio.wait_for(
+                fetch_all_layers({**osm_tag_sets, **exc_tag_sets, **sup_tag_sets}, overpass_bbox),
+                timeout=s.main_fetch_timeout,
+            )
+        except JobCancelled:
+            raise
+        except asyncio.TimeoutError:
+            _osm_warn = f"main OSM fetch timed out after {s.main_fetch_timeout}s"
+            fallbacks.append(
+                f"OSM fetch timed out after {s.main_fetch_timeout}s — OSM layers scored as zero."
+            )
+            _provider_degraded.append("main_osm_fetch")
         except Exception as e:
             _osm_warn = str(e)[:200]
             fallbacks.append(f"OSM fetch failed entirely — OSM layers scored as zero ({e}).")
@@ -604,7 +679,13 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             ptype = poi_merge.places_type_for_osm(layer.source.tags)
             if ptype and s.google_places_api_key and places_fetches < PLACES_FETCH_CAP:
                 _update(job, 40, "fetch", f"Google Places back-up for: {layer.name}...")
-                places_pois = await fetch_places_pois([ptype], None, overpass_bbox)
+                # v1.4.6 — bounded: a slow/broken Places API degrades this
+                # back-up merge to OSM-only, it must not kill the job.
+                places_pois = await _degradable_call(
+                    fetch_places_pois([ptype], None, overpass_bbox),
+                    timeout=_opt_timeout, label=f"places_backup_{layer.id}",
+                    job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
+                )
                 places_fetches += 1
                 _qt.record_places(
                     purpose=f"backup_for_{layer.id}",
@@ -622,8 +703,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 fallbacks.append(f"No features found for layer '{layer.name}' in the study area.")
         elif layer.source.provider == "google_places":
             _update(job, 40, "fetch", f"Fetching Google Places for: {layer.name}...")
-            places_pois = await fetch_places_pois(
-                layer.source.types, layer.source.keyword, overpass_bbox,
+            # v1.4.6 — bounded: on timeout/failure this layer degrades to the
+            # OSM supplement (or no-data, excluded from scoring) with a note.
+            places_pois = await _degradable_call(
+                fetch_places_pois(layer.source.types, layer.source.keyword, overpass_bbox),
+                timeout=_opt_timeout, label=f"places_primary_{layer.id}",
+                job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
             )
             places_fetches += 1
             _qt.record_places(
@@ -741,8 +826,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # water mask (4d). Includes waterway=river so the river line is available even
     # when it isn't mapped as an area polygon.
     try:
-        water_ways = await fetch_area_geometries(
-            ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
+        # v1.4.6 — per-call ceiling; on timeout the water mask degrades and is
+        # reported (for riverside briefs the corridor-failure path below still
+        # withholds the recommendation rather than silently keeping water cells).
+        water_ways = await asyncio.wait_for(
+            fetch_area_geometries(
+                ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
+            ),
+            timeout=_opt_timeout,
         )
         _qt.record_osm(
             purpose="water_body_geometry",
@@ -752,14 +843,16 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         )
     except Exception as e:
         water_ways = []
+        _provider_degraded.append("water_body_geometry")
+        _err_txt = str(e)[:200] or f"timed out after {_opt_timeout}s"
         _qt.record_osm(
             purpose="water_body_geometry",
             tags=["natural=water", "waterway=riverbank", "waterway=river"],
             bbox=overpass_bbox,
             feature_count=0,
-            warning=str(e)[:200],
+            warning=_err_txt,
         )
-        fallbacks.append(f"Water-body geometry fetch failed: {e}.")
+        fallbacks.append(f"Water-body geometry fetch failed: {_err_txt}.")
     # PATCH 1 (v1.0.3.1): track whether a WATERFRONT gate was actually enforced, so a
     # failed riverfront corridor never silently becomes "all candidates kept".
     waterfront_corridor_enforced = False
@@ -779,10 +872,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         for c in spec.corridors:
             is_water = any(_is_water_tag(t) for t in c.source.tags)
             try:
-                ways = await fetch_line_geometries(c.source.tags, overpass_bbox)
+                # v1.4.6 — per-call ceiling; a slow corridor fetch degrades to
+                # the water-polygon fallback / skip-gate paths below.
+                ways = await asyncio.wait_for(
+                    fetch_line_geometries(c.source.tags, overpass_bbox),
+                    timeout=_opt_timeout,
+                )
             except Exception as e:
                 ways = []
-                fallbacks.append(f"Corridor '{c.name}': line geometry fetch failed ({e}).")
+                _provider_degraded.append(f"corridor_{c.name}")
+                _err_txt = str(e)[:160] or f"timed out after {_opt_timeout}s"
+                fallbacks.append(f"Corridor '{c.name}': line geometry fetch failed ({_err_txt}).")
             geom_source = f"{len(ways)} line feature(s)"
             # PATCH 1: a waterfront gate with NO river line must not be skipped — fall
             # back to the water-polygon boundary as the riverbank. distance_to_lines_m
@@ -1095,8 +1195,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     if iso_layers and spec.execution.isochroneRefinement:
         _update(job, 70, "isochrones", f"Refining top {len(candidates)} candidates with isochrones...")
         cand_cells = [hexes[i] for i in candidates]
+        # v1.4.6 — each layer's isochrone batch is individually bounded; a
+        # slow/failed ORS call degrades that layer to its Euclidean proxy.
         iso_results = await asyncio.gather(*(
-            fetch_isochrones(cand_cells, l.catchment.type, l.catchment.minutes)
+            _degradable_call(
+                fetch_isochrones(cand_cells, l.catchment.type, l.catchment.minutes),
+                timeout=_opt_timeout, label=f"isochrone_{l.id}",
+                job=job, fallbacks=fallbacks, degraded=_provider_degraded, default={},
+            )
             for l in iso_layers
         ))
         for layer, isos in zip(iso_layers, iso_results):
@@ -1133,6 +1239,13 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         _update(job, 80, "traffic", f"Traffic-aware drive catchments for top {len(candidates)} candidates...")
         cand_cells = [hexes[i] for i in candidates]
         drive_speed = s.drive_speed_m_per_min
+        # v1.4.6 — per-call ceiling + circuit breaker. This loop makes one
+        # Google Routes call per candidate per layer (up to ~12 × layers); a
+        # degraded provider must not stack 60s timeouts across all of them.
+        # After 3 failures the remaining calls are skipped (Euclidean proxy
+        # values kept) and one degradation note is recorded.
+        _traffic_failures = 0
+        _traffic_circuit_open = False
         for layer in traffic_layers:
             pois = layer_pois.get(layer.id, [])
             if not pois:
@@ -1144,9 +1257,31 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 if not near:
                     scores[layer.id].refined[ci] = 0.0
                     continue
-                reachable, congestion = await traffic_catchment(
-                    (cell.lat, cell.lng), near, float(layer.catchment.minutes),
-                )
+                if _traffic_circuit_open:
+                    continue   # proxy value kept; degradation already noted
+                try:
+                    reachable, congestion = await asyncio.wait_for(
+                        traffic_catchment(
+                            (cell.lat, cell.lng), near, float(layer.catchment.minutes),
+                        ),
+                        timeout=_opt_timeout,
+                    )
+                except JobCancelled:
+                    raise
+                except Exception as ex:
+                    _traffic_failures += 1
+                    logger.warning(
+                        "job %s: traffic catchment failed (%d/3): %s",
+                        job.id[:8], _traffic_failures, str(ex)[:120] or type(ex).__name__,
+                    )
+                    if _traffic_failures >= 3:
+                        _traffic_circuit_open = True
+                        _provider_degraded.append("traffic_catchment")
+                        fallbacks.append(
+                            "Traffic-aware drive catchments degraded (provider slow/"
+                            "unresponsive after 3 attempts) — free-flow proxy values kept."
+                        )
+                    continue
                 if reachable is not None:
                     scores[layer.id].refined[ci] = float(reachable)
                     refined_any = True
@@ -1164,19 +1299,41 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         _update(job, 78, "routing", f"Routing top {len(candidates)} candidates (network + barriers)...")
         # Railway geometry once, if any constraint needs crossing checks
         need_rail = any(rc.avoidRailwayCrossing for rc in spec.routeConstraints)
-        railway_lines = await fetch_railway_lines(overpass_bbox) if need_rail else []
+        # v1.4.6 — all routing-stage provider calls are individually bounded.
+        # A degraded call leaves the constraint "unavailable" (never silently
+        # passed); required constraints then flow into route_unavailable →
+        # recommendation withheld/provisional per the strict-route policy.
+        railway_lines = await _degradable_call(
+            fetch_railway_lines(overpass_bbox),
+            timeout=_opt_timeout, label="railway_barrier_geometry",
+            job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
+        ) if need_rail else []
         for rc in spec.routeConstraints:
             # Resolve target points: named place (geocode) or nearest of tag-set
             targets: list[tuple[float, float]] = []
             if rc.targetKeyword:
-                pt = await geocode(rc.targetKeyword)
+                pt = await _degradable_call(
+                    geocode(rc.targetKeyword),
+                    timeout=20, label=f"route_target_geocode_{rc.name}",
+                    job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=None,
+                )
                 if pt:
                     targets = [pt]
             if not targets and rc.targetTags:
-                pois = fetched.get(f"__route__{rc.name}", []) or \
-                       (await fetch_all_layers({f"__route__{rc.name}": rc.targetTags}, overpass_bbox)).get(f"__route__{rc.name}", [])
+                pois = fetched.get(f"__route__{rc.name}", [])
+                if not pois:
+                    _route_fetch = await _degradable_call(
+                        fetch_all_layers({f"__route__{rc.name}": rc.targetTags}, overpass_bbox),
+                        timeout=_opt_timeout, label=f"route_targets_{rc.name}",
+                        job=job, fallbacks=fallbacks, degraded=_provider_degraded, default={},
+                    )
+                    pois = _route_fetch.get(f"__route__{rc.name}", [])
                 targets = [(p["lat"], p["lng"]) for p in pois]
-            metrics = await evaluate_route_constraint(rc, cand_cells, targets, railway_lines)
+            metrics = await _degradable_call(
+                evaluate_route_constraint(rc, cand_cells, targets, railway_lines),
+                timeout=max(_opt_timeout, 90), label=f"route_eval_{rc.name}",
+                job=job, fallbacks=fallbacks, degraded=_provider_degraded, default={},
+            )
             any_evaluated = False
             for idx, ci in enumerate(candidates):
                 m = metrics.get(idx, {"status": "unavailable", "passed": None})
@@ -1242,6 +1399,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── 7. Re-rank with refined values, take topN ───────────────────
     # Candidates failing a REQUIRED route constraint are dropped from ranking
     # (real computed exclusion — not a fabricated score).
+    # v1.4.6 — surface every degraded optional provider check to the UI and
+    # evidence trail (mirrors the v1.4.2 buildabilityDegraded pattern).
+    if _provider_degraded:
+        mask_stats["providerDegraded"] = sorted(set(_provider_degraded))
+        notes.append(
+            "Optional provider checks degraded (timeout/failure): "
+            + ", ".join(sorted(set(_provider_degraded)))
+            + ". Affected factors/constraints use fallback values or were "
+            "skipped — confidence reduced."
+        )
+
     _update(job, 85, "score_pass_b", "Final ranking...")
     eligible = [ci for ci in candidates if passes_required_routes(ci)] or candidates
     finals = sorted(
