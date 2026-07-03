@@ -71,13 +71,14 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 
 ## How Scoring Works
 
+0. **PlannerLite (v1.4.9)** — before any expensive stage runs, a deterministic relevance gate (`engine/planner_lite.py`) decides which of water/buildability/routing/Places-refinement checks actually matter for *this* prompt. A plain cafe or supermarket brief skips buildability and water-geometry fetches entirely; a riverside brief runs the full stack. Skipped-because-irrelevant is never a failure or a degradation — it's a recorded resource decision, surfaced as `analysisCompleteness` in the result and a preview on the spec card before you click Start.
 1. **Study area & grid** — The area is resolved to real localities (or a bounding polygon) and tiled with H3 hexagonal cells (res 9, ~0.1 km² each).
-2. **Data gathering** — OSM Overpass (batched union query) + Google Places per factor. Consumer POI layers auto-merged with ~40 m spatial dedup.
-3. **Spatial masks** — Water mask, buildability masks (railway, ghat, heritage, maidan), waterfront corridor enforcement, exclusion buffers. Applied before scoring.
+2. **Data gathering** — OSM Overpass (batched union query) + Google Places (New, with legacy Places/OSM fallback) per factor. Consumer POI layers auto-merged with ~40 m spatial dedup.
+3. **Spatial masks** — Water mask, buildability masks (railway, ghat, heritage, maidan), waterfront corridor enforcement, exclusion buffers. Applied before scoring, and skipped by PlannerLite when not relevant to the prompt.
 4. **Pass A scoring** — Every cell scored on each factor (BallTree Euclidean counts), normalized percentile-based, combined by weight.
-5. **Pass B refinement** — Top-K candidates re-scored with real ORS isochrones; optional traffic-aware drive catchments.
-6. **Route constraints** — Real ORS network routing per top-K candidate; railway-crossing detection.
-7. **Multi-score output** — relativeRankScore, absoluteViabilityScore, confidenceScore computed; recommendation status derived from all three + critic.
+5. **Pass B refinement** — Top-K candidates re-scored with real ORS isochrones and Google Places Aggregate counts; optional traffic-aware drive catchments.
+6. **Route constraints** — Real Google Routes / ORS network routing per top-K candidate (only when relevant — see PlannerLite); railway-crossing detection.
+7. **Multi-score output** — relativeRankScore, absoluteViabilityScore, confidenceScore computed; recommendation status derived from all three + critic + analysis completeness.
 8. **Viability gate** — Candidates below minimum viable score withheld; waterfront/strict briefs may return `insufficient_viable_land`.
 
 **Honesty enforced by design:**
@@ -94,7 +95,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
   React + Vite SPA          ┌─────────────────────────────────────────┐
   (GitHub Pages)            │  FastAPI Engine  (Google Cloud Run)      │
         │                   │                                           │
-        │  POST /api/v2/chat │  Consultant LLM (gpt-4o) → SpecV2       │
+        │  POST /api/v2/chat │  Consultant LLM (gpt-5.4-mini) → SpecV2 │
         ├──────────────────► │  RawIntent parser (deterministic)        │
         │                   │  Archetype registry                       │
         │  POST /api/v2/analyses                                        │
@@ -104,13 +105,17 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
         │                   │    Pass B (ORS isochrones) · Route gates  │
         │                   │    Uploaded-candidates gate               │
         │                   │    Multi-score (rank/viability/confidence)│
-        │                   │    Critic pass (gpt-4o, if cost≥balanced) │
+        │                   │    Critic pass (gpt-5.4, if cost≥balanced)│
         │ ◄─────────────────┤  ranked candidate zones + evidence        │
                             └─────────────────────────────────────────┘
 
-  Data:   OpenStreetMap (Overpass) · Google Places · OpenRouteService · Google Routes
+  Data:   OpenStreetMap (Overpass) · Google Places (New + legacy) · Places Aggregate
+          · OpenRouteService · Google Routes
   Auth:   Firebase Auth + Firestore
   Cache:  Google Cloud Storage (job snapshots)
+
+  PlannerLite (v1.4.9) sits in front of the engine's water/buildability/routing/
+  Places-refinement stages, skipping whichever are irrelevant to the prompt.
 ```
 
 ---
@@ -122,11 +127,11 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | Frontend | React 19, TypeScript, Vite 6 — static SPA on GitHub Pages; Leaflet maps, Recharts |
 | Backend | Python 3.12 + FastAPI on **Google Cloud Run** (`--max-instances 1 --no-cpu-throttling`) |
 | Spatial | H3 (`h3-py`), Shapely, scikit-learn BallTree, NumPy |
-| Data | OpenStreetMap (Overpass), Google Places (New), OpenRouteService, Google Routes |
+| Data | OpenStreetMap (Overpass), Google Places (New + legacy fallback), Google Places Aggregate, OpenRouteService, Google Routes |
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (236 tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (513 backend tests) · Vitest (44 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -153,6 +158,20 @@ STRATAGEO_ENABLE_MODEL_ESCALATION  # default: false
 CHAT_MODEL
 EXPLAIN_MODEL
 CRITIC_MODEL
+
+# Google provider layer (v1.4.8) — all analysis-critical flags default ON and
+# self-disable/fall back to legacy Places or OSM if the specific API isn't
+# enabled on GOOGLE_PLACES_API_KEY's project (verify in the GCP console —
+# Places API New, Places Aggregate/Area Insights, and Routes API are each
+# enabled independently of a valid key existing).
+ENABLE_GOOGLE_PLACES_NEW            # default: true
+ENABLE_GOOGLE_PLACES_AGGREGATE      # default: true
+ENABLE_GOOGLE_PLACE_DETAILS_NEW     # default: true
+ENABLE_GOOGLE_ROUTES_VALIDATION     # default: true
+ENABLE_GOOGLE_PLACE_PHOTOS          # default: false (UI-only, never scored)
+ENABLE_GOOGLE_AUTOCOMPLETE          # default: false (frontend UX only)
+ENABLE_GOOGLE_SEARCH_ALONG_ROUTE    # default: false
+ENABLE_GOOGLE_AI_SUMMARIES          # default: false (narrative only, never scored)
 ```
 
 **Frontend** (Vite build-time, baked into bundle):
@@ -206,8 +225,9 @@ npm run dev
 pytest tests/ -v
 
 # Frontend
-npm run typecheck
-npm run build
+npx tsc --noEmit   # typecheck
+npm run build      # also runs tsc as part of the build
+npm test           # vitest
 ```
 
 ---
@@ -217,14 +237,14 @@ npm run build
 ### Backend — Google Cloud Run
 
 ```bash
-cd backend-py/
 gcloud run deploy stratageo-engine \
-  --source . \
+  --source backend-py/ \
   --region asia-south1 \
-  --max-instances 1 \
-  --no-cpu-throttling \
   --project <your-gcp-project>
-# Secrets are already set in Secret Manager — no --set-secrets needed on updates.
+# --max-instances / --no-cpu-throttling / concurrency are already set on the
+# service and are NOT passed on redeploys — a bare `gcloud run deploy` with
+# --source preserves the existing service configuration. Secrets are already
+# set in Secret Manager — no --set-secrets needed on updates.
 ```
 
 After deploy, verify:
@@ -233,7 +253,9 @@ After deploy, verify:
 curl https://<your-cloud-run-url>/health
 ```
 
-Expected response includes `appVersion: "1.1.0"`, `engineVersion: "1.1.0"`, `costMode`, `featureFlags`, and active model names.
+Expected response includes `appVersion: "1.4.9"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
+
+**Rollback discipline:** before every backend deploy, tag the currently-live commit first — `git tag -a rollback-pre-vX.Y.Z <live-commit-sha> -m "..." && git push origin rollback-pre-vX.Y.Z` — so `git checkout` back to a known-good state is always one command away (see [Rollback](#rollback) below).
 
 ### Frontend — GitHub Pages
 
@@ -255,18 +277,32 @@ Frontend deploys automatically via GitHub Actions on every push to `master`. No 
 
 ## Rollback
 
+Every deploy since v1.4.2 is preceded by a `rollback-pre-vX.Y.Z` tag pointing at the commit that was actually live at the moment of tagging (not necessarily the tip of `master`):
+
 ```bash
-git checkout backup/pre-v1.1.0-universal-suitability
-# Redeploy backend and rebuild frontend from the checked-out state.
+git tag -l "rollback-pre-*"          # list available rollback points
+git checkout rollback-pre-v1.4.9 -- backend-py/   # or check out the whole tree
+# Redeploy backend from the checked-out state:
+gcloud run deploy stratageo-engine --source backend-py/ --region asia-south1 --project <your-gcp-project>
+# Frontend: push the rolled-back commit to master to trigger the GitHub Pages workflow.
 ```
+
+Do not roll back unless production is actually broken — a slow or degraded provider is handled gracefully by design (see `analysisCompleteness` / `providerDiagnostics`) and is not, by itself, a reason to revert.
 
 ---
 
 ## Version History
 
+Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a compact index. See the "Highlights" sections above for v1.4.8/v1.4.9 detail.
+
 | Version | Highlights |
 |---|---|
-| **v1.2.0** *(current)* | Deterministic planning: canonical archetype schemas, frozen factor weights, spec fingerprinting, no reliable recommendation handling, relaxation options |
+| **v1.4.9** *(current)* | PlannerLite smart resource gating — skips irrelevant water/buildability/routing/Places-refinement stages per prompt; `analysisCompleteness` payload; unsupported constraints labeled up front |
+| **v1.4.8** | Google Places API (New) provider layer, Places Aggregate count refinement, Google Routes primary route validator — legacy Places/OSM/ORS retained as fallback throughout |
+| **v1.4.1–1.4.7** | Execution-flow reliability, per-provider timeout/degradation, results-crash safety, numeric scoring contract (`engine/contracts.py`), three-state result payload (`success`/`no_viable_site`/`failed`) |
+| **v1.4.0** | Reliability Hardening: constraint policy engine, always-on deterministic critic, verified metro station resolver, score display policy (displayScore/scoreBand/confidenceLabel), data coverage accounting |
+| **v1.3.0** | Evidence Trail & Reproducible Site Selection Reports — full `EvidenceTrail` schema, provider query tracking, `/evidence` endpoint |
+| **v1.2.0** | Deterministic planning: canonical archetype schemas, frozen factor weights, spec fingerprinting, no-reliable-recommendation handling, relaxation options |
 | **v1.1.2** | Hotfix: restore `_is_water_tag` import — NameError crashed analysis for non-waterfront briefs |
 | **v1.1.1** | Cost-aware model routing refresh: gpt-5.4-mini / gpt-5.4-nano / gpt-5.4 · max_completion_tokens for gpt-5.x compat |
 | **v1.1.0** | Universal archetype registry · RawIntent parser · multi-dimensional scoring · uploaded-candidates-only enforcement · cost-aware model routing · honest R/V/C score labels |
@@ -279,12 +315,16 @@ git checkout backup/pre-v1.1.0-universal-suitability
 
 ## Documentation
 
-- [`CHANGELOG.md`](CHANGELOG.md)
-- [`docs/RELEASE_NOTES_v1.1.0.md`](docs/RELEASE_NOTES_v1.1.0.md)
-- [`docs/DEPLOYMENT_CHECKLIST_v1.1.0.md`](docs/DEPLOYMENT_CHECKLIST_v1.1.0.md)
-- [`docs/FINAL_PR_SUMMARY_v1.1.0.md`](docs/FINAL_PR_SUMMARY_v1.1.0.md)
-- [`docs/PHASE_18_UPLOADED_POINTS_ONLY_FIX.md`](docs/PHASE_18_UPLOADED_POINTS_ONLY_FIX.md)
-- [`docs/PHASE_17_SMOKE_TEST_v1.1.0.md`](docs/PHASE_17_SMOKE_TEST_v1.1.0.md)
+- [`CHANGELOG.md`](CHANGELOG.md) — every release, most recent first
+- [`docs/STRATAGEO_PORTAL_LATEST_PROJECT_AUDIT.md`](docs/STRATAGEO_PORTAL_LATEST_PROJECT_AUDIT.md) — critical architecture/performance audit that motivated PlannerLite (v1.4.9); a good starting point for understanding why the pipeline is shaped the way it is
+- [`docs/STRATAGEO_V1_4_KNOWN_LIMITATIONS.md`](docs/STRATAGEO_V1_4_KNOWN_LIMITATIONS.md)
+- `docs/` contains 30+ additional release-note, deployment-checklist, and phase-audit files from earlier versions (v1.0.x–v1.3.x) — browse the directory for full history
+
+---
+
+## Product Disclosure
+
+Results are **screening-level candidate zones** (H3 micro-market hexagons), never exact parcels, and the following are explicitly detected and shown as **unverified — not scored** rather than silently omitted: rent/lease price, floor area/footprint, parcel/space availability, zoning/licensing, ownership/title. Drive-time and walk-time constraints are only ever shown as verified when a real routing provider (Google Routes or ORS) computed them — never a straight-line/Euclidean substitute presented as confirmed.
 
 ---
 
