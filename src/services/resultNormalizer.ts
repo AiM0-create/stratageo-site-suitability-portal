@@ -150,6 +150,8 @@ function normalizeEvidenceTrail(raw: unknown, warnings: string[]): any {
   return t;
 }
 
+const RESULT_STATES = ['success', 'no_viable_site', 'failed'] as const;
+
 export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
   const warnings: string[] = [];
   const src: Record<string, any> = isObj(raw) ? raw : {};
@@ -158,6 +160,39 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
   }
 
   const out: any = { ...src };
+
+  // ── v1.4.7: three-state backend result contract ──
+  // status ∈ success | no_viable_site | failed. A payload with no recognizable
+  // state AND no usable content is flagged 'malformed' so the UI can show
+  // "Malformed backend result" with the job reference instead of a blank panel.
+  out.jobRef = asStr(src.jobRef) || asStr(src.analysisId) || undefined;
+  if (RESULT_STATES.includes(src.status)) {
+    out.status = src.status;
+  } else {
+    const hasContent =
+      Array.isArray(src.locations) || typeof src.summary === 'string';
+    out.status = hasContent ? 'success' : 'malformed';   // legacy payloads = success shape
+    if (!hasContent) {
+      warnings.push(
+        `Malformed backend result${out.jobRef ? ` (ref: ${out.jobRef})` : ''} — no status, candidates, or summary.`,
+      );
+    }
+  }
+  out.degradationNotes = asArr(src.degradationNotes).filter(n => typeof n === 'string');
+  out.providerDiagnostics = isObj(src.providerDiagnostics)
+    ? { ...src.providerDiagnostics, degraded: asArr(src.providerDiagnostics.degraded) }
+    : undefined;
+  if (out.status === 'no_viable_site') {
+    out.reason = asStr(src.reason, 'No viable site satisfied the hard constraints.');
+    out.failedGates = asArr(src.failedGates).filter(isObj);
+    out.relaxationSuggestions = asArr(src.relaxationSuggestions).filter(s => typeof s === 'string');
+  }
+  if (out.status === 'failed') {
+    out.stage = asStr(src.stage, 'unknown');
+    out.errorCode = asStr(src.errorCode, 'UNKNOWN');
+    out.userMessage = asStr(src.userMessage, 'The analysis failed on the server.');
+    out.retryable = src.retryable !== false;
+  }
 
   out.summary = asStr(src.summary, 'Analysis completed, but the summary could not be read.');
   out.business_type = asStr(src.business_type, '—');

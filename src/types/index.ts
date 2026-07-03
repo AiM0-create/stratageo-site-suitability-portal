@@ -214,6 +214,22 @@ export interface AnalysisResult {
   spec: AnalysisSpec;
   locations: LocationData[];
   grounding_sources: GroundingSource[];
+  // ── v1.4.7 three-state backend result contract (normalizer-guaranteed) ──
+  /** success | no_viable_site | failed; 'malformed' when the payload had no
+   * recognizable state or content. Legacy payloads normalize to 'success'. */
+  status?: 'success' | 'no_viable_site' | 'failed' | 'malformed';
+  jobRef?: string;
+  degradationNotes?: string[];
+  providerDiagnostics?: { degraded: string[]; degradationCount?: number; notes?: string[] };
+  /** no_viable_site only */
+  reason?: string;
+  failedGates?: Array<Record<string, unknown>>;
+  relaxationSuggestions?: string[];
+  /** failed only */
+  stage?: string;
+  errorCode?: string;
+  userMessage?: string;
+  retryable?: boolean;
   /** Present only for v2 conversational-engine analyses */
   hexGrid?: HexGridCell[];
   catchments?: CatchmentOutline[];

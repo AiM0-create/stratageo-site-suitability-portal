@@ -4,8 +4,8 @@ import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, Heatma
 import type { BasemapId } from './components/MapView';
 import { config } from './config';
 import { runDemoAnalysis, runServerAnalysis } from './services/analysisService';
-import { sendChatTurn, startAnalysis, pollAnalysis, cancelAnalysis, AnalysisCancelledError } from './services/chatService';
-import { isAnalysisSpecWithPoints, isConfirmationPhrase } from './services/analysisFlow';
+import { sendChatTurn, startAnalysis, pollAnalysis, cancelAnalysis, AnalysisCancelledError, AnalysisFailedError } from './services/chatService';
+import { isAnalysisSpecWithPoints, isConfirmationPhrase, isFollowUpQuestion } from './services/analysisFlow';
 import { normalizeAnalysisResult } from './services/resultNormalizer';
 import type { SpecV2, AnalysisPhase } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
@@ -472,6 +472,19 @@ const App: React.FC = () => {
         return;
       }
 
+      // v1.4.7 — three-state rendering: a payload with no recognizable state
+      // or content is surfaced as "Malformed backend result" WITH the job
+      // reference (never a blank panel or a silent success).
+      if (analysisResultData.status === 'malformed') {
+        const ref = analysisResultData.jobRef || jobId?.slice(0, 8) || 'unknown';
+        const msg = `Malformed backend result (ref: ${ref}). The analysis finished but returned an unreadable payload — please retry or report this reference.`;
+        setError(msg);
+        addMessage('assistant', msg);
+        if (lastSpecWithPointsRef.current) setCanRetry(true);
+        setAnalysisPhase('failed');
+        return;
+      }
+
       setResult(analysisResultData);
       setSpec(analysisResultData.spec);
       if (analysisResultData.locations.length > 0) {
@@ -484,9 +497,18 @@ const App: React.FC = () => {
       setAnalysisPhase('completed');
 
       const top = analysisResultData.locations.filter(l => !l.excluded)[0];
-      addMessage('assistant', top
-        ? `Analysis complete — screened ${analysisResultData.spec.parsingNotes.find(n => n.includes('hexes'))?.match(/\d+ hexes/)?.[0] || 'the study area'}. ${top.name} ranks highest at ${top.mcda_score}/10.`
-        : analysisResultData.summary);
+      // v1.4.7 — NO_VIABLE_SITE gets its own honest message (reason + first
+      // relaxation suggestion) instead of the generic success summary.
+      if (analysisResultData.status === 'no_viable_site') {
+        const relax = analysisResultData.relaxationSuggestions?.[0];
+        addMessage('assistant',
+          `No viable site: ${analysisResultData.reason || analysisResultData.summary}` +
+          (relax ? ` Suggestion: ${relax}` : ''));
+      } else {
+        addMessage('assistant', top
+          ? `Analysis complete — screened ${analysisResultData.spec.parsingNotes.find(n => n.includes('hexes'))?.match(/\d+ hexes/)?.[0] || 'the study area'}. ${top.name} ranks highest at ${top.mcda_score}/10.`
+          : analysisResultData.summary);
+      }
 
       if (user) {
         saveAnalysis(user.uid, user.email, lastPrompt || specToUse.objective, analysisResultData, analysisResultData.spec).catch(() => {});
@@ -530,11 +552,17 @@ const App: React.FC = () => {
       // v1.4.4 — this is a backend job error (startAnalysis/pollAnalysis
       // failure), never the chat/planning "assistant unavailable" message —
       // those two error paths are fully separate (see handleChatTurn's catch).
+      // v1.4.7 — a structured FAILED payload carries stage/errorCode/jobRef in
+      // its userMessage and an explicit retryable flag; honour it.
+      const failedPayload = err instanceof AnalysisFailedError ? err.failed : undefined;
       const msg = err?.message || 'Analysis failed. Please try again.';
       setError(msg);
       addMessage('assistant', msg);
-      // v1.4.2 — enable Retry button so the user can re-run without re-typing
-      if (lastSpecWithPointsRef.current) setCanRetry(true);
+      // v1.4.2 — enable Retry button so the user can re-run without re-typing.
+      // v1.4.7 — unless the backend says the failure is not retryable (a code
+      // defect retried verbatim will fail identically).
+      const retryable = failedPayload ? failedPayload.retryable !== false : true;
+      if (lastSpecWithPointsRef.current && retryable) setCanRetry(true);
       setAnalysisPhase('failed');
     } finally {
       // Only unlock state that still belongs to THIS invocation. If a newer
@@ -596,6 +624,17 @@ const App: React.FC = () => {
       // run's drawer, map layers, or error banner on screen. (Results are
       // still cached per-session by the session-switch cache; and a follow-up
       // that IS a confirmation phrase never reaches this branch.)
+      // v1.4.7 — but a follow-up QUESTION about the existing results ("why is
+      // zone 2 lower?") must NOT clear them: the user is still working with
+      // the drawer/map. Only a prompt that reads as a new analysis brief
+      // resets the state.
+      if (
+        (analysisPhase === 'completed' || analysisPhase === 'failed') &&
+        isFollowUpQuestion(rawPrompt)
+      ) {
+        console.debug('[follow-up question — keeping existing results]', rawPrompt);
+        return handleChatTurn(rawPrompt);
+      }
       if (analysisPhase === 'completed' || analysisPhase === 'failed') {
         setChatSpec(null);
         setChatSpecStatus('empty');

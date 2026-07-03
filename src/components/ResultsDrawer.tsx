@@ -147,13 +147,21 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const [showChecklist, setShowChecklist] = useState(false);
   const [evidenceExpandedFactor, setEvidenceExpandedFactor] = useState<string | null>(null);
   const evidenceTrail: EvidenceTrail | undefined = (result as any).evidenceTrail;
+  // v1.4.7 — three-state backend contract: an explicit no_viable_site payload
+  // always renders the withheld/insufficient treatment, independent of the
+  // legacy flags.
+  const resultState: string | undefined = (result as any).status;
   // The critic judged this ranking untrustworthy → withhold the recommendation
   // (show the reasons, not a confident list). Raw candidates stay behind an opt-in.
-  const withheld = (result as any).recommendationWithheld === true;
+  const withheld = (result as any).recommendationWithheld === true
+    || resultState === 'no_viable_site';
   // Spatial Reliability Upgrade v1.0.3 — viability gate surfacing.
   const analysisStatus: string | undefined = (result as any).analysisStatus;
-  const insufficient = analysisStatus === 'insufficient_viable_land';
-  const suggestions: string[] = (result as any).suggestions || [];
+  const insufficient = analysisStatus === 'insufficient_viable_land'
+    || resultState === 'no_viable_site';
+  const suggestions: string[] = ((result as any).suggestions?.length
+    ? (result as any).suggestions
+    : (result as any).relaxationSuggestions) || [];
   const maskStats: Record<string, number> = (result as any).maskStats || {};
   // Phase 17 — critic and constraint enforcement transparency
   const criticEnabled: boolean = (result as any).criticEnabled === true;

@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isAnalysisSpecWithPoints,
   isConfirmationPhrase,
+  isFollowUpQuestion,
   CONFIRMATION_PHRASES,
 } from '../services/analysisFlow';
 
@@ -73,5 +74,37 @@ describe('isConfirmationPhrase (v1.4.4 local interception)', () => {
     expect(isConfirmationPhrase(
       'Find the top 3 locations for a quick-service cafe near Ruby crossing',
     )).toBe(false);
+  });
+});
+
+describe('isFollowUpQuestion (v1.4.7 — results must survive follow-ups)', () => {
+  it.each([
+    'why is zone 2 lower?',
+    'Why is zone 2 lower than zone 1',
+    'explain the competition factor',
+    'how did you compute the drive time?',
+    'what about the second candidate?',
+    'compare zone 1 and zone 3',
+    'is the metro exclusion applied here?',
+  ])('treats %j as a follow-up (keep results)', (q) => {
+    expect(isFollowUpQuestion(q)).toBe(true);
+  });
+
+  it.each([
+    'Find the top 3 locations for a dark kitchen in South Kolkata',
+    'Identify the 3 best sites for a premium riverside restaurant',
+    'Show me the 3 best locations for a discount supermarket in Sector V',
+    'I need a dark kitchen location in South Kolkata',
+  ])('treats %j as a NEW brief (clear results)', (q) => {
+    expect(isFollowUpQuestion(q)).toBe(false);
+  });
+
+  it('a new brief phrased as a question still counts as a new brief', () => {
+    expect(isFollowUpQuestion('can you find the best locations for a gym in Salt Lake?')).toBe(false);
+  });
+
+  it('confirmation phrases are not follow-ups (handled upstream)', () => {
+    expect(isFollowUpQuestion('yes')).toBe(false);
+    expect(isFollowUpQuestion('run')).toBe(false);
   });
 });

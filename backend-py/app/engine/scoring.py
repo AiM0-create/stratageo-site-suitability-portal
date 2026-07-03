@@ -192,16 +192,21 @@ def refit_refined_layers(scores: dict[str, "LayerScores"], candidates: list[int]
 def _layer_norm_for_hex(ls: "LayerScores", hex_index: int) -> float:
     """Normalized 0-1 score for one hex, using refined-scale params when the hex was
     refined (and the refit succeeded), else Pass-A params. A non-discriminating
-    refined layer returns a neutral 0.5 so it neither rewards nor punishes."""
+    refined layer returns a neutral 0.5 so it neither rewards nor punishes.
+
+    Contract (v1.4.7): the return value is ALWAYS a finite float in [0, 1] —
+    refined values are scalar-coerced so a provider that handed back a list or
+    NaN degrades this hex's factor to 0.0 instead of crashing the composite."""
+    from .contracts import normalize_0_1
     if hex_index in ls.refined:
-        raw = ls.refined[hex_index]
         if not ls.discriminating:
             return 0.5
         lo = ls.refined_low if ls.refined_low is not None else ls.norm_low
         hi = ls.refined_high if ls.refined_high is not None else ls.norm_high
-        return float(normalize(raw, lo, hi, ls.layer.direction))
-    raw = float(ls.raw[hex_index])
-    return float(normalize(raw, ls.norm_low, ls.norm_high, ls.layer.direction))
+        return normalize_0_1(ls.refined[hex_index], lo, hi, ls.layer.direction,
+                             label=f"{ls.layer.id}.refined[{hex_index}]")
+    return normalize_0_1(ls.raw[hex_index], ls.norm_low, ls.norm_high, ls.layer.direction,
+                         label=f"{ls.layer.id}.raw[{hex_index}]")
 
 
 def composite_for_hex(
@@ -216,6 +221,7 @@ def composite_for_hex(
     the composite rather than print a fabricated number. Layers without data get
     hasData=False and normScore=None in the detail; they contribute nothing.
     """
+    from .contracts import to_finite_float
     total = 0.0
     detail: dict[str, dict] = {}
     for lid, ls in scores.items():
@@ -225,9 +231,16 @@ def composite_for_hex(
                 "refined": False, "proxyRadiusM": ls.proxy_radius_m,
             }
             continue
-        raw = ls.refined.get(hex_index, float(ls.raw[hex_index]))
-        norm = _layer_norm_for_hex(ls, hex_index)
-        total += ls.layer.weight * norm
+        raw = (
+            to_finite_float(ls.refined[hex_index], default=None, label=f"{lid}.refined")
+            if hex_index in ls.refined else None
+        )
+        if raw is None:
+            raw = to_finite_float(ls.raw[hex_index], default=0.0, label=f"{lid}.raw") or 0.0
+        norm = _layer_norm_for_hex(ls, hex_index)   # contract: finite float in [0,1]
+        # Final scoring uses ONLY validated floats (v1.4.7 contract).
+        weight = to_finite_float(ls.layer.weight, default=0.0, label=f"{lid}.weight") or 0.0
+        total += float(weight) * float(norm)
         detail[lid] = {
             "raw": raw, "normScore": norm, "hasData": True,
             "refined": hex_index in ls.refined,

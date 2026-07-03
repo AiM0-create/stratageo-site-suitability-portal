@@ -122,6 +122,27 @@ export class AnalysisStalledError extends Error {
   }
 }
 
+/** v1.4.7 — structured FAILED payload from the backend's three-state result
+ * contract. Carried on the poll error so the UI can show stage / errorCode /
+ * jobRef and honour `retryable` instead of a bare string. */
+export interface FailedAnalysisPayload {
+  status: 'failed';
+  stage?: string;
+  errorCode?: string;
+  userMessage?: string;
+  retryable?: boolean;
+  jobRef?: string;
+}
+
+export class AnalysisFailedError extends Error {
+  failed?: FailedAnalysisPayload;
+  constructor(message: string, failed?: FailedAnalysisPayload) {
+    super(message);
+    this.name = 'AnalysisFailedError';
+    this.failed = failed;
+  }
+}
+
 export async function cancelAnalysis(jobId: string): Promise<CancelAnalysisResponse> {
   const r = await fetch(`${base()}/api/v2/analyses/${jobId}/cancel`, {
     method: 'POST',
@@ -178,11 +199,19 @@ export async function pollAnalysis(
     // didn't even declare) is exactly how a finished job can still leave
     // the chat input locked until the client-side deadline above fires.
     if (s.status === 'done' && s.result) return s.result;
-    if (s.status === 'error') throw new Error(s.error || 'Analysis failed on the server.');
-    if (s.status === 'cancelled') throw new AnalysisCancelledError(s.message || 'Analysis cancelled.');
-    if (s.status === 'timeout') {
-      throw new Error(s.error || 'Analysis timed out on the server — please try again.');
+    if (s.status === 'error' || s.status === 'timeout') {
+      // v1.4.7 — the backend now attaches a structured FAILED payload
+      // (stage / errorCode / userMessage / retryable / jobRef) to failed and
+      // timed-out jobs. Surface it so the UI can render an actionable error.
+      const failed = (s.result && (s.result as any).status === 'failed')
+        ? ((s.result as unknown) as FailedAnalysisPayload)
+        : undefined;
+      const fallback = s.status === 'timeout'
+        ? 'Analysis timed out on the server — please try again.'
+        : 'Analysis failed on the server.';
+      throw new AnalysisFailedError(failed?.userMessage || s.error || fallback, failed);
     }
+    if (s.status === 'cancelled') throw new AnalysisCancelledError(s.message || 'Analysis cancelled.');
     // status is 'queued' or 'running' — keep polling
   }
 }

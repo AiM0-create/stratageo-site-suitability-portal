@@ -31,3 +31,27 @@ export const CONFIRMATION_PHRASES = new Set([
 export function isConfirmationPhrase(text: string): boolean {
   return CONFIRMATION_PHRASES.has(text.trim().toLowerCase());
 }
+
+/** v1.4.7 — a NEW analysis brief: asks to find/identify sites somewhere.
+ * Used to decide whether a prompt after a completed run should clear the
+ * previous results (new brief) or keep them (follow-up question). */
+const NEW_ANALYSIS_RE =
+  /\b(find|identify|locate|suggest|recommend|show\s+me|search\s+for|i\s+need|looking\s+for)\b[\s\S]*\b(location|site|zone|place|spot|premise|outlet|kitchen|store|shop|restaurant|cafe|clinic|warehouse|supermarket)s?\b/i;
+
+/** Interrogative / analytical phrasing about the existing result. */
+const FOLLOW_UP_RE =
+  /^(why|how|what|which|where|when|who|explain|compare|tell\s+me|can\s+you|could\s+you|does|do|is|are|was|were|should|would)\b/i;
+
+/** v1.4.7 — true when a prompt after a completed/failed run is a QUESTION
+ * about the existing results ("why is zone 2 lower?") rather than a fresh
+ * analysis brief. Follow-up questions must NOT clear the results drawer,
+ * map layers, or spec — the user is still working with them. A prompt that
+ * clearly states a new brief ("find the top 3 locations for…") clears as
+ * before, even if phrased as a question. */
+export function isFollowUpQuestion(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (isConfirmationPhrase(t)) return false;      // handled upstream anyway
+  if (NEW_ANALYSIS_RE.test(t)) return false;      // an explicit new brief wins
+  return FOLLOW_UP_RE.test(t) || t.endsWith('?');
+}

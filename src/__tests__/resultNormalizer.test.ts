@@ -77,6 +77,56 @@ describe('normalizeAnalysisResult', () => {
     expect(Array.isArray(t.limitations)).toBe(true);
   });
 
+  // ── v1.4.7 three-state contract ──
+
+  it('flags a content-free payload as malformed with the job reference', () => {
+    const r = normalizeAnalysisResult({ jobRef: 'abc12345' }) as any;
+    expect(r.status).toBe('malformed');
+    expect(r.jobRef).toBe('abc12345');
+    expect(r.normalizationWarnings.join(' ')).toContain('abc12345');
+    expect(r.normalizationWarnings.join(' ')).toContain('Malformed backend result');
+  });
+
+  it('normalizes a legacy payload (no status field) to success', () => {
+    const r = normalizeAnalysisResult({ summary: 's', locations: [] }) as any;
+    expect(r.status).toBe('success');
+  });
+
+  it('preserves a no_viable_site payload with gates and relaxations', () => {
+    const r = normalizeAnalysisResult({
+      status: 'no_viable_site',
+      jobRef: 'j1',
+      reason: 'All hexes were water.',
+      failedGates: [{ gate: 'waterMask', hexesRemoved: 120 }, 'not-an-object'],
+      relaxationSuggestions: ['Widen the band to 500 m', 42],
+      degradationNotes: ['water fetch degraded', { bad: true }],
+      locations: [],
+      summary: 'no viable site',
+    }) as any;
+    expect(r.status).toBe('no_viable_site');
+    expect(r.reason).toBe('All hexes were water.');
+    expect(r.failedGates).toHaveLength(1);
+    expect(r.relaxationSuggestions).toEqual(['Widen the band to 500 m']);
+    expect(r.degradationNotes).toEqual(['water fetch degraded']);
+  });
+
+  it('preserves a failed payload with stage/errorCode/jobRef and retryable', () => {
+    const r = normalizeAnalysisResult({
+      status: 'failed', stage: 'score_pass_a', errorCode: 'TypeError',
+      userMessage: 'boom', retryable: false, jobRef: 'ref9',
+    }) as any;
+    expect(r.status).toBe('failed');
+    expect(r.stage).toBe('score_pass_a');
+    expect(r.errorCode).toBe('TypeError');
+    expect(r.retryable).toBe(false);
+    expect(r.jobRef).toBe('ref9');
+  });
+
+  it('an unknown status string does not crash and degrades sensibly', () => {
+    const r = normalizeAnalysisResult({ status: 'wat', summary: 's', locations: [] }) as any;
+    expect(r.status).toBe('success');
+  });
+
   it('leaves a healthy result essentially untouched (no spurious warnings)', () => {
     const healthy = {
       summary: 'ok', business_type: 'cafe', target_location: 'Kolkata',

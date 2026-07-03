@@ -17,6 +17,7 @@ import numpy as np
 from ..config import get_settings
 from ..models.spec import SpecV2, _is_water_tag
 from ..engine import buildability
+from ..engine import contracts
 from ..engine import corridors
 from ..engine import poi_merge
 from ..engine import results as results_mod
@@ -151,8 +152,16 @@ def _cap_competition_whitespace(spec, locations: list[dict]) -> None:
                 )
                 changed = True
         if changed:
-            num = sum(c["weight"] * c["score"] for c in crits if c.get("score") is not None)
-            den = sum(c["weight"] for c in crits if c.get("score") is not None)
+            # v1.4.7 contract: dict-sourced weights/scores are scalar-coerced
+            # before arithmetic (a list here must degrade, not crash).
+            from ..engine.contracts import to_finite_float as _tff
+            pairs = [
+                (_tff(c.get("weight"), 0.0, label="cap.weight") or 0.0,
+                 _tff(c.get("score"), None, label="cap.score"))
+                for c in crits
+            ]
+            num = sum(w * sc for w, sc in pairs if sc is not None)
+            den = sum(w for w, sc in pairs if sc is not None)
             if den > 0:
                 loc["mcda_score"] = round(num / den, 1)
                 loc["competitionCapped"] = True
@@ -207,6 +216,47 @@ def _viability_suggestions(spec) -> list[str]:
 
 
 TERMINAL_STATUSES = ("done", "error", "cancelled", "timeout")
+
+# v1.4.7 — every job that produces a result payload ends in EXACTLY one of
+# these three payload states. No raw Python exception may become the final
+# user-facing result (it becomes a structured FAILED payload instead).
+RESULT_STATES = ("success", "no_viable_site", "failed")
+
+
+def _provider_diagnostics(
+    degraded: list[str],
+    fallbacks: list[str] | None = None,
+    query_count: int | None = None,
+) -> dict:
+    """Compact provider health block attached to every terminal payload."""
+    return {
+        "degraded": sorted(set(degraded or [])),
+        "degradationCount": len(set(degraded or [])),
+        "notes": list(fallbacks or [])[:40],
+        "providerQueryCount": query_count,
+    }
+
+
+def _failed_result(
+    job: "Job",
+    *,
+    stage: str,
+    error_code: str,
+    user_message: str,
+    retryable: bool,
+    degraded: list[str] | None = None,
+) -> dict:
+    """Structured FAILED payload — the ONLY shape an engine crash may surface as."""
+    return {
+        "status": "failed",
+        "analysisId": "analysis_" + job.id[:8],
+        "stage": stage,
+        "errorCode": error_code,
+        "userMessage": user_message,
+        "retryable": retryable,
+        "providerDiagnostics": _provider_diagnostics(degraded or []),
+        "jobRef": job.id[:8],
+    }
 
 
 class JobCancelled(Exception):
@@ -332,15 +382,33 @@ def _run_in_thread(job: Job, spec: SpecV2) -> None:
             f"unresponsive. [stage={job.phase}; jobRef={job.id[:8]}]"
         )
         job.message = f"Timed out during: {job.phase}"
+        # v1.4.7 — structured FAILED payload (three-state result contract).
+        job.result = _failed_result(
+            job, stage=job.phase, error_code="JOB_TIMEOUT",
+            user_message=job.error, retryable=True,
+        )
     except JobCancelled:
         job.status = "cancelled"
         job.message = f"Cancelled during: {job.phase}"
         logger.info("job %s cancelled at phase=%s", job.id[:8], job.phase)
     except Exception as e:
-        logger.exception("job %s failed", job.id)
+        logger.exception("job %s failed at stage=%s", job.id, job.phase)
         job.status = "error"
         job.error = str(e)[:1000]
         job.message = f"Analysis failed: {e}"
+        # v1.4.7 — no raw Python exception becomes the user-facing result:
+        # ship a structured FAILED payload with stage/errorCode/jobRef. A
+        # TypeError/ValueError is a code defect (not retryable); network-ish
+        # failures are worth retrying.
+        job.result = _failed_result(
+            job, stage=job.phase, error_code=type(e).__name__,
+            user_message=(
+                f"The analysis engine hit an internal error during stage "
+                f"'{job.phase}'. [errorCode={type(e).__name__}; jobRef={job.id[:8]}] "
+                + str(e)[:300]
+            ),
+            retryable=not isinstance(e, (TypeError, ValueError, KeyError, AttributeError)),
+        )
     # Always write a terminal snapshot — even if storage is disabled, this
     # keeps the in-memory job object's final state consistent and logged.
     if job.status not in TERMINAL_STATUSES:
@@ -368,6 +436,46 @@ def _update(job: Job, progress: int, phase: str, message: str) -> None:
     _snapshot(job)
 
 
+class ProviderBreaker:
+    """v1.4.7 — per-job circuit breaker across optional provider calls.
+
+    Keyed by provider family (the label prefix before the first '_', e.g.
+    'places', 'isochrone', 'route'). After `threshold` failures in one family
+    the circuit opens for the REST OF THIS JOB: subsequent calls short-circuit
+    to their default immediately instead of stacking per-call timeouts. State
+    is per-job (never shared across jobs/instances)."""
+
+    def __init__(self, threshold: int = 3) -> None:
+        self.threshold = threshold
+        self._failures: dict[str, int] = {}
+        self._open: set[str] = set()
+        self._noted: set[str] = set()
+
+    @staticmethod
+    def family(label: str) -> str:
+        return label.split("_", 1)[0]
+
+    def is_open(self, label: str) -> bool:
+        return self.family(label) in self._open
+
+    def record_failure(self, label: str) -> bool:
+        """Returns True when this failure OPENS the circuit."""
+        fam = self.family(label)
+        self._failures[fam] = self._failures.get(fam, 0) + 1
+        if self._failures[fam] >= self.threshold and fam not in self._open:
+            self._open.add(fam)
+            return True
+        return False
+
+    def note_once(self, label: str) -> bool:
+        """True only the first time per family — bounds skip-note spam."""
+        fam = self.family(label)
+        if fam in self._noted:
+            return False
+        self._noted.add(fam)
+        return True
+
+
 async def _degradable_call(
     coro,
     *,
@@ -377,41 +485,86 @@ async def _degradable_call(
     fallbacks: list[str],
     degraded: list[str],
     default,
+    retries: int = 0,
+    breaker: "ProviderBreaker | None" = None,
 ):
-    """v1.4.6 — run one OPTIONAL provider call with a hard per-call ceiling.
+    """v1.4.6/v1.4.7 — run one OPTIONAL provider call with a hard per-call
+    ceiling, bounded retries with jittered exponential backoff, and a per-job
+    circuit breaker.
 
-    Generalises the v1.4.2 buildability pattern to every optional provider
-    stage: on timeout or failure the call degrades to `default`, records a
-    human-readable note in `fallbacks`, and appends `label` to `degraded`
-    (surfaced as maskStats["providerDegraded"] for the UI/evidence trail).
-    A slow optional mask must never kill the whole job.
+    `coro` may be a coroutine object (single attempt — a coroutine cannot be
+    re-awaited) or a zero-arg callable returning a fresh coroutine (enables
+    retries). Retries apply only to FAST failures (exceptions); a per-call
+    TIMEOUT is never retried — re-waiting a slow provider would stack
+    timeouts against the 240s job budget.
+
+    On final failure the call degrades to `default`, records a note in
+    `fallbacks`, and appends `label` to `degraded` (surfaced as
+    maskStats["providerDegraded"]). A slow optional check must never kill
+    the whole job.
 
     Never swallows JobCancelled (user cancel) or CancelledError (the outer
     240s watchdog — a BaseException, so `except Exception` can't catch it).
     """
-    try:
-        return await asyncio.wait_for(coro, timeout=timeout)
-    except JobCancelled:
-        raise
-    except asyncio.TimeoutError:
+    import random
+
+    factory = coro if callable(coro) else None
+    attempts_allowed = (retries + 1) if factory is not None else 1
+
+    if breaker is not None and breaker.is_open(label):
+        if breaker.note_once(label):
+            fallbacks.append(
+                f"Provider family '{ProviderBreaker.family(label)}' circuit is open "
+                "(repeated failures) — remaining optional calls in this family were "
+                "skipped (graceful degradation)."
+            )
+        degraded.append(label)
+        if factory is None:
+            coro.close()   # don't leak a never-awaited coroutine
+        return default
+
+    last_err: str = ""
+    for attempt in range(attempts_allowed):
+        this_coro = factory() if factory is not None else coro
+        try:
+            return await asyncio.wait_for(this_coro, timeout=timeout)
+        except JobCancelled:
+            raise
+        except asyncio.TimeoutError:
+            logger.warning(
+                "job %s: provider call '%s' timed out after %ss — degraded (no retry on timeout)",
+                job.id[:8], label, timeout,
+            )
+            fallbacks.append(
+                f"Provider call '{label}' timed out after {int(timeout)}s — "
+                "this check was skipped (graceful degradation)."
+            )
+            degraded.append(label)
+            if breaker is not None:
+                breaker.record_failure(label)
+            return default
+        except Exception as ex:
+            last_err = str(ex)[:160] or type(ex).__name__
+            logger.warning(
+                "job %s: provider call '%s' failed (attempt %d/%d): %s",
+                job.id[:8], label, attempt + 1, attempts_allowed, last_err,
+            )
+            if attempt + 1 < attempts_allowed:
+                # jittered exponential backoff: 0.5s, 1s, 2s … (+0-250ms)
+                await asyncio.sleep(0.5 * (2 ** attempt) + random.uniform(0, 0.25))
+                continue
+    fallbacks.append(
+        f"Provider call '{label}' failed ({last_err}) — "
+        "this check was skipped (graceful degradation)."
+    )
+    degraded.append(label)
+    if breaker is not None and breaker.record_failure(label):
         logger.warning(
-            "job %s: provider call '%s' timed out after %ss — degraded",
-            job.id[:8], label, timeout,
+            "job %s: circuit OPEN for provider family '%s' — remaining optional "
+            "calls in this family will be skipped",
+            job.id[:8], ProviderBreaker.family(label),
         )
-        fallbacks.append(
-            f"Provider call '{label}' timed out after {int(timeout)}s — "
-            "this check was skipped (graceful degradation)."
-        )
-        degraded.append(label)
-        return default
-    except Exception as ex:
-        logger.warning("job %s: provider call '%s' failed: %s", job.id[:8], label, ex)
-        fallbacks.append(
-            f"Provider call '{label}' failed ({str(ex)[:160]}) — "
-            "this check was skipped (graceful degradation)."
-        )
-        degraded.append(label)
-        return default
+    return default
 
 
 async def _run_analysis(job: Job, spec: SpecV2) -> None:
@@ -422,6 +575,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # skipped (see _degradable_call). Reported via maskStats["providerDegraded"].
     _provider_degraded: list[str] = []
     _opt_timeout = s.optional_provider_timeout
+    # v1.4.7 — per-job circuit breaker across optional provider families.
+    _breaker = ProviderBreaker(threshold=3)
     _qt = QueryTracker()          # v1.3.0 — evidence trail provider query tracker
     import datetime as _dt
     _analysis_start = _dt.datetime.utcnow().isoformat() + "Z"
@@ -461,7 +616,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         if not spec.userCandidatePoints:
             # Hard block: no points provided → return user-facing error, no engine run.
             logger.warning("job %s: uploadedCandidatesOnly=True but no userCandidatePoints — blocking", job.id[:8])
-            job.result = build_no_points_result(spec)
+            job.result = {
+                **build_no_points_result(spec),
+                "status": "no_viable_site",
+                "analysisId": "analysis_" + job.id[:8],
+                "jobRef": job.id[:8],
+                "reason": "Uploaded-candidates-only mode requires uploaded candidate points; none were provided.",
+                "failedGates": [{"gate": "uploaded_points_present"}],
+                "relaxationSuggestions": ["Upload one or more candidate points, or disable uploaded-candidates-only mode."],
+                "degradationNotes": [],
+                "providerDiagnostics": _provider_diagnostics([]),
+            }
             job.status = "done"; job.progress = 100; job.phase = "done"
             job.message = "Blocked: no uploaded candidate points provided"
             return
@@ -473,6 +638,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             all_reasons = "; ".join(r["reason"] for r in invalid_records[:5])
             job.result = {
                 **build_no_points_result(spec),
+                "status": "no_viable_site",
+                "analysisId": "analysis_" + job.id[:8],
+                "jobRef": job.id[:8],
+                "reason": f"All {len(spec.userCandidatePoints)} uploaded point(s) failed validation.",
+                "failedGates": [{"gate": "uploaded_point_validation"}],
+                "relaxationSuggestions": ["Fix the flagged points (coordinates inside the study region) and rerun."],
+                "degradationNotes": [],
+                "providerDiagnostics": _provider_diagnostics([]),
                 "summary": f"All {len(spec.userCandidatePoints)} uploaded point(s) failed validation: {all_reasons}",
                 "uploadedCandidateCount": len(spec.userCandidatePoints),
                 "excludedUploadedCandidateCount": len(invalid_records),
@@ -549,6 +722,18 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         )
 
         job.result = {
+            # v1.4.7 — three-state contract (uploaded-candidates path)
+            "status": "success" if n_ranked > 0 else "no_viable_site",
+            "analysisId": "analysis_" + job.id[:8],
+            "jobRef": job.id[:8],
+            "candidates": locations,
+            "degradationNotes": list(notes),
+            "providerDiagnostics": _provider_diagnostics(_provider_degraded, notes),
+            **({
+                "reason": "No uploaded candidate point survived validation and exclusion checks.",
+                "failedGates": [{"gate": "uploaded_point_ranking"}],
+                "relaxationSuggestions": ["Upload more candidate points with better spatial coverage."],
+            } if n_ranked == 0 else {}),
             "summary": summary,
             "business_type": spec.businessType,
             "target_location": target_location,
@@ -682,9 +867,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 # v1.4.6 — bounded: a slow/broken Places API degrades this
                 # back-up merge to OSM-only, it must not kill the job.
                 places_pois = await _degradable_call(
-                    fetch_places_pois([ptype], None, overpass_bbox),
+                    lambda pt=ptype: fetch_places_pois([pt], None, overpass_bbox),
                     timeout=_opt_timeout, label=f"places_backup_{layer.id}",
                     job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
+                    retries=1, breaker=_breaker,
                 )
                 places_fetches += 1
                 _qt.record_places(
@@ -706,9 +892,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             # v1.4.6 — bounded: on timeout/failure this layer degrades to the
             # OSM supplement (or no-data, excluded from scoring) with a note.
             places_pois = await _degradable_call(
-                fetch_places_pois(layer.source.types, layer.source.keyword, overpass_bbox),
+                lambda l=layer: fetch_places_pois(l.source.types, l.source.keyword, overpass_bbox),
                 timeout=_opt_timeout, label=f"places_primary_{layer.id}",
                 job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
+                retries=1, breaker=_breaker,
             )
             places_fetches += 1
             _qt.record_places(
@@ -769,7 +956,23 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
     # ── 4. Pass A — Euclidean proxy scoring, all hexes ──────────────
     _update(job, 55, "score_pass_a", f"Scoring {len(hexes)} hexes (Pass A)...")
+    import time as _time_mod
+    _pa_t0 = _time_mod.monotonic()
     composite, scores = scoring.pass_a(spec, hexes, layer_pois)
+    # v1.4.7 — stage log with input/output types+shapes so a data-shape
+    # regression is diagnosable from one log line (job, stage, factor,
+    # provider, types, shape, elapsed).
+    logger.info(
+        "job %s stage=score_pass_a hexes=%d composite=%s%s elapsed_ms=%d factors=[%s]",
+        job.id[:8], len(hexes), type(composite).__name__,
+        list(getattr(composite, "shape", [])),
+        int((_time_mod.monotonic() - _pa_t0) * 1000),
+        ", ".join(
+            f"{lid}(provider={ls.layer.source.provider}, raw={type(ls.raw).__name__}"
+            f"{list(getattr(ls.raw, 'shape', []))}, weight={type(ls.layer.weight).__name__})"
+            for lid, ls in scores.items()
+        ),
+    )
 
     # Data-sufficiency gate: layers whose source returned nothing are excluded
     # from the composite (never scored 0/10 from absence). If a REQUIRED layer is
@@ -1137,6 +1340,15 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 "candidate zones may overlap these land types. Confidence reduced."
             )
 
+    # v1.4.7 — buildability/mask stage log: key→type map of mask_stats (the
+    # mixed-type dict whose list values crashed v1.4.6 evidence aggregation).
+    logger.info(
+        "job %s stage=buildability_done excluded=%d/%d mask_stats={%s} degraded=%s",
+        job.id[:8], int(excluded.sum()), len(hexes),
+        ", ".join(f"{k}:{type(v).__name__}" for k, v in mask_stats.items()),
+        sorted(set(_provider_degraded)),
+    )
+
     # ── 5. Candidate selection ──────────────────────────────────────
     top_k = min(spec.execution.refineTopK, s.refine_top_k)
     candidates = scoring.select_candidates(
@@ -1159,7 +1371,32 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "note": ("No buildable candidate survived the " + wf_band
                      + "water / railway / ghat / heritage / open-space masks."),
         }
+        # v1.4.7 — which hard gates removed candidates (three-state contract).
+        _failed_gates = [
+            {"gate": k, "hexesRemoved": int(v)}
+            for k, v in mask_stats.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+            and k.endswith("Removed") and v > 0
+        ]
+        if spec.waterfront and spec.waterfront.isWaterfront:
+            _failed_gates.append({
+                "gate": "waterfront_corridor",
+                "detail": f"{spec.waterfront.corridorWidthM} m riverfront band",
+            })
         job.result = {
+            # v1.4.7 — three-state result contract
+            "status": "no_viable_site",
+            "analysisId": "analysis_" + job.id[:8],
+            "jobRef": job.id[:8],
+            "reason": ("No buildable candidate survived the " + wf_band
+                       + "water / railway / ghat / heritage / open-space masks."),
+            "failedGates": _failed_gates,
+            "relaxationSuggestions": _viability_suggestions(spec),
+            "degradationNotes": list(fallbacks),
+            "providerDiagnostics": _provider_diagnostics(
+                _provider_degraded, fallbacks, len(_qt.records),
+            ),
+            # legacy shape (frontend wire contract) — unchanged below
             "summary": ("No reliable recommendation: no buildable site remained after the "
                         + wf_band + "water, railway, ghat, heritage and open-space masks were applied."),
             "business_type": spec.businessType,
@@ -1199,9 +1436,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         # slow/failed ORS call degrades that layer to its Euclidean proxy.
         iso_results = await asyncio.gather(*(
             _degradable_call(
-                fetch_isochrones(cand_cells, l.catchment.type, l.catchment.minutes),
+                lambda l=l: fetch_isochrones(cand_cells, l.catchment.type, l.catchment.minutes),
                 timeout=_opt_timeout, label=f"isochrone_{l.id}",
                 job=job, fallbacks=fallbacks, degraded=_provider_degraded, default={},
+                retries=1, breaker=_breaker,
             )
             for l in iso_layers
         ))
@@ -1222,9 +1460,13 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             for ci, cell in zip(candidates, cand_cells):
                 poly = isos.get(cell.h3_id)
                 if poly is not None:
-                    scores[layer.id].refined[ci] = float(
+                    # v1.4.7 contract: refined values enter scoring as
+                    # validated finite floats only.
+                    scores[layer.id].refined[ci] = contracts.to_finite_float(
                         count_pois_in_polygon(poly, layer_pois.get(layer.id, [])),
-                    )
+                        default=0.0, label=f"isochrone_count_{layer.id}",
+                        warnings=fallbacks,
+                    ) or 0.0
                     # keep geometry for map display of the eventual winners
                     iso_polygons[(layer.id, ci)] = poly
 
@@ -1283,10 +1525,20 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                         )
                     continue
                 if reachable is not None:
-                    scores[layer.id].refined[ci] = float(reachable)
-                    refined_any = True
-                if congestion is not None:
-                    traffic_ctx[ci].append(congestion)
+                    # v1.4.7 contract: provider output is scalar-coerced;
+                    # a list/NaN degrades this refinement instead of crashing.
+                    _reach = contracts.to_finite_float(
+                        reachable, default=None,
+                        label=f"traffic_reachable_{layer.id}", warnings=fallbacks,
+                    )
+                    if _reach is not None:
+                        scores[layer.id].refined[ci] = _reach
+                        refined_any = True
+                _cong = contracts.to_finite_float(
+                    congestion, default=None, label=f"traffic_congestion_{layer.id}",
+                )
+                if _cong is not None:
+                    traffic_ctx[ci].append(_cong)
 
     # ── 6b. Network route constraints (real ORS routing, top-K only) ──
     # e.g. "within 500m of Sector V Metro, walk < 7 min, without crossing railway".
@@ -1304,18 +1556,20 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         # passed); required constraints then flow into route_unavailable →
         # recommendation withheld/provisional per the strict-route policy.
         railway_lines = await _degradable_call(
-            fetch_railway_lines(overpass_bbox),
+            lambda: fetch_railway_lines(overpass_bbox),
             timeout=_opt_timeout, label="railway_barrier_geometry",
             job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=[],
+            retries=1, breaker=_breaker,
         ) if need_rail else []
         for rc in spec.routeConstraints:
             # Resolve target points: named place (geocode) or nearest of tag-set
             targets: list[tuple[float, float]] = []
             if rc.targetKeyword:
                 pt = await _degradable_call(
-                    geocode(rc.targetKeyword),
+                    lambda rc=rc: geocode(rc.targetKeyword),
                     timeout=20, label=f"route_target_geocode_{rc.name}",
                     job=job, fallbacks=fallbacks, degraded=_provider_degraded, default=None,
+                    retries=1, breaker=_breaker,
                 )
                 if pt:
                     targets = [pt]
@@ -1323,16 +1577,18 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 pois = fetched.get(f"__route__{rc.name}", [])
                 if not pois:
                     _route_fetch = await _degradable_call(
-                        fetch_all_layers({f"__route__{rc.name}": rc.targetTags}, overpass_bbox),
+                        lambda rc=rc: fetch_all_layers({f"__route__{rc.name}": rc.targetTags}, overpass_bbox),
                         timeout=_opt_timeout, label=f"route_targets_{rc.name}",
                         job=job, fallbacks=fallbacks, degraded=_provider_degraded, default={},
+                        retries=1, breaker=_breaker,
                     )
                     pois = _route_fetch.get(f"__route__{rc.name}", [])
                 targets = [(p["lat"], p["lng"]) for p in pois]
             metrics = await _degradable_call(
-                evaluate_route_constraint(rc, cand_cells, targets, railway_lines),
+                lambda rc=rc: evaluate_route_constraint(rc, cand_cells, targets, railway_lines),
                 timeout=max(_opt_timeout, 90), label=f"route_eval_{rc.name}",
                 job=job, fallbacks=fallbacks, degraded=_provider_degraded, default={},
+                breaker=_breaker,
             )
             any_evaluated = False
             for idx, ci in enumerate(candidates):
@@ -1411,6 +1667,34 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         )
 
     _update(job, 85, "score_pass_b", "Final ranking...")
+
+    # ── v1.4.7: factor scoring contract gate ─────────────────────────────────
+    # Every factor is converted to a validated FactorResult (finite 0-1 floats
+    # only) BEFORE final scoring. A violation degrades that factor by explicit
+    # policy (neutral zero + note) and is logged loudly with job/stage/factor —
+    # raw provider shapes (lists/dicts/NaN) can never reach the composite.
+    import time as _time
+    _t0 = _time.monotonic()
+    _factor_results, _contract_violations = contracts.factor_results_from_layer_scores(
+        spec, scores, candidates, hexes, warnings=fallbacks,
+    )
+    for _v in _contract_violations:
+        logger.error(
+            "job %s stage=factor_contract violation: %s (candidates=%d)",
+            job.id[:8], _v, len(candidates),
+        )
+    if _contract_violations:
+        _provider_degraded.append("factor_contract")
+        fallbacks.append(
+            f"{len(_contract_violations)} factor value(s) violated the numeric scoring "
+            "contract and were degraded to neutral — see factor diagnostics."
+        )
+    logger.info(
+        "job %s stage=factor_contract factors=%d candidates=%d violations=%d elapsed_ms=%d",
+        job.id[:8], len(_factor_results), len(candidates),
+        len(_contract_violations), int((_time.monotonic() - _t0) * 1000),
+    )
+
     eligible = [ci for ci in candidates if passes_required_routes(ci)] or candidates
     finals = sorted(
         eligible,
@@ -1486,22 +1770,38 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         buildability.commercial_viability(hexes, finals, road_lines, all_poi_points, lat0, lng0)
         if bflags.get("commercial_proxy") else {}
     )
+    import math as _math
     wf_width = (spec.waterfront.corridorWidthM if spec.waterfront and spec.waterfront.isWaterfront else None)
     for pos, (ci, loc) in enumerate(zip(finals, locations)):
         rd = float(river_dists[pos]) if pos < len(river_dists) else float("inf")
-        loc["riverDistanceM"] = (round(rd, 1) if rd != float("inf") else None)
-        in_corridor = (wf_width is None) or (rd <= wf_width)
-        loc["inWaterfrontCorridor"] = bool(in_corridor) if wf_width is not None else None
+        # v1.4.7 — rd is INF when no water geometry was available (degraded
+        # fetch). round(inf) raised OverflowError in that case and killed the
+        # whole riverside job; an unmeasurable distance now means the gate is
+        # UNVERIFIABLE for this site (conservative: never RECOMMENDED), not a
+        # fabricated "∞ m outside the band" exclusion.
+        rd_known = _math.isfinite(rd)
+        loc["riverDistanceM"] = (round(rd, 1) if rd_known else None)
+        in_corridor = (wf_width is None) or (rd_known and rd <= wf_width)
+        loc["inWaterfrontCorridor"] = (
+            bool(in_corridor) if (wf_width is not None and rd_known) else None
+        )
         loc["buildabilityStatus"] = ("excluded" if loc.get("excluded")
                                      else build_status.get(ci, "viable" if not bflags.get("commercial_proxy") else "weak"))
         reasons = [e["detail"] for e in loc.get("exclusions", []) if e.get("passed") is False]
-        # Hard deterministic gate: waterfront site outside the band.
-        if wf_width is not None and not in_corridor:
+        # Hard deterministic gate: waterfront site at a KNOWN distance outside the band.
+        if wf_width is not None and rd_known and rd > wf_width:
             loc["excluded"] = True
             reasons.append(f"{round(rd)} m from the water edge — outside the {wf_width} m riverfront band.")
             loc["exclusions"].append({
                 "rule": "waterfront_corridor", "passed": False,
                 "detail": reasons[-1], "evidenceBasis": "constraint-rule",
+            })
+        elif wf_width is not None and not rd_known:
+            loc["exclusions"].append({
+                "rule": "waterfront_corridor", "passed": None,
+                "detail": ("River distance could not be measured (water geometry "
+                           "unavailable) — riverfront gate unverified for this site."),
+                "evidenceBasis": "insufficient-data",
             })
         loc["exclusionReasons"] = reasons
         loc["hardConstraintPass"] = bool(
@@ -1724,7 +2024,66 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         deterministic_critic=_det_critic,
     )
 
+    # ── v1.4.7: three-state result contract ──────────────────────────────────
+    # "no_viable_site" when the whole ranking was withheld for lack of viable
+    # land; otherwise "success" (possibly degraded — see degradationNotes).
+    _result_state = (
+        "no_viable_site" if analysis_status == "insufficient_viable_land" else "success"
+    )
+    _factor_scores_public = [
+        {
+            "factorId": fr.factor_id,
+            "confidence": fr.confidence,
+            "degraded": fr.degraded,
+            "degradationReason": fr.degradation_reason,
+            "values": [
+                {
+                    "hexId": v.hex_id,
+                    "rawValue": v.raw_value,
+                    "normalizedScore": v.normalized_score,
+                    "evidenceCount": v.evidence_count,
+                }
+                for v in fr.values
+            ],
+        }
+        for fr in _factor_results
+    ]
+
     job.result = {
+        # v1.4.7 — three-state contract fields (additive; legacy keys below
+        # remain the frontend wire contract).
+        "status": _result_state,
+        "analysisId": "analysis_" + job.id[:8],
+        "jobRef": job.id[:8],
+        "candidates": locations,
+        # hexGrid/catchments stay top-level (legacy keys) to avoid double
+        # serialization of up to 3000 cells; mapLayers indexes them.
+        "mapLayers": {
+            "hexGridKey": "hexGrid",
+            "catchmentsKey": "catchments",
+            "studyAreaBoundaryKey": "studyAreaBoundary",
+            "hexGridCellCount": len(hex_grid),
+            "catchmentCount": len(catchments),
+        },
+        "factorScores": _factor_scores_public,
+        "constraintValidation": _policy.to_dict(),
+        "degradationNotes": list(fallbacks),
+        "providerDiagnostics": _provider_diagnostics(
+            _provider_degraded, fallbacks, len(_qt.records),
+        ),
+        **({
+            "reason": data_sufficiency.get(
+                "note", "Recommendation withheld — insufficient viable land.",
+            ),
+            "failedGates": [
+                {"gate": k, "hexesRemoved": int(v)}
+                for k, v in mask_stats.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+                and k.endswith("Removed") and v > 0
+            ],
+            "relaxationSuggestions": suggestions,
+        } if _result_state == "no_viable_site" else {}),
+        # ── legacy shape (wire contract) ─────────────────────────────────────
         "summary": summary,
         "business_type": spec.businessType,
         "target_location": target_location,

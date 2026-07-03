@@ -10,8 +10,11 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from ..config import APP_VERSION, ENGINE_VERSION
 from ..models.evidence import (
@@ -264,8 +267,11 @@ def build_exclusion_ledger(
         "maidanRemoved":             ("buildability_mask", "Open ground/maidan 75m buffer"),
     }
 
+    from .contracts import to_finite_float
+
     for stat_key, (exc_type, reason_label) in _MASK_TYPE_MAP.items():
-        n = mask_stats.get(stat_key, 0)
+        n = to_finite_float(mask_stats.get(stat_key, 0), default=0.0, label=stat_key) or 0.0
+        n = int(n)
         if n > 0:
             exclusions.append(ExclusionEvidence(
                 targetType="h3_cell",
@@ -277,7 +283,9 @@ def build_exclusion_ledger(
             ))
 
     # Water centroid mask (tracked in notes but not in mask_stats directly)
-    water_centroid = mask_stats.get("waterCentroidRemoved", 0)
+    water_centroid = int(to_finite_float(
+        mask_stats.get("waterCentroidRemoved", 0), default=0.0, label="waterCentroidRemoved",
+    ) or 0.0)
     if water_centroid > 0:
         exclusions.append(ExclusionEvidence(
             targetType="h3_cell",
@@ -322,10 +330,13 @@ def build_scoring_evidence(
 ) -> ScoringEvidence:
     """Summarize the scoring formula applied."""
     from ..engine.scoring import present_weight
+    from .contracts import to_finite_float
     total_w = round(sum(l.weight for l in spec.layers), 4)
     present_w = round(present_weight(scores), 4)
-    min_score = float(mask_stats.get("minViableScore", 4.5))
-    viable = int(mask_stats.get("viableCandidates", 0))
+    min_score = to_finite_float(mask_stats.get("minViableScore", 4.5),
+                                default=4.5, label="minViableScore") or 4.5
+    viable = int(to_finite_float(mask_stats.get("viableCandidates", 0),
+                                 default=0.0, label="viableCandidates") or 0.0)
 
     norm_details = [
         {
@@ -418,8 +429,19 @@ def assemble_evidence_trail(
     if created_at is None:
         created_at = datetime.datetime.utcnow().isoformat() + "Z"
 
-    h3_count_after = int((~_build_excluded_mask(mask_stats, h3_count_before)).sum()) \
+    # Stage-entry log with input types/shapes — mask_stats is the mixed-type
+    # dict that crashed v1.4.6; log its shape so a future contract breach is
+    # diagnosable from one Cloud Run log line.
+    logger.info(
+        "job %s stage=evidence_trail candidates=%d hexes=%d mask_stats={%s}",
+        job_id[:8], len(candidate_indices), len(hexes),
+        ", ".join(f"{k}:{type(v).__name__}" for k, v in mask_stats.items()),
+    )
+
+    h3_count_after = (
+        max(0, h3_count_before - _removed_hex_count(mask_stats, job_id=job_id))
         if h3_count_before > 0 else len(hexes)
+    )
 
     # Study area
     sa_label = ""
@@ -595,16 +617,43 @@ def assemble_evidence_trail(
     )
 
 
-def _build_excluded_mask(mask_stats: dict[str, int], h3_count_before: int):
-    """Approximate excluded mask size from mask_stats for h3_count_after calculation."""
+# mask_stats keys that are HEX-REMOVAL COUNTERS. mask_stats is a mixed-type
+# diagnostic dict — it also carries lists (buildabilityDegraded,
+# providerDegraded), floats (minViableScore) and non-removal ints
+# (metroExclusionStationCount, viableCandidates). Summing "everything except a
+# blocklist" was the v1.4.6 production crash (`+: 'int' and 'list'` — every
+# cafe/riverside run with a degraded provider died here) AND silently
+# inflated the removed-hex count with station counts. Only these
+# explicitly-whitelisted counters may enter the arithmetic.
+_HEX_REMOVAL_COUNT_KEYS = (
+    "corridorRemoved",
+    "waterCentroidRemoved",
+    "waterOverlapRemoved",
+    "railwayRemoved",
+    "ghatRemoved",
+    "protectedOpenSpaceRemoved",
+    "maidanRemoved",
+)
+
+
+def _removed_hex_count(mask_stats: dict, *, job_id: str = "") -> int:
+    """Total hexes removed by the hard masks, from whitelisted counters only.
+    Non-numeric values behind a whitelisted key are skipped with a warning
+    (contract: lists/dicts never reach numeric aggregation)."""
+    from .contracts import safe_int_sum
+    warnings: list[str] = []
+    total = safe_int_sum(mask_stats, _HEX_REMOVAL_COUNT_KEYS,
+                         label="mask_stats", warnings=warnings)
+    for w in warnings:
+        logger.warning("evidence trail job=%s stage=exclusion_aggregation %s", job_id[:8], w)
+    return total
+
+
+def _build_excluded_mask(mask_stats: dict, h3_count_before: int):
+    """Approximate excluded mask from mask_stats for h3_count_after calculation.
+    Kept for callers/tests that want the boolean-array shape."""
     import numpy as np
-    excluded_count = sum(
-        v for k, v in mask_stats.items()
-        if k not in ("minViableScore", "viableCandidates", "maidanRemoved")
-    )
-    excluded_count += mask_stats.get("maidanRemoved", 0)
-    # Return a boolean array proxy — just use the count for h3_count_after
-    n_after = max(0, h3_count_before - excluded_count)
+    n_after = max(0, h3_count_before - _removed_hex_count(mask_stats))
     fake = np.ones(h3_count_before, dtype=bool)
     fake[:n_after] = False
     return fake
