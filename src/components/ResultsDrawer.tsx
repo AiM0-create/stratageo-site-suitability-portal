@@ -184,16 +184,22 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const buildabilityDegraded: string[] = ((result as any).maskStats?.buildabilityDegraded as string[]) || [];
   const providerDegraded: string[] = ((result as any).maskStats?.providerDegraded as string[]) || [];
   const normalizationWarnings: string[] = (result as any).normalizationWarnings || [];
+  // v1.4.9 — PlannerLite completeness payload (normalizer-guaranteed shape).
+  const completeness = (result as any).analysisCompleteness as
+    import('../types').AnalysisCompleteness | undefined;
   // v1.4.6 — gate the green "Recommended" badge: any unverified critical
   // constraint, non-verified enforcement level, or degraded provider check
   // demotes RECOMMENDED to "Candidate Zone" (see getRecommendationLabel).
+  // v1.4.9 — a provisional completeness verdict (unsupported constraints or a
+  // degraded RELEVANT stage) also demotes. Skipped-irrelevant stages do NOT.
   const demoteRecommended =
     unverifiedConstraints.length > 0
     || (result as any).constraintPolicy?.hasUnverifiableConstraints === true
     || buildabilityDegraded.length > 0
     || providerDegraded.length > 0
     || constraintEnforcementLevel === 'provisional'
-    || constraintEnforcementLevel === 'failed';
+    || constraintEnforcementLevel === 'failed'
+    || completeness?.provisional === true;
   // v1.4.0 — data coverage
   const dataCoverage: any = (result as any).dataCoverage || {};
   const coverageRatio: number = dataCoverage.coverageRatio ?? 1.0;
@@ -324,6 +330,41 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#92400e', marginBottom: 8 }}>
             <b>Degraded checks</b> (provider slow/unavailable — skipped, confidence reduced):{' '}
             {[...buildabilityDegraded, ...providerDegraded].join(', ')}
+          </div>
+        )}
+
+        {/* v1.4.9 — PlannerLite completeness: skipped-irrelevant stages are a
+            resource decision (neutral styling), unsupported constraints are
+            "not scored" (amber), never presented as errors. */}
+        {completeness && (
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#475569', marginBottom: 8 }}>
+            <b>Analysis scope</b>
+            {completeness.provisional && (
+              <span style={{ marginLeft: 6, color: '#92400e', fontWeight: 700 }}>
+                — Provisional Candidate Zones (confidence: {completeness.confidenceLevel})
+              </span>
+            )}
+            {completeness.skippedStages.length > 0 && (
+              <div style={{ marginTop: 4 }}>
+                ⚡ <b>Skipped (not relevant — saved time):</b>
+                <ul style={{ margin: '2px 0 0', paddingLeft: 16 }}>
+                  {completeness.skippedStages.slice(0, 6).map((s, i) => <li key={i}>{s.reason}</li>)}
+                </ul>
+              </div>
+            )}
+            {completeness.unsupportedConstraints.length > 0 && (
+              <div style={{ marginTop: 4, color: '#92400e' }}>
+                ⚠ <b>Not scored (cannot be verified from data):</b>
+                <ul style={{ margin: '2px 0 0', paddingLeft: 16 }}>
+                  {completeness.unsupportedConstraints.map((c, i) => <li key={i}>{c.displayLabel}</li>)}
+                </ul>
+              </div>
+            )}
+            {completeness.degradedStages.length > 0 && (
+              <div style={{ marginTop: 4, color: '#92400e' }}>
+                ⏱ <b>Degraded this run:</b> {completeness.degradedStages.join(', ')}
+              </div>
+            )}
           </div>
         )}
 

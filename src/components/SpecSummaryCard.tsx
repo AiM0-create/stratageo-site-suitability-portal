@@ -242,6 +242,38 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
         </Collapsible>
       )}
 
+      {/* ── v1.4.9 — PlannerLite scope: verified / skipped / cannot verify ── */}
+      {spec.plannerPreview && !blocked && (
+        <Collapsible title="Analysis scope" defaultOpen>
+          {(spec.plannerPreview.willVerify?.length ?? 0) > 0 && (
+            <>
+              <div className="spec-subhead">Will be checked</div>
+              <ul className="spec-list">
+                {spec.plannerPreview.willVerify!.map((v, i) => <li key={i}>✓ {v}</li>)}
+              </ul>
+            </>
+          )}
+          {(spec.plannerPreview.skipped?.length ?? 0) > 0 && (
+            <>
+              <div className="spec-subhead">Skipped for this analysis (saves time)</div>
+              <ul className="spec-list">
+                {spec.plannerPreview.skipped!.map((s, i) => (
+                  <li key={i}><span className="spec-list-sub">⚡ {s.reason}</span></li>
+                ))}
+              </ul>
+            </>
+          )}
+          {(spec.plannerPreview.cannotVerify?.length ?? 0) > 0 && (
+            <>
+              <div className="spec-subhead">Cannot be verified from data</div>
+              <ul className="spec-list">
+                {spec.plannerPreview.cannotVerify!.map((c, i) => <li key={i}>⚠ {c}</li>)}
+              </ul>
+            </>
+          )}
+        </Collapsible>
+      )}
+
       {/* ── Weak proxy banner (orange) ── */}
       {weakProxies.length > 0 && (
         <div className="spec-card-weak-banner">

@@ -11,6 +11,12 @@ v1.4.1-1.4.7: execution-flow reliability, provider degradation, results-crash
   APP_VERSION bump; folded into this bump.
 v1.4.8: typed Google provider layer (Places API New, Places Aggregate,
   Routes, Place Details) with legacy Places / OSM / ORS retained as fallback.
+v1.4.9: PlannerLite — a minimal per-prompt relevance gate (engine/planner_lite.py)
+  that skips irrelevant water/buildability/routing/Places-refinement stages
+  instead of running the same generic checklist for every prompt. Adds
+  analysisCompleteness to the result payload and a plannerPreview on the spec
+  card. No new providers, no engine rewrite — a YAGNI resource-optimization
+  release on top of the v1.4.8 provider layer.
 """
 from functools import lru_cache
 from typing import Literal
@@ -18,17 +24,16 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.4.8"
+APP_VERSION     = "1.4.9"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00053"
-# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.4.8 — the
+ENGINE_VERSION  = "stratageo-engine-00054"
+# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.4.9 — the
 # SpecV2 wire schema and the EvidenceTrail schema are structurally unchanged;
-# only internal engine values (LayerScores.refined_source) and additive
-# result-payload keys (factorScores, providerDiagnostics.googleCalls,
-# locations[].poiEvidence) were added outside these versioned contracts.
+# analysisCompleteness/plannerPreview are additive result/spec-payload keys
+# outside these versioned contracts, same reasoning as the v1.4.8 bump.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Result Contract Stability & Google Provider Intelligence"
+RELEASE_NAME    = "PlannerLite Smart Resource Gating"
 
 
 class Settings(BaseSettings):

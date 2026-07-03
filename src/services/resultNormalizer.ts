@@ -194,6 +194,36 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
     out.retryable = src.retryable !== false;
   }
 
+  // ── v1.4.9: analysisCompleteness (PlannerLite) — arrays/booleans guaranteed
+  // so ResultsDrawer can render it unconditionally without crashing.
+  if (isObj(src.analysisCompleteness)) {
+    const ac = src.analysisCompleteness;
+    out.analysisCompleteness = {
+      coreScoringComplete: ac.coreScoringComplete !== false,
+      buildabilityVerified: ac.buildabilityVerified === true,
+      waterVerified: ac.waterVerified === true,
+      routeVerified: ac.routeVerified === true,
+      placesVerified: ac.placesVerified === true,
+      provisional: ac.provisional === true,
+      confidenceLevel: asStr(ac.confidenceLevel, 'M'),
+      skippedStages: asArr(ac.skippedStages).filter(isObj).map((s: any) => ({
+        stage: asStr(s.stage, 'stage'),
+        reason: asStr(s.reason),
+        savedCost: asStr(s.savedCost),
+      })),
+      degradedStages: asArr(ac.degradedStages).filter(d => typeof d === 'string'),
+      unsupportedConstraints: asArr(ac.unsupportedConstraints).filter(isObj).map((c: any) => ({
+        constraint: asStr(c.constraint, 'constraint'),
+        reason: asStr(c.reason),
+        shouldScore: c.shouldScore === true,
+        displayLabel: asStr(c.displayLabel, asStr(c.constraint, 'constraint')),
+      })),
+    };
+  } else if (src.analysisCompleteness !== undefined) {
+    warnings.push('analysisCompleteness was malformed — hidden.');
+    out.analysisCompleteness = undefined;
+  }
+
   out.summary = asStr(src.summary, 'Analysis completed, but the summary could not be read.');
   out.business_type = asStr(src.business_type, '—');
   out.target_location = asStr(src.target_location, '—');

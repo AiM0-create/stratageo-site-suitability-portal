@@ -4,6 +4,30 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.4.9] — 2026-07-03 — PlannerLite Smart Resource Gating
+
+**Tests:** 513 backend passed · 44 frontend passed · **Readiness:** deployed to production
+
+A YAGNI resource-optimization release. The v1.4.8 audit (`docs/STRATAGEO_PORTAL_LATEST_PROJECT_AUDIT.md`) found the pipeline ran the same generic checklist for nearly every prompt — buildability (railway/ghat/heritage/maidan, up to 5 sequential Overpass calls) fired for almost any commercial business type via an overly broad keyword regex, and water geometry was fetched even for briefs with zero water relevance. This release adds a minimal relevance gate in front of the existing pipeline — no engine rewrite, no new providers, no new APIs.
+
+### Added
+- **`PlannerLite`** (`backend-py/app/engine/planner_lite.py`) — `create_analysis_plan(spec)` returns an `AnalysisPlan` (required/optional/skipped stages, unsupported constraints, per-factor support labels, provider budgets) from deterministic rules over the already-validated spec text and fields. Deliberately not the full `AnalysisPlanner` architecture the audit sketched — a single pure function, no new classes beyond simple dataclasses.
+- **Relevance rules**: water/corridor checks run only on a waterfront flag, a water-tagged corridor/exclusion, or water/river/lake/coastal language in the prompt; buildability runs only when water-relevant or the prompt signals land development (parcel/plot/construction/resort/warehouse/industrial/…) or explicit railway avoidance; routing runs only on an explicit route constraint or detected strict drive/walk-time phrasing; Places Aggregate/Details run only when Google-Places-sourced factors exist.
+- **`analysisCompleteness`** in the result payload: `coreScoringComplete`, `buildabilityVerified`, `waterVerified`, `routeVerified`, `placesVerified`, `provisional`, `confidenceLevel` (H/M/L), `skippedStages`, `degradedStages`, `unsupportedConstraints`. Skipping an irrelevant stage never lowers confidence; a degraded *relevant* stage does and marks the result provisional.
+- **`plannerPreview`** embedded in the spec at chat time (`services/llm.py`) — surfaces "what will be verified / what will be skipped / what cannot be verified" on the `SpecSummaryCard` **before** the user clicks Start analysis, in a new "Analysis scope" section.
+- **`ResultsDrawer`** renders `analysisCompleteness`: skipped stages shown as resource-saving decisions (not errors), degraded stages as warnings, unsupported constraints as "not scored"; a provisional completeness verdict now also suppresses the green RECOMMENDED badge.
+- **11 new backend tests** (`tests/test_v149_planner_lite.py`) covering plan rules for all four canonical prompts, including provider-call spy assertions proving zero Overpass geometry/named calls fire for cafe/supermarket/dark-kitchen when buildability/water are correctly skipped.
+
+### Changed
+- `config.py`: `APP_VERSION` → `1.4.9`; `ENGINE_VERSION` fallback → `stratageo-engine-00054`; `RELEASE_NAME` → "PlannerLite Smart Resource Gating".
+- `package.json` / `package-lock.json`: version → `1.4.9`.
+- Candidate `buildabilityStatus` now reports `"unchecked"` (rather than a fabricated "viable"/"weak" verdict) when the frontage check was planner-skipped.
+
+### Not changed
+- No new provider APIs, no background jobs, no confidence-weighted scoring formula, no new database/queue/dashboard — kept deliberately out of scope per the audit's phased roadmap. Result contract remains exactly `SUCCESS` / `NO_VIABLE_SITE` / `FAILED`.
+
+---
+
 ## [1.4.8] — 2026-07-03 — Result Contract Stability & Google Provider Intelligence
 
 **Tests:** 502 backend passed · 41 frontend passed · **Readiness:** deployed to production

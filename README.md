@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.4.8 — Result Contract Stability & Google Provider Intelligence**
+**Current version: v1.4.9 — PlannerLite Smart Resource Gating**
 
 ---
 
@@ -20,6 +20,18 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.4.9 Highlights
+
+- **PlannerLite** (`engine/planner_lite.py`) — a minimal, deterministic per-prompt relevance gate. Before the engine runs, it decides which expensive stages actually matter for *this* prompt instead of running the same generic checklist every time.
+- **Irrelevant buildability/water/maidan/heritage/railway checks are skipped** for prompts with no waterfront, land-development, or railway-avoidance signal (a plain cafe or supermarket brief no longer pays for the same checks a riverside restaurant needs).
+- **Routing only runs when it's actually relevant** — an explicit route constraint or detected drive/walk-time phrasing in the prompt; skipped for generic cafe/retail briefs that never asked for it.
+- **Unsupported constraints** (rent, floor area/footprint, zoning, parcel availability, ownership) are labeled **"unverified — not scored"** up front, before the analysis even runs, not just after.
+- **`analysisCompleteness`** added to the result payload — what was verified, what was skipped (a resource decision, never a failure), what degraded, and the resulting confidence level (H/M/L) and provisional status.
+- **Result contract unchanged**: every analysis still ends in exactly one of `SUCCESS` / `NO_VIABLE_SITE` / `FAILED` — skipped-because-irrelevant stages never turn into a failure; a degraded *relevant* stage marks the result provisional instead.
+- **No new APIs, no engine rewrite** — this is a YAGNI resource-optimization release on top of the v1.4.8 provider layer, not a new architecture.
 
 ---
 

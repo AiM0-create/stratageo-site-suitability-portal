@@ -1,0 +1,374 @@
+"""PlannerLite — minimal per-prompt relevance gate (v1.4.9, YAGNI).
+
+The audit (docs/STRATAGEO_PORTAL_LATEST_PROJECT_AUDIT.md §8-§10) showed the
+pipeline runs the same generic checklist for nearly every prompt: buildability
+(railway/ghat/heritage/maidan — up to 5 sequential Overpass calls) fires for
+any business matching a broad commercial regex, and the water-geometry fetch
+runs for briefs with no water relevance at all.
+
+This module is deliberately NOT the full AnalysisPlanner from the audit's §11.
+It is a single pure function over the already-validated SpecV2 that answers
+one question per expensive stage: "is this stage relevant to THIS prompt?"
+Skipped-because-irrelevant is recorded honestly (never presented as a failure)
+and unsupported constraints (rent/footprint/zoning/parcel/ownership) are
+labeled "unverified — not scored" up front.
+
+Rules are deterministic (regex + spec fields). No providers are called here.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from ..models.spec import _is_water_tag
+from .constraint_policy import (
+    _FOOTPRINT_RE,
+    _OWNERSHIP_RE,
+    _PARCEL_RE,
+    _RENT_RE,
+    _ZONING_RE,
+)
+
+# ── Stage keys (must match the gates in services/jobs.py) ─────────────────────
+CORE_STAGES = (
+    "study_area", "grid", "poi_fetch", "pass_a_scoring",
+    "candidate_selection", "results_payload",
+)
+GATED_STAGES = (
+    "water_geometry",        # Overpass area fetch + water/overlap masks
+    "buildability",          # railway/ghat/heritage/maidan hard masks
+    "frontage_proxy",        # road-frontage soft viability check
+    "routing",               # route-constraint validation (Routes/ORS)
+    "isochrone_refinement",  # ORS Pass-B refinement
+    "places_aggregate",      # Google Places Aggregate count refinement
+    "place_details",         # Place Details evidence enrichment
+    "traffic_catchment",     # traffic-aware drive catchment
+)
+
+# ── Relevance regexes (deterministic, prompt/spec text) ───────────────────────
+_WATER_RE = re.compile(
+    r"\briver(?:side|front|bank)?\b|\bwater(?:front|body|side)?\b|\blake(?:front|side)?\b"
+    r"|\bcoast(?:al|line)?\b|\bsea\s?(?:front|side|facing)\b|\bbeach\b|\bghat\b"
+    r"|\bhooghly\b|\bganga\b|\bganges\b|\bflood\b|\bwetland\b|\bcreek\b|\bcanal.?front\b",
+    re.I,
+)
+_LAND_DEV_RE = re.compile(
+    r"\bparcel\b|\bplot\b|\bvacant\s+land\b|\bbuildable\b|\bconstruction\b"
+    r"|\bland\s+(?:development|acquisition|bank|use)\b|\bgreenfield\b|\bbrownfield\b"
+    r"|\bresort\b|\btownship\b|\bcampus\b|\bwarehouse\b|\bfactory\b|\bindustrial\b"
+    r"|\b(?:site|parcel|land)\s+feasibility\b|\bdevelop(?:ment|able)\b|\bacreage\b|\bacres?\b",
+    re.I,
+)
+_AVOID_RAIL_RE = re.compile(
+    r"avoid\s+railway|railway\s+land|away\s+from\s+(the\s+)?railway|not\s+(on|near)\s+railway"
+    r"|no\s+railway|exclude\s+railway",
+    re.I,
+)
+_DARK_KITCHEN_RE = re.compile(r"\b(dark|cloud|ghost)\s*.?\s*kitchen\b|\bdelivery.?only\b", re.I)
+
+
+@dataclass
+class SkippedStage:
+    stage: str
+    reason: str
+    saved_cost: str  # "low" | "medium" | "high"
+
+    def to_dict(self) -> dict:
+        return {"stage": self.stage, "reason": self.reason, "savedCost": self.saved_cost}
+
+
+@dataclass
+class UnsupportedConstraint:
+    constraint: str
+    reason: str
+    display_label: str
+    should_score: bool = False   # always False — these are never scored
+
+    def to_dict(self) -> dict:
+        return {
+            "constraint": self.constraint,
+            "reason": self.reason,
+            "shouldScore": self.should_score,
+            "displayLabel": self.display_label,
+        }
+
+
+@dataclass
+class AnalysisPlan:
+    required_stages: list[str] = field(default_factory=list)
+    optional_stages: list[str] = field(default_factory=list)
+    skipped_stages: list[SkippedStage] = field(default_factory=list)
+    unsupported_constraints: list[UnsupportedConstraint] = field(default_factory=list)
+    factor_support: dict = field(default_factory=dict)
+    max_runtime_target_seconds: int = 90
+    provider_budgets: dict = field(default_factory=dict)
+    provisional_reasons: list[str] = field(default_factory=list)
+
+    def should_run(self, stage: str) -> bool:
+        return stage in self.required_stages or stage in self.optional_stages
+
+    def is_skipped(self, stage: str) -> bool:
+        return any(sk.stage == stage for sk in self.skipped_stages)
+
+    def skip_reason(self, stage: str) -> str | None:
+        for sk in self.skipped_stages:
+            if sk.stage == stage:
+                return sk.reason
+        return None
+
+    def to_dict(self) -> dict:
+        return {
+            "requiredStages": list(self.required_stages),
+            "optionalStages": list(self.optional_stages),
+            "skippedStages": [sk.to_dict() for sk in self.skipped_stages],
+            "unsupportedConstraints": [uc.to_dict() for uc in self.unsupported_constraints],
+            "factorSupport": self.factor_support,
+            "maxRuntimeTargetSeconds": self.max_runtime_target_seconds,
+            "providerBudgets": self.provider_budgets,
+            "provisionalReasons": list(self.provisional_reasons),
+        }
+
+    def to_preview_dict(self) -> dict:
+        """Compact shape for the SpecSummaryCard 'Analysis scope' section,
+        shown BEFORE the user clicks Start analysis."""
+        verify_labels = {
+            "water_geometry": "Water exclusion (real OSM geometry)",
+            "buildability": "Buildability masks (railway / ghat / heritage / open-space)",
+            "frontage_proxy": "Road-frontage viability check",
+            "routing": "Drive/walk-time (verified by routing, never straight-line)",
+            "isochrone_refinement": "Catchment refinement (isochrones)",
+            "places_aggregate": "POI counts (Google Places Aggregate)",
+            "place_details": "Evidence POIs (ratings / reviews)",
+            "traffic_catchment": "Traffic-aware drive catchment",
+        }
+        will_verify = ["Core suitability scoring (all framework factors)"]
+        will_verify += [
+            verify_labels[st] for st in GATED_STAGES
+            if self.should_run(st) and st in verify_labels
+        ]
+        return {
+            "willVerify": will_verify,
+            "skipped": [{"stage": sk.stage, "reason": sk.reason} for sk in self.skipped_stages],
+            "cannotVerify": [uc.display_label for uc in self.unsupported_constraints],
+            "notes": list(self.provisional_reasons),
+        }
+
+
+def _spec_text(spec) -> str:
+    """All prompt-derived text worth scanning for relevance signals."""
+    parts = [
+        getattr(spec, "objective", "") or "",
+        getattr(spec, "businessType", "") or "",
+        getattr(spec, "normalizedPrompt", "") or "",
+    ]
+    ri = getattr(spec, "rawIntent", None)
+    if ri is not None:
+        parts.append(getattr(ri, "rawPrompt", "") or "")
+        parts.extend(getattr(ri, "hardConstraintPhrases", None) or [])
+    for c in getattr(spec, "constraints", None) or []:
+        parts.append(getattr(c, "constraint", "") or "")
+    return " ".join(parts)
+
+
+def _water_relevant(spec, text: str) -> tuple[bool, str]:
+    wf = getattr(spec, "waterfront", None)
+    if wf is not None and getattr(wf, "isWaterfront", False):
+        return True, "waterfront brief"
+    for c in getattr(spec, "corridors", None) or []:
+        if any(_is_water_tag(t) for t in c.source.tags):
+            return True, f"water corridor '{c.name}'"
+    for e in getattr(spec, "exclusions", None) or []:
+        if any(_is_water_tag(t) for t in e.source.tags):
+            return True, f"water exclusion '{e.name}'"
+    m = _WATER_RE.search(text)
+    if m:
+        return True, f"prompt mentions '{m.group(0)}'"
+    return False, "no waterfront/river/lake/coastal signal in the prompt or spec"
+
+
+def _buildability_relevant(spec, text: str, water: bool) -> tuple[bool, str]:
+    if water:
+        return True, "waterfront brief — ghat/heritage/no-build land is a real risk"
+    m = _LAND_DEV_RE.search(text)
+    if m:
+        return True, f"prompt mentions '{m.group(0)}' — land/parcel development signal"
+    if _AVOID_RAIL_RE.search(text):
+        return True, "user explicitly asked to avoid railway land"
+    return False, (
+        "no waterfront / land-development / railway-avoidance signal — "
+        "parcel-level validation remains an offline field task"
+    )
+
+
+def _routing_relevant(spec) -> tuple[bool, str]:
+    if getattr(spec, "routeConstraints", None):
+        return True, f"{len(spec.routeConstraints)} route constraint(s) in the spec"
+    ri = getattr(spec, "rawIntent", None)
+    if ri is not None and getattr(ri, "hasStrictRouteConstraint", False):
+        return True, "strict drive/walk-time phrasing detected in the prompt"
+    return False, "no drive/walk-time or delivery-radius constraint stated"
+
+
+_UNSUPPORTED_RULES = [
+    (_RENT_RE, "rent_or_lease_price",
+     "Rent/lease price has no spatial data source — requires broker or field survey.",
+     "Rent / lease price: unverified — not scored."),
+    (_FOOTPRINT_RE, "floor_area_footprint",
+     "Floor area / footprint cannot be verified at H3 screening resolution.",
+     "Floor area / footprint: unverified — not scored."),
+    (_ZONING_RE, "zoning_licensing",
+     "Zoning / licensing requires authority confirmation.",
+     "Zoning / licensing: unverified — not scored."),
+    (_PARCEL_RE, "parcel_availability",
+     "Actual parcel/space availability requires property-market data.",
+     "Parcel / space availability: unverified — not scored."),
+    (_OWNERSHIP_RE, "ownership_title",
+     "Ownership / title requires land-registry data.",
+     "Ownership / title: unverified — not scored."),
+]
+
+
+def create_analysis_plan(spec, raw_intent=None, study_area_hint=None) -> AnalysisPlan:
+    """Build the minimal per-prompt stage plan from the validated SpecV2.
+
+    `raw_intent` / `study_area_hint` are accepted for future use but the
+    current rules only need the spec (which already embeds rawIntent).
+    Never raises — planning is deterministic over validated data.
+    """
+    text = _spec_text(spec)
+    plan = AnalysisPlan(required_stages=list(CORE_STAGES))
+
+    layers = getattr(spec, "layers", None) or []
+    has_google_layers = any(l.source.provider == "google_places" for l in layers)
+    iso_layers = [l for l in layers if l.catchment.type in ("walk", "drive")]
+    traffic_layers = [
+        l for l in layers
+        if l.catchment.type == "drive" and getattr(l.catchment, "trafficAware", False)
+    ]
+    is_dark_kitchen = bool(_DARK_KITCHEN_RE.search(text))
+
+    # A. Water / corridor
+    water, water_why = _water_relevant(spec, text)
+    if water:
+        plan.required_stages.append("water_geometry")
+    else:
+        plan.skipped_stages.append(SkippedStage(
+            stage="water_geometry",
+            reason=f"Water mask skipped — {water_why}.",
+            saved_cost="high",
+        ))
+
+    # B. Buildability + frontage
+    buildability, build_why = _buildability_relevant(spec, text, water)
+    if buildability:
+        plan.optional_stages.append("buildability")
+        if is_dark_kitchen:
+            plan.skipped_stages.append(SkippedStage(
+                stage="frontage_proxy",
+                reason="Frontage check skipped — delivery-only kitchen has no walk-in frontage requirement.",
+                saved_cost="low",
+            ))
+        else:
+            plan.optional_stages.append("frontage_proxy")
+    else:
+        plan.skipped_stages.append(SkippedStage(
+            stage="buildability",
+            reason=f"Buildability masks skipped — {build_why}.",
+            saved_cost="high",
+        ))
+        plan.skipped_stages.append(SkippedStage(
+            stage="frontage_proxy",
+            reason="Frontage check skipped with buildability — no land-development signal.",
+            saved_cost="low",
+        ))
+
+    # C. Routing
+    routing, route_why = _routing_relevant(spec)
+    if routing:
+        plan.required_stages.append("routing")
+    else:
+        plan.skipped_stages.append(SkippedStage(
+            stage="routing",
+            reason=f"Routing skipped — {route_why}.",
+            saved_cost="medium",
+        ))
+
+    # Isochrone refinement / traffic — only when matching layers exist
+    if iso_layers:
+        plan.optional_stages.append("isochrone_refinement")
+    else:
+        plan.skipped_stages.append(SkippedStage(
+            stage="isochrone_refinement",
+            reason="No walk/drive catchment factors in the framework.",
+            saved_cost="low",
+        ))
+    if traffic_layers:
+        plan.optional_stages.append("traffic_catchment")
+    else:
+        plan.skipped_stages.append(SkippedStage(
+            stage="traffic_catchment",
+            reason="No traffic-aware drive factors in the framework.",
+            saved_cost="low",
+        ))
+
+    # D. Places Aggregate / Details — only for POI-count/evidence factors
+    if has_google_layers:
+        plan.optional_stages.append("places_aggregate")
+        plan.optional_stages.append("place_details")
+    else:
+        plan.skipped_stages.append(SkippedStage(
+            stage="places_aggregate",
+            reason="No Google-Places-sourced factors — POI count refinement not needed.",
+            saved_cost="medium",
+        ))
+        plan.skipped_stages.append(SkippedStage(
+            stage="place_details",
+            reason="No Google-Places-sourced factors — no evidence POIs to enrich.",
+            saved_cost="low",
+        ))
+
+    # E. Unsupported constraints — visible, never scored, never provider-checked
+    for rx, key, reason, label in _UNSUPPORTED_RULES:
+        if rx.search(text):
+            plan.unsupported_constraints.append(UnsupportedConstraint(
+                constraint=key, reason=reason, display_label=label,
+            ))
+            plan.provisional_reasons.append(label)
+    if not buildability:
+        plan.provisional_reasons.append(
+            "Buildability not checked for this brief — parcel-level validation "
+            "remains an offline step before any leasing decision."
+        )
+
+    # Factor support labels (static registry confidence → honest label)
+    for l in layers:
+        is_proxy = bool(getattr(l, "proxyWarning", None)) or getattr(l, "confidence", "medium") == "low"
+        plan.factor_support[l.id] = {
+            "name": l.name,
+            "support": "proxy" if is_proxy else "observed",
+            "note": getattr(l, "proxyWarning", None),
+        }
+
+    # Budgets / runtime target (informational — enforcement stays where it is:
+    # per-call ceilings + the Google budget in providers/base.py)
+    from ..config import get_settings
+    s = get_settings()
+    overpass_calls = 1                       # main union fetch
+    if water:
+        overpass_calls += 1
+    if getattr(spec, "corridors", None):
+        overpass_calls += len(spec.corridors)
+    if buildability:
+        overpass_calls += 4                  # railway×2, ghat, protected(+maidan)
+    plan.provider_budgets = {
+        "googleSecondsPerJob": s.google_places_total_budget_seconds_per_job,
+        "overpassCallsPlanned": overpass_calls,
+    }
+    target = 90
+    if water or buildability:
+        target += 45
+    if routing:
+        target += 45
+    plan.max_runtime_target_seconds = min(target, s.job_max_runtime_seconds)
+
+    return plan

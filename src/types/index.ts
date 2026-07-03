@@ -206,6 +206,22 @@ export interface FactorDataQuality {
   nonDiscriminating: boolean;
 }
 
+/** v1.4.9 — PlannerLite analysis completeness (skipped ≠ failed). */
+export interface AnalysisCompleteness {
+  coreScoringComplete: boolean;
+  buildabilityVerified: boolean;
+  waterVerified: boolean;
+  routeVerified: boolean;
+  placesVerified: boolean;
+  provisional: boolean;
+  confidenceLevel: 'H' | 'M' | 'L' | string;
+  skippedStages: Array<{ stage: string; reason: string; savedCost?: string }>;
+  degradedStages: string[];
+  unsupportedConstraints: Array<{
+    constraint: string; reason: string; shouldScore: boolean; displayLabel: string;
+  }>;
+}
+
 export interface AnalysisResult {
   summary: string;
   business_type: string;
@@ -230,6 +246,9 @@ export interface AnalysisResult {
   errorCode?: string;
   userMessage?: string;
   retryable?: boolean;
+  /** v1.4.9 — PlannerLite honesty payload: verified vs skipped vs degraded vs
+   * unsupported for this specific prompt (normalizer-guaranteed shape). */
+  analysisCompleteness?: AnalysisCompleteness;
   /** Present only for v2 conversational-engine analyses */
   hexGrid?: HexGridCell[];
   catchments?: CatchmentOutline[];

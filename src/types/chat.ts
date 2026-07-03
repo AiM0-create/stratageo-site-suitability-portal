@@ -76,6 +76,17 @@ export interface SpecV2 {
     unsupportedRequests?: Array<{ requested: string; fallback: string }>;
     clarificationsResolved?: string[];
   };
+  /** v1.4.9 — PlannerLite preview: what will be verified / skipped / cannot
+   * be verified for THIS prompt, shown before Start analysis. */
+  plannerPreview?: PlannerPreview;
+}
+
+/** v1.4.9 — backend PlannerLite preview embedded in the spec at chat time. */
+export interface PlannerPreview {
+  willVerify: string[];
+  skipped: Array<{ stage: string; reason: string }>;
+  cannotVerify: string[];
+  notes: string[];
 }
 
 export type ChatStage = 'chat' | 'framework' | 'ready';

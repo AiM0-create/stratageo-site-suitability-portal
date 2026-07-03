@@ -127,6 +127,54 @@ describe('normalizeAnalysisResult', () => {
     expect(r.status).toBe('success');
   });
 
+  // ── v1.4.9 PlannerLite analysisCompleteness ──
+
+  it('normalizes a well-formed analysisCompleteness payload', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's', locations: [],
+      analysisCompleteness: {
+        coreScoringComplete: true, buildabilityVerified: false,
+        waterVerified: false, routeVerified: true, placesVerified: true,
+        provisional: true, confidenceLevel: 'M',
+        skippedStages: [{ stage: 'water_geometry', reason: 'not a waterfront analysis', savedCost: 'high' }, 'junk'],
+        degradedStages: ['places_primary_x', 42],
+        unsupportedConstraints: [
+          { constraint: 'rent_or_lease_price', reason: 'r', shouldScore: false, displayLabel: 'Rent: unverified — not scored.' },
+        ],
+      },
+    }) as any;
+    const ac = r.analysisCompleteness;
+    expect(ac.provisional).toBe(true);
+    expect(ac.confidenceLevel).toBe('M');
+    expect(ac.skippedStages).toHaveLength(1);           // junk dropped
+    expect(ac.skippedStages[0].reason).toContain('waterfront');
+    expect(ac.degradedStages).toEqual(['places_primary_x']);   // non-strings dropped
+    expect(ac.unsupportedConstraints[0].shouldScore).toBe(false);
+    expect(ac.unsupportedConstraints[0].displayLabel).toContain('not scored');
+  });
+
+  it('hides a malformed analysisCompleteness instead of crashing the drawer', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's', locations: [], analysisCompleteness: 'oops',
+    }) as any;
+    expect(r.analysisCompleteness).toBeUndefined();
+    expect(r.normalizationWarnings.join(' ')).toContain('analysisCompleteness');
+  });
+
+  it('provisional candidate zones payload renders shape without crash-prone fields', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's',
+      locations: [{ name: 'Z1', lat: 22.5, lng: 88.3, mcda_score: 6.5 }],
+      analysisCompleteness: {
+        provisional: true, confidenceLevel: 'L',
+        skippedStages: [], degradedStages: [], unsupportedConstraints: [],
+      },
+    }) as any;
+    expect(r.analysisCompleteness.coreScoringComplete).toBe(true);  // defaulted
+    expect(Array.isArray(r.analysisCompleteness.skippedStages)).toBe(true);
+    expect(r.locations).toHaveLength(1);
+  });
+
   it('leaves a healthy result essentially untouched (no spurious warnings)', () => {
     const healthy = {
       summary: 'ok', business_type: 'cafe', target_location: 'Kolkata',

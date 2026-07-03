@@ -57,6 +57,7 @@ from ..engine.metro import (
     metro_stations_to_pois,
 )
 from ..engine.route_policy import validate_strict_route_constraints
+from ..engine.planner_lite import create_analysis_plan
 
 logger = logging.getLogger(__name__)
 
@@ -798,6 +799,24 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     _study_area_text = " ".join(spec.studyArea.places or []) if spec.studyArea.type == "places" else ""
     _raw_prompt_text = getattr(spec, "normalizedPrompt", "") or spec.objective
 
+    # ── v1.4.9: PlannerLite — per-prompt relevance gate ─────────────────────
+    # One deterministic pass over the validated spec decides which expensive
+    # stages are relevant to THIS prompt. Skipped-because-irrelevant is a
+    # resource-saving decision recorded honestly in notes + the
+    # analysisCompleteness payload — never a failure or a degradation.
+    _plan = create_analysis_plan(spec)
+    for _sk in _plan.skipped_stages:
+        notes.append(f"Planner: {_sk.reason} (cost saved: {_sk.saved_cost})")
+    for _uc in _plan.unsupported_constraints:
+        notes.append(f"Planner: {_uc.display_label}")
+    logger.info(
+        "job %s stage=plan required=%s optional=%s skipped=%s unsupported=%s target=%ss",
+        job.id[:8], _plan.required_stages, _plan.optional_stages,
+        [s.stage for s in _plan.skipped_stages],
+        [c.constraint for c in _plan.unsupported_constraints],
+        _plan.max_runtime_target_seconds,
+    )
+
     # v1.4.0: Resolve metro stations early so we can override exclusion_pois below.
     _metro_result = resolve_metro_stations(
         prompt_text=_raw_prompt_text,
@@ -1064,34 +1083,46 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # multipolygons). Reused by BOTH the riverbank-corridor fallback (4c) and the
     # water mask (4d). Includes waterway=river so the river line is available even
     # when it isn't mapped as an area polygon.
-    try:
-        # v1.4.6 — per-call ceiling; on timeout the water mask degrades and is
-        # reported (for riverside briefs the corridor-failure path below still
-        # withholds the recommendation rather than silently keeping water cells).
-        water_ways = await asyncio.wait_for(
-            fetch_area_geometries(
-                ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
-            ),
-            timeout=_opt_timeout,
-        )
-        _qt.record_osm(
-            purpose="water_body_geometry",
-            tags=["natural=water", "waterway=riverbank", "waterway=river"],
-            bbox=overpass_bbox,
-            feature_count=len(water_ways),
-        )
-    except Exception as e:
-        water_ways = []
-        _provider_degraded.append("water_body_geometry")
-        _err_txt = str(e)[:200] or f"timed out after {_opt_timeout}s"
-        _qt.record_osm(
-            purpose="water_body_geometry",
-            tags=["natural=water", "waterway=riverbank", "waterway=river"],
-            bbox=overpass_bbox,
+    # v1.4.9 — planner-gated: skipped entirely for non-waterfront briefs (no
+    # river/lake/coastal signal in the prompt or spec). The skip is recorded in
+    # notes/analysisCompleteness; it is NOT a degradation.
+    water_ways = []
+    if _plan.should_run("water_geometry"):
+        try:
+            # v1.4.6 — per-call ceiling; on timeout the water mask degrades and is
+            # reported (for riverside briefs the corridor-failure path below still
+            # withholds the recommendation rather than silently keeping water cells).
+            water_ways = await asyncio.wait_for(
+                fetch_area_geometries(
+                    ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
+                ),
+                timeout=_opt_timeout,
+            )
+            _qt.record_osm(
+                purpose="water_body_geometry",
+                tags=["natural=water", "waterway=riverbank", "waterway=river"],
+                bbox=overpass_bbox,
+                feature_count=len(water_ways),
+            )
+        except Exception as e:
+            water_ways = []
+            _provider_degraded.append("water_body_geometry")
+            _err_txt = str(e)[:200] or f"timed out after {_opt_timeout}s"
+            _qt.record_osm(
+                purpose="water_body_geometry",
+                tags=["natural=water", "waterway=riverbank", "waterway=river"],
+                bbox=overpass_bbox,
+                feature_count=0,
+                warning=_err_txt,
+            )
+            fallbacks.append(f"Water-body geometry fetch failed: {_err_txt}.")
+    else:
+        _qt.record_internal(
+            purpose="water_geometry_skipped_by_planner",
+            query_type="relevance_gate",
             feature_count=0,
-            warning=_err_txt,
+            params={"reason": _plan.skip_reason("water_geometry") or "not relevant"},
         )
-        fallbacks.append(f"Water-body geometry fetch failed: {_err_txt}.")
     # PATCH 1 (v1.0.3.1): track whether a WATERFRONT gate was actually enforced, so a
     # failed riverfront corridor never silently becomes "all candidates kept".
     waterfront_corridor_enforced = False
@@ -1223,6 +1254,16 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # in India, so absence of a mask means "unknown" not "buildable" — we only mask
     # where OSM positively says no-build, and we report every removal.
     bflags = _buildability_flags(spec)
+    # v1.4.9 — planner-gated. The legacy _COMMERCIAL_RE trigger fires for nearly
+    # every business type (audit §8); the planner narrows it to briefs with a
+    # genuine waterfront / land-development / railway-avoidance signal. A skip
+    # is a recorded resource decision, not a degradation.
+    _frontage_skipped_by_planner = bool(bflags.get("commercial_proxy")) and not _plan.should_run("frontage_proxy")
+    if not _plan.should_run("buildability"):
+        for _k in ("railway", "ghat", "protected"):
+            bflags[_k] = False
+    if not _plan.should_run("frontage_proxy"):
+        bflags["commercial_proxy"] = False
     road_lines: list[dict] = []
     _buildability_degraded: list[str] = []   # checks skipped due to provider timeout
     if any(bflags.values()):
@@ -1466,7 +1507,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     iso_layers = [l for l in spec.layers if l.catchment.type in ("walk", "drive")]
     iso_polygons: dict[tuple[str, int], object] = {}  # (layer_id, hex_index) → shapely poly
     refined_any = False
-    if iso_layers and spec.execution.isochroneRefinement:
+    if iso_layers and spec.execution.isochroneRefinement and _plan.should_run("isochrone_refinement"):
         _update(job, 70, "isochrones", f"Refining top {len(candidates)} candidates with isochrones...")
         cand_cells = [hexes[i] for i in candidates]
         # v1.4.6 — each layer's isochrone batch is individually bounded; a
@@ -1516,7 +1557,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # isochrone/Euclidean values are simply kept.
     _agg_layers = [l for l in spec.layers
                    if l.source.provider == "google_places" and l.source.types]
-    if _agg_layers and s.enable_google_places_aggregate and s.google_places_api_key:
+    if (_agg_layers and s.enable_google_places_aggregate and s.google_places_api_key
+            and _plan.should_run("places_aggregate")):
         _AGG_CAND_CAP = 8
         _agg_pairs = [(ci, hexes[ci]) for ci in candidates[:_AGG_CAND_CAP]]
         _update(job, 74, "aggregate_counts",
@@ -1569,7 +1611,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # traffic, per candidate. Also collect a per-candidate congestion ratio.
     traffic_ctx: dict[int, list[float]] = {ci: [] for ci in candidates}
     traffic_layers = [l for l in spec.layers if l.catchment.type == "drive" and l.catchment.trafficAware]
-    if traffic_layers and s.google_places_api_key:
+    if traffic_layers and s.google_places_api_key and _plan.should_run("traffic_catchment"):
         from ..engine.scoring import haversine_m as _hav
         _update(job, 80, "traffic", f"Traffic-aware drive catchments for top {len(candidates)} candidates...")
         cand_cells = [hexes[i] for i in candidates]
@@ -1641,7 +1683,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     route_results: dict[int, dict[str, dict]] = {ci: {} for ci in candidates}
     route_unavailable: list[str] = []   # required route constraints that couldn't be computed
     cand_cells = [hexes[i] for i in candidates]
-    if spec.routeConstraints:
+    if spec.routeConstraints and _plan.should_run("routing"):
         _update(job, 78, "routing", f"Routing top {len(candidates)} candidates (network + barriers)...")
         # Railway geometry once, if any constraint needs crossing checks
         need_rail = any(rc.avoidRailwayCrossing for rc in spec.routeConstraints)
@@ -1879,8 +1921,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         loc["inWaterfrontCorridor"] = (
             bool(in_corridor) if (wf_width is not None and rd_known) else None
         )
-        loc["buildabilityStatus"] = ("excluded" if loc.get("excluded")
-                                     else build_status.get(ci, "viable" if not bflags.get("commercial_proxy") else "weak"))
+        # v1.4.9 — when the planner skipped the frontage check for a brief that
+        # would previously have run it, say "unchecked" rather than implying a
+        # viability verdict that was never computed.
+        loc["buildabilityStatus"] = (
+            "excluded" if loc.get("excluded")
+            else "unchecked" if _frontage_skipped_by_planner
+            else build_status.get(ci, "viable" if not bflags.get("commercial_proxy") else "weak")
+        )
         reasons = [e["detail"] for e in loc.get("exclusions", []) if e.get("passed") is False]
         # Hard deterministic gate: waterfront site at a KNOWN distance outside the band.
         if wf_width is not None and rd_known and rd > wf_width:
@@ -1908,7 +1956,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # level. HARD CAP per job (google_details_max_places_per_job) — details
     # are fetched only for selected top evidence, never every raw result.
     # Evidence only: never enters MCDA scoring.
-    if s.enable_google_place_details_new and s.google_places_api_key and locations:
+    if (s.enable_google_place_details_new and s.google_places_api_key and locations
+            and _plan.should_run("place_details")):
         _details_cap = s.google_details_max_places_per_job
         _enriched_total = 0
         for loc in locations:
@@ -2112,6 +2161,34 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── v1.4.0: Data coverage accounting (Phase 6) ──────────────────────────
     _data_coverage = compute_data_coverage(scores, spec.layers)
 
+    # ── v1.4.9: analysisCompleteness (PlannerLite honesty payload) ──────────
+    # Rules: a stage skipped because it was IRRELEVANT is a resource decision,
+    # not a failure, and does not reduce confidence. A stage that was RELEVANT
+    # but degraded (provider timeout/failure) marks the result provisional and
+    # lowers confidence. Unsupported constraints are visible, never scored.
+    _degraded_all = sorted(set(_provider_degraded) | set(_buildability_degraded))
+    _water_planned = _plan.should_run("water_geometry")
+    _buildability_planned = _plan.should_run("buildability")
+    _route_planned = _plan.should_run("routing") and bool(spec.routeConstraints)
+    _required_problem = bool(all_required_missing) or wf_corridor_unenforced
+    _has_unverifiable = bool(_plan.unsupported_constraints) or _policy.hasUnverifiableConstraints
+    _completeness = {
+        "coreScoringComplete": True,   # this code path only runs after Pass A + selection
+        "buildabilityVerified": _buildability_planned and not _buildability_degraded,
+        "waterVerified": _water_planned and bool(water_ways),
+        "routeVerified": _route_planned and not route_unavailable,
+        "placesVerified": not any(d.startswith("places") for d in _provider_degraded),
+        "provisional": _has_unverifiable or bool(_degraded_all) or _required_problem,
+        "confidenceLevel": (
+            "L" if _required_problem
+            else "M" if (_degraded_all or _has_unverifiable)
+            else "H"
+        ),
+        "skippedStages": [sk.to_dict() for sk in _plan.skipped_stages],
+        "degradedStages": _degraded_all,
+        "unsupportedConstraints": [uc.to_dict() for uc in _plan.unsupported_constraints],
+    }
+
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
@@ -2247,6 +2324,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "parcels, building addresses, or investment recommendations. "
             "Field validation is required before any leasing or investment decision."
         ),
+        # v1.4.9 — PlannerLite completeness: what was verified vs skipped vs
+        # degraded vs unsupported for THIS prompt. Skipped-irrelevant stages
+        # never reduce confidence; degraded RELEVANT stages do.
+        "analysisCompleteness": _completeness,
         # v1.3.0 — evidence trail (secret-safe serialisation)
         "evidenceTrail": _ev_trail.safe_dict(),
     }

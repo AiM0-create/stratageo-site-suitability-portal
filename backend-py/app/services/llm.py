@@ -412,6 +412,18 @@ async def chat_turn(
         if stage == "ready":
             stage = "framework"
 
+    # ── v1.4.9: PlannerLite preview — "what will be verified / skipped /
+    # cannot be verified" shown on the spec card BEFORE Start analysis.
+    # Embedded in the spec dict (SpecV2 ignores unknown keys at execution
+    # validation, so this rides along harmlessly). Never blocks the turn.
+    if valid and isinstance(new_spec, dict) and stage in ("framework", "ready"):
+        try:
+            from ..models.spec import SpecV2 as _SpecV2
+            from ..engine.planner_lite import create_analysis_plan as _cap
+            new_spec["plannerPreview"] = _cap(_SpecV2.model_validate(new_spec)).to_preview_dict()
+        except Exception as _pe:
+            logger.warning("planner preview failed (non-fatal): %s", _pe)
+
     return ChatResponse(
         reply=parsed.get("reply", ""),
         stage=stage,
