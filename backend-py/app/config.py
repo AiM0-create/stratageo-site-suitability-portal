@@ -17,6 +17,11 @@ v1.4.9: PlannerLite — a minimal per-prompt relevance gate (engine/planner_lite
   analysisCompleteness to the result payload and a plannerPreview on the spec
   card. No new providers, no engine rewrite — a YAGNI resource-optimization
   release on top of the v1.4.8 provider layer.
+v1.5.0: Analysis Intelligence Lite — deterministic prompt/spec classification
+  (businessArchetype/locationIntent/riskTriggers/analysisMode), scenario
+  ranking stability over the final shortlist, granular dataSufficiencyV2,
+  and the honest investigation-zone label taxonomy — all surfaced in the UI.
+  Zero new provider calls; purely local derivations over existing run state.
 """
 from functools import lru_cache
 from typing import Literal
@@ -24,16 +29,16 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.4.9"
+APP_VERSION     = "1.5.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00054"
-# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.4.9 — the
+ENGINE_VERSION  = "stratageo-engine-00055"
+# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.0 — the
 # SpecV2 wire schema and the EvidenceTrail schema are structurally unchanged;
-# analysisCompleteness/plannerPreview are additive result/spec-payload keys
-# outside these versioned contracts, same reasoning as the v1.4.8 bump.
+# analysisIntelligence/dataSufficiencyV2/analysisRecommendation are additive
+# result-payload keys outside these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "PlannerLite Smart Resource Gating"
+RELEASE_NAME    = "Analysis Intelligence Lite"
 
 
 class Settings(BaseSettings):

@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.4.9 — PlannerLite Smart Resource Gating**
+**Current version: v1.5.0 — Analysis Intelligence Lite**
 
 ---
 
@@ -20,6 +20,17 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.5.0 Highlights
+
+- **Analysis Intelligence Lite** — a deterministic classification of every analysis, computed at plan time with zero new provider calls: `businessArchetype` (food_footfall / delivery_kitchen / large_format_retail / hospitality_destination / healthcare / education / logistics / generic), `locationIntent`, `riskTriggers` (waterfront, rent cap, large floorplate, strict boundary, …), and `analysisMode`.
+- **Scenario ranking stability** — the final shortlist is re-ranked under four controlled weighting scenarios (balanced / demand-led / access-led / competition-sensitive); each candidate is labeled *Robust top candidate*, *Stable top 3*, *Scenario sensitive*, or *Weak/unstable*, with the sensitive scenario named. Pure local math on already-computed scores.
+- **Granular data sufficiency (`dataSufficiencyV2`)** — geocoding, boundary/corridor, demand, competition, road access, routing, and buildability each labeled verified / proxy / unknown / degraded / not-required, plus hard-constraint verified/unknown/failed counts and a human-readable confidence reason.
+- **Honest investigation-zone labels** — analyses and candidates now carry *Recommended Investigation Zone / Provisional Candidate / Weak Candidate / No Reliable Recommendation / No Viable Site in Constraints*. A strong recommendation is only possible when nothing critical is unverified **and** the rank survives the stability check; unknown rent/floorplate constraints show **"Field validation required"**.
+- All of it surfaced in the results drawer: analysis-level verdict badge, per-candidate labels, data-sufficiency panel — additive UI, old payloads render exactly as before.
+- **Zero new external calls** — every v1.5 addition is local arithmetic over data the pipeline already fetched.
 
 ---
 
@@ -297,7 +308,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.4.9** *(current)* | PlannerLite smart resource gating — skips irrelevant water/buildability/routing/Places-refinement stages per prompt; `analysisCompleteness` payload; unsupported constraints labeled up front |
+| **v1.5.0** *(current)* | Analysis Intelligence Lite — deterministic archetype/intent/risk classification, scenario ranking stability, granular `dataSufficiencyV2`, investigation-zone label taxonomy, all surfaced in the UI; zero new provider calls |
+| **v1.4.9** | PlannerLite smart resource gating — skips irrelevant water/buildability/routing/Places-refinement stages per prompt; `analysisCompleteness` payload; unsupported constraints labeled up front |
 | **v1.4.8** | Google Places API (New) provider layer, Places Aggregate count refinement, Google Routes primary route validator — legacy Places/OSM/ORS retained as fallback throughout |
 | **v1.4.1–1.4.7** | Execution-flow reliability, per-provider timeout/degradation, results-crash safety, numeric scoring contract (`engine/contracts.py`), three-state result payload (`success`/`no_viable_site`/`failed`) |
 | **v1.4.0** | Reliability Hardening: constraint policy engine, always-on deterministic critic, verified metro station resolver, score display policy (displayScore/scoreBand/confidenceLabel), data coverage accounting |

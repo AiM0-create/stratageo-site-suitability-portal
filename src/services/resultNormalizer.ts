@@ -88,6 +88,16 @@ function normalizeLocation(raw: unknown, index: number, warnings: string[]): Loc
   if (raw.routeMetrics !== undefined && !isObj(raw.routeMetrics)) {
     out.routeMetrics = undefined;
   }
+  // v1.5-Lite — per-candidate labels: strings or absent, never other shapes.
+  if (raw.investigationLabel !== undefined) {
+    out.investigationLabel = typeof raw.investigationLabel === 'string' ? raw.investigationLabel : undefined;
+  }
+  if (raw.stabilityLabel !== undefined) {
+    out.stabilityLabel = typeof raw.stabilityLabel === 'string' ? raw.stabilityLabel : undefined;
+  }
+  if (raw.stabilityNote !== undefined) {
+    out.stabilityNote = typeof raw.stabilityNote === 'string' ? raw.stabilityNote : undefined;
+  }
   if (raw.trafficContext !== undefined) {
     out.trafficContext = isObj(raw.trafficContext)
       ? {
@@ -222,6 +232,44 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
   } else if (src.analysisCompleteness !== undefined) {
     warnings.push('analysisCompleteness was malformed — hidden.');
     out.analysisCompleteness = undefined;
+  }
+
+  // ── v1.5-Lite: analysis verdict + granular data sufficiency ──
+  // All optional — an old payload without these keys renders exactly as before.
+  const VALID_RECO = [
+    'RECOMMENDED_INVESTIGATION_ZONE', 'PROVISIONAL_CANDIDATE', 'WEAK_CANDIDATE',
+    'NO_RELIABLE_RECOMMENDATION', 'NO_VIABLE_SITE_IN_CONSTRAINTS',
+  ];
+  out.analysisRecommendation = VALID_RECO.includes(src.analysisRecommendation)
+    ? src.analysisRecommendation
+    : undefined;
+  if (isObj(src.dataSufficiencyV2)) {
+    const d = src.dataSufficiencyV2;
+    const st = (v: unknown) => asStr(v, 'unknown');
+    const hc = isObj(d.hard_constraints) ? d.hard_constraints : {};
+    out.dataSufficiencyV2 = {
+      geocoding: st(d.geocoding),
+      boundary_or_corridor: st(d.boundary_or_corridor),
+      demand_data: st(d.demand_data),
+      competition_data: st(d.competition_data),
+      road_access: st(d.road_access),
+      routing: st(d.routing),
+      buildability_lite: st(d.buildability_lite),
+      hard_constraints: {
+        verified_count: asNum(hc.verified_count, 0),
+        unknown_count: asNum(hc.unknown_count, 0),
+        failed_count: asNum(hc.failed_count, 0),
+      },
+      external_provider_health: st(d.external_provider_health),
+      final_confidence: st(d.final_confidence),
+      confidence_reason: asStr(d.confidence_reason),
+    };
+  } else if (src.dataSufficiencyV2 !== undefined) {
+    warnings.push('dataSufficiencyV2 was malformed — hidden.');
+    out.dataSufficiencyV2 = undefined;
+  }
+  if (src.analysisIntelligence !== undefined && !isObj(src.analysisIntelligence)) {
+    out.analysisIntelligence = undefined;
   }
 
   out.summary = asStr(src.summary, 'Analysis completed, but the summary could not be read.');

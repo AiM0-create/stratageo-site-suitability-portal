@@ -57,7 +57,8 @@ from ..engine.metro import (
     metro_stations_to_pois,
 )
 from ..engine.route_policy import validate_strict_route_constraints
-from ..engine.planner_lite import create_analysis_plan
+from ..engine.planner_lite import create_analysis_plan, _factor_family
+from ..engine.stability import compute_ranking_stability
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,27 @@ def _provider_diagnostics(
         "notes": list(fallbacks or [])[:40],
         "providerQueryCount": query_count,
     }
+
+
+# v1.5-Lite — honest investigation-zone taxonomy (Part 9). Additive: maps the
+# existing recommendationStatus + provisional/stability context onto clearer
+# labels. "Site" language is intentionally absent — these are candidate ZONES.
+def _investigation_label(status: str | None, provisional: bool, stability: str | None) -> str:
+    if status == "EXCLUDED":
+        return "EXCLUDED"
+    if status == "RECOMMENDED":
+        # A strong recommendation is only allowed when nothing critical is
+        # unverified AND the rank survives the scenario stability check.
+        if provisional or stability == "WEAK_UNSTABLE":
+            return "PROVISIONAL_CANDIDATE"
+        return "RECOMMENDED_INVESTIGATION_ZONE"
+    if status == "CANDIDATE_ZONE":
+        return "PROVISIONAL_CANDIDATE"
+    if status == "WEAK_CANDIDATE":
+        return "WEAK_CANDIDATE"
+    if status in ("RAW_DIAGNOSTIC", "NO_RELIABLE_RECOMMENDATION"):
+        return "NO_RELIABLE_RECOMMENDATION"
+    return "PROVISIONAL_CANDIDATE" if provisional else "WEAK_CANDIDATE"
 
 
 def _failed_result(
@@ -2158,6 +2180,18 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── v1.4.0: Downgrade RECOMMENDED → CANDIDATE_ZONE for unverifiable constraints ──
     downgrade_status_for_unverified(locations, _policy)
 
+    # ── v1.5-Lite: ranking stability under controlled scenarios (Part 7) ────
+    # Re-ranks ONLY the final shortlist (≤ topN) under 4 explicit weight
+    # variants — pure local math over already-computed LayerScores, zero
+    # provider calls. Informational: never changes exclusion or scoring.
+    _stability = compute_ranking_stability(scores, finals)
+    for _ci, _loc in zip(finals, locations):
+        _st = _stability.get(_ci)
+        if _st:
+            _loc["stabilityLabel"] = _st["stabilityLabel"]
+            _loc["scenarioRanks"] = _st["scenarioRanks"]
+            _loc["stabilityNote"] = _st["note"]
+
     # ── v1.4.0: Data coverage accounting (Phase 6) ──────────────────────────
     _data_coverage = compute_data_coverage(scores, spec.layers)
 
@@ -2188,6 +2222,96 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "degradedStages": _degraded_all,
         "unsupportedConstraints": [uc.to_dict() for uc in _plan.unsupported_constraints],
     }
+
+    # ── v1.5-Lite: granular DataSufficiency (Part 6) ─────────────────────────
+    # Assembled entirely from state the run already computed — zero new work.
+    def _family_status(*families: str) -> str:
+        """Best evidence status among this run's factors of the given families:
+        verified > proxy > unknown. 'unknown' when no such factor exists or
+        none has data."""
+        best = "unknown"
+        for l in spec.layers:
+            if _factor_family(l.name) not in families:
+                continue
+            if not layer_pois.get(l.id):
+                continue
+            sup = _plan.factor_support.get(l.id, {}).get("support", "observed")
+            if sup == "observed":
+                return "verified"
+            best = "proxy"
+        return best
+
+    _n_routes = len(spec.routeConstraints or [])
+    _hc_verified = (
+        len(spec.exclusions or [])
+        + len(corridor_widths)
+        + max(0, _n_routes - len(route_unavailable))
+    )
+    _hc_unknown = (
+        len(_plan.unsupported_constraints)
+        + len(route_unavailable)
+        + (1 if wf_corridor_unenforced else 0)
+    )
+    _conf_word = {"H": "high", "M": "medium", "L": "low"}[_completeness["confidenceLevel"]]
+    _conf_bits: list[str] = []
+    if _required_problem:
+        _conf_bits.append("a required constraint could not be evaluated")
+    if _plan.unsupported_constraints:
+        _conf_bits.append(
+            f"{len(_plan.unsupported_constraints)} constraint(s) cannot be verified from data"
+        )
+    if _degraded_all:
+        _conf_bits.append(f"degraded provider check(s): {', '.join(_degraded_all[:4])}")
+    if not _conf_bits:
+        _conf_bits.append("all relevant gates verified and factor data sufficient")
+    _ds2 = {
+        "geocoding": "verified",   # this code path only exists after a resolved study area
+        "boundary_or_corridor": (
+            "degraded" if wf_corridor_unenforced
+            else "verified"
+        ),
+        "demand_data": _family_status("demand"),
+        "competition_data": _family_status("competition"),
+        "road_access": _family_status("access"),
+        "routing": (
+            "not_required" if not (_plan.should_run("routing") and _n_routes)
+            else ("degraded" if route_unavailable else "verified")
+        ),
+        "buildability_lite": (
+            "not_required" if not _plan.should_run("buildability")
+            else ("degraded" if _buildability_degraded else "verified")
+        ),
+        "hard_constraints": {
+            "verified_count": _hc_verified,
+            "unknown_count": _hc_unknown,
+            "failed_count": len(required_missing),
+        },
+        "external_provider_health": "degraded" if _provider_degraded else "ok",
+        "final_confidence": _conf_word,
+        "confidence_reason": "; ".join(_conf_bits).capitalize() + ".",
+    }
+
+    # ── v1.5-Lite: investigation-zone labels (Part 9) ────────────────────────
+    for _loc in locations:
+        _loc["investigationLabel"] = _investigation_label(
+            _loc.get("recommendationStatus"),
+            _completeness["provisional"],
+            _loc.get("stabilityLabel"),
+        )
+    if analysis_status == "insufficient_viable_land":
+        _analysis_reco = "NO_VIABLE_SITE_IN_CONSTRAINTS"
+    elif recommendation_withheld or analysis_status == "unreliable":
+        _analysis_reco = "NO_RELIABLE_RECOMMENDATION"
+    else:
+        _labels = {l.get("investigationLabel") for l in locations if not l.get("excluded")}
+        if "RECOMMENDED_INVESTIGATION_ZONE" in _labels:
+            _analysis_reco = "RECOMMENDED_INVESTIGATION_ZONE"
+        elif "PROVISIONAL_CANDIDATE" in _labels:
+            _analysis_reco = "PROVISIONAL_CANDIDATE"
+        elif "WEAK_CANDIDATE" in _labels:
+            _analysis_reco = "WEAK_CANDIDATE"
+        else:
+            _analysis_reco = "NO_RELIABLE_RECOMMENDATION"
 
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
@@ -2328,6 +2452,13 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         # degraded vs unsupported for THIS prompt. Skipped-irrelevant stages
         # never reduce confidence; degraded RELEVANT stages do.
         "analysisCompleteness": _completeness,
+        # v1.5-Lite — deterministic prompt/spec classification (archetype,
+        # locationIntent, riskTriggers, analysisMode, hard gates, soft factors).
+        "analysisIntelligence": _plan.intelligence,
+        # v1.5-Lite — granular per-domain data sufficiency + final confidence.
+        "dataSufficiencyV2": _ds2,
+        # v1.5-Lite — analysis-level investigation verdict (Part 9 taxonomy).
+        "analysisRecommendation": _analysis_reco,
         # v1.3.0 — evidence trail (secret-safe serialisation)
         "evidenceTrail": _ev_trail.safe_dict(),
     }

@@ -112,6 +112,14 @@ export interface LocationData {
   pois: POI[];
   searchRadiusM: number;
   scoreWithheld?: boolean;     // composite not computable (required data missing)
+  // ── v1.5-Lite (all optional — older payloads simply omit them) ──
+  /** Honest investigation-zone taxonomy; preferred over recommendationStatus when present. */
+  investigationLabel?: string;
+  /** Scenario ranking stability: ROBUST_TOP_CANDIDATE | STABLE_TOP_3 |
+   * SCENARIO_SENSITIVE | WEAK_UNSTABLE | NOT_ENOUGH_CANDIDATES */
+  stabilityLabel?: string;
+  stabilityNote?: string;
+  scenarioRanks?: Record<string, number>;
   routeMetrics?: Record<string, RouteMetric>;  // computed network routing per constraint
   trafficContext?: { congestionRatio: number; label: string; note: string };
   // Spatial Reliability Upgrade v1.0.3 — deterministic geographic checks (optional)
@@ -206,6 +214,22 @@ export interface FactorDataQuality {
   nonDiscriminating: boolean;
 }
 
+/** v1.5-Lite — granular per-domain data sufficiency. Every status is one of
+ * verified | proxy | unknown | degraded | not_required. */
+export interface DataSufficiencyV2 {
+  geocoding: string;
+  boundary_or_corridor: string;
+  demand_data: string;
+  competition_data: string;
+  road_access: string;
+  routing: string;
+  buildability_lite: string;
+  hard_constraints: { verified_count: number; unknown_count: number; failed_count: number };
+  external_provider_health: string;
+  final_confidence: string;
+  confidence_reason: string;
+}
+
 /** v1.4.9 — PlannerLite analysis completeness (skipped ≠ failed). */
 export interface AnalysisCompleteness {
   coreScoringComplete: boolean;
@@ -249,6 +273,13 @@ export interface AnalysisResult {
   /** v1.4.9 — PlannerLite honesty payload: verified vs skipped vs degraded vs
    * unsupported for this specific prompt (normalizer-guaranteed shape). */
   analysisCompleteness?: AnalysisCompleteness;
+  // ── v1.5-Lite (all optional — older payloads simply omit them) ──
+  /** Analysis-level investigation verdict. */
+  analysisRecommendation?: string;
+  /** Granular per-domain data sufficiency (normalizer-guaranteed shape). */
+  dataSufficiencyV2?: DataSufficiencyV2;
+  /** Deterministic prompt/spec classification (archetype, intent, risk triggers). */
+  analysisIntelligence?: Record<string, unknown>;
   /** Present only for v2 conversational-engine analyses */
   hexGrid?: HexGridCell[];
   catchments?: CatchmentOutline[];

@@ -7,9 +7,9 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def test_version_is_120():
-    # Updated to v1.4.9 — PlannerLite smart resource gating
-    assert APP_VERSION == "1.4.9"
-    assert ENGINE_VERSION == "stratageo-engine-00054"
+    # Updated to v1.5.0 — Analysis Intelligence Lite
+    assert APP_VERSION == "1.5.0"
+    assert ENGINE_VERSION == "stratageo-engine-00055"
 
 
 # ── Model defaults (v1.1.1 — gpt-5.4 family) ─────────────────────────────────

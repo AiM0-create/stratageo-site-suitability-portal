@@ -74,6 +74,41 @@ function getScoreQualityLabel(score: number): string {
 // compromised, or provider checks degraded, a backend "RECOMMENDED" must be
 // downgraded to "Candidate Zone": an overconfident green badge over unverified
 // rent/footprint/routing claims is a product-correctness bug, not a style choice.
+// v1.5-Lite — investigation-zone taxonomy display text. Deliberately never
+// says "site": these are candidate/investigation ZONES pending field checks.
+const INVESTIGATION_TEXT: Record<string, string> = {
+  RECOMMENDED_INVESTIGATION_ZONE: 'Recommended Investigation Zone',
+  PROVISIONAL_CANDIDATE: 'Provisional Candidate',
+  WEAK_CANDIDATE: 'Weak Candidate',
+  NO_RELIABLE_RECOMMENDATION: 'Not recommended',
+  EXCLUDED: 'Excluded',
+};
+
+const STABILITY_TEXT: Record<string, { text: string; color: string }> = {
+  ROBUST_TOP_CANDIDATE: { text: 'Robust top candidate', color: '#059669' },
+  STABLE_TOP_3: { text: 'Stable top 3', color: '#0369a1' },
+  SCENARIO_SENSITIVE: { text: 'Scenario sensitive', color: '#d97706' },
+  WEAK_UNSTABLE: { text: 'Weak / unstable ranking', color: '#dc2626' },
+  NOT_ENOUGH_CANDIDATES: { text: 'Not enough candidates to compare', color: '#94a3b8' },
+};
+
+const ANALYSIS_RECO_META: Record<string, { text: string; bg: string; border: string; color: string }> = {
+  RECOMMENDED_INVESTIGATION_ZONE: { text: 'Recommended Investigation Zones', bg: '#ecfdf5', border: '#059669', color: '#065f46' },
+  PROVISIONAL_CANDIDATE: { text: 'Provisional Candidate Zones — field validation required', bg: '#fffbeb', border: '#f59e0b', color: '#92400e' },
+  WEAK_CANDIDATE: { text: 'Weak Candidate Zones — treat with caution', bg: '#fffbeb', border: '#d97706', color: '#92400e' },
+  NO_RELIABLE_RECOMMENDATION: { text: 'No Reliable Recommendation', bg: '#fef2f2', border: '#dc2626', color: '#991b1b' },
+  NO_VIABLE_SITE_IN_CONSTRAINTS: { text: 'No Viable Site in the Stated Constraints', bg: '#fef2f2', border: '#dc2626', color: '#991b1b' },
+};
+
+// v1.5-Lite — data-sufficiency status chip colors (verified/proxy/unknown/degraded/not_required)
+const DS_STATUS_META: Record<string, { text: string; color: string }> = {
+  verified: { text: 'verified', color: '#059669' },
+  proxy: { text: 'proxy', color: '#d97706' },
+  unknown: { text: 'unknown', color: '#64748b' },
+  degraded: { text: 'degraded', color: '#dc2626' },
+  not_required: { text: 'not required', color: '#94a3b8' },
+};
+
 function getRecommendationLabel(
   loc: import('../types').LocationData,
   withheld: boolean,
@@ -82,6 +117,13 @@ function getRecommendationLabel(
 ): string {
   if (loc.excluded) return 'Excluded';
   if (raw || withheld) return 'Not recommended';
+  // v1.5-Lite — the backend's investigation label is the preferred, already-
+  // honesty-gated verdict; older payloads fall through to the legacy chain.
+  const il = (loc as any).investigationLabel as string | undefined;
+  if (il && INVESTIGATION_TEXT[il]) {
+    if (il === 'RECOMMENDED_INVESTIGATION_ZONE' && demoted) return 'Provisional Candidate';
+    return INVESTIGATION_TEXT[il];
+  }
   const rs = loc.recommendationStatus;
   if (rs === 'RECOMMENDED') return demoted ? 'Candidate Zone' : 'Recommended';
   if (rs === 'CANDIDATE_ZONE') return 'Candidate Zone';
@@ -187,6 +229,12 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   // v1.4.9 — PlannerLite completeness payload (normalizer-guaranteed shape).
   const completeness = (result as any).analysisCompleteness as
     import('../types').AnalysisCompleteness | undefined;
+  // v1.5-Lite — analysis verdict + granular data sufficiency (both optional;
+  // an older payload without them renders exactly as before).
+  const analysisReco = (result as any).analysisRecommendation as string | undefined;
+  const analysisRecoMeta = analysisReco ? ANALYSIS_RECO_META[analysisReco] : undefined;
+  const ds2 = (result as any).dataSufficiencyV2 as
+    import('../types').DataSufficiencyV2 | undefined;
   // v1.4.6 — gate the green "Recommended" badge: any unverified critical
   // constraint, non-verified enforcement level, or degraded provider check
   // demotes RECOMMENDED to "Candidate Zone" (see getRecommendationLabel).
@@ -257,6 +305,17 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
       </div>
 
       <div className="drawer-body">
+        {/* v1.5-Lite — analysis-level investigation verdict badge */}
+        {analysisRecoMeta && (
+          <div style={{
+            background: analysisRecoMeta.bg, border: `1px solid ${analysisRecoMeta.border}`,
+            color: analysisRecoMeta.color, borderRadius: 6, padding: '7px 12px',
+            fontSize: '13px', fontWeight: 700, marginBottom: 8,
+          }}>
+            {analysisRecoMeta.text}
+          </div>
+        )}
+
         {/* Summary — suppressed when withheld (it may assert a winner the critic rejected) */}
         {!withheld && <p className="drawer-summary">{result.summary}</p>}
 
@@ -354,7 +413,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             )}
             {completeness.unsupportedConstraints.length > 0 && (
               <div style={{ marginTop: 4, color: '#92400e' }}>
-                ⚠ <b>Not scored (cannot be verified from data):</b>
+                ⚠ <b>Field validation required — not scored (cannot be verified from data):</b>
                 <ul style={{ margin: '2px 0 0', paddingLeft: 16 }}>
                   {completeness.unsupportedConstraints.map((c, i) => <li key={i}>{c.displayLabel}</li>)}
                 </ul>
@@ -365,6 +424,46 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 ⏱ <b>Degraded this run:</b> {completeness.degradedStages.join(', ')}
               </div>
             )}
+          </div>
+        )}
+
+        {/* v1.5-Lite — granular data sufficiency panel */}
+        {ds2 && (
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#475569', marginBottom: 8 }}>
+            <b>Data sufficiency</b>
+            <span style={{
+              marginLeft: 6, fontWeight: 700,
+              color: ds2.final_confidence === 'high' ? '#059669'
+                : ds2.final_confidence === 'medium' ? '#d97706' : '#dc2626',
+            }}>
+              — {ds2.final_confidence} confidence
+            </span>
+            {ds2.confidence_reason && (
+              <div style={{ marginTop: 2, color: '#64748b' }}>{ds2.confidence_reason}</div>
+            )}
+            <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
+              {([
+                ['Geocoding', ds2.geocoding],
+                ['Boundary/corridor', ds2.boundary_or_corridor],
+                ['Demand data', ds2.demand_data],
+                ['Competition data', ds2.competition_data],
+                ['Road access', ds2.road_access],
+                ['Routing', ds2.routing],
+                ['Buildability', ds2.buildability_lite],
+              ] as Array<[string, string]>).map(([name, status], i) => {
+                const meta = DS_STATUS_META[status] || DS_STATUS_META.unknown;
+                return (
+                  <span key={i} style={{ whiteSpace: 'nowrap' }}>
+                    {name}: <b style={{ color: meta.color }}>{meta.text}</b>
+                  </span>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 4, color: '#64748b' }}>
+              Hard constraints: <b style={{ color: '#059669' }}>{ds2.hard_constraints.verified_count} verified</b>
+              {' · '}<b style={{ color: '#d97706' }}>{ds2.hard_constraints.unknown_count} unknown</b>
+              {' · '}<b style={{ color: '#dc2626' }}>{ds2.hard_constraints.failed_count} failed</b>
+            </div>
           </div>
         )}
 
@@ -779,6 +878,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             fontWeight: 600,
                           }}>
                             {(loc as any).confidenceLabel} confidence
+                          </span>
+                        )}
+                        {/* v1.5-Lite: scenario ranking stability */}
+                        {!raw && !loc.excluded && (loc as any).stabilityLabel
+                          && STABILITY_TEXT[(loc as any).stabilityLabel] && (
+                          <span
+                            title={(loc as any).stabilityNote || 'Ranking stability under controlled weighting scenarios'}
+                            style={{
+                              fontSize: '0.70em', fontWeight: 600,
+                              color: STABILITY_TEXT[(loc as any).stabilityLabel].color,
+                            }}
+                          >
+                            {STABILITY_TEXT[(loc as any).stabilityLabel].text}
                           </span>
                         )}
                         {/* v1.4.0: score band */}

@@ -4,6 +4,35 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.5.0] — 2026-07-04 — Analysis Intelligence Lite
+
+**Tests:** 526 backend passed · 48 frontend passed · **Readiness:** deployed to production
+
+A lightweight reasoning layer over the v1.4.9 pipeline — strict YAGNI: zero new provider calls, no engine rewrite, no heavy buildability, no rent data, no live traffic. Full per-change detail (risk, testing, rollback) in [`docs/analysis-engine-v1.5-change-log.md`](docs/analysis-engine-v1.5-change-log.md).
+
+### Added — backend
+- **Intelligence classification** (`engine/planner_lite.py`): deterministic `businessArchetype` (8 families mapped from the canonical archetype registry with regex fallback), `locationIntent`, `riskTriggers`, `analysisMode`, hard-gate inventory with per-gate verification class, soft factors with family + proxy/observed support. Attached to the plan, the result payload (`analysisIntelligence`), and the spec-card preview.
+- **Scenario ranking stability** (`engine/stability.py`, new): the final shortlist re-ranked under `balanced` / `demand_led` / `access_led` / `competition_sensitive` weight variants → `ROBUST_TOP_CANDIDATE` / `STABLE_TOP_3` / `SCENARIO_SENSITIVE` (names the scenario that drops it) / `WEAK_UNSTABLE` / `NOT_ENOUGH_CANDIDATES`. Informational only; never changes exclusion or scoring; never raises.
+- **`dataSufficiencyV2`** (`services/jobs.py`): per-domain verified/proxy/unknown/degraded/not_required statuses, hard-constraint verified/unknown/failed counts, provider health, `final_confidence` (high/medium/low) with a human-readable reason — assembled entirely from state the run already computed.
+- **Investigation-zone taxonomy**: per-candidate `investigationLabel` + analysis-level `analysisRecommendation` (`RECOMMENDED_INVESTIGATION_ZONE` / `PROVISIONAL_CANDIDATE` / `WEAK_CANDIDATE` / `NO_RELIABLE_RECOMMENDATION` / `NO_VIABLE_SITE_IN_CONSTRAINTS`). A `RECOMMENDED` status demotes to `PROVISIONAL_CANDIDATE` when the analysis is provisional or the candidate is scenario-unstable. Existing `recommendationStatus` wire values unchanged.
+
+### Added — frontend (additive only; old payloads render exactly as before)
+- Analysis-level verdict badge at the top of the results drawer.
+- Per-candidate investigation label (preferred over the legacy label when present) and scenario-stability label with explanatory tooltip.
+- Compact **Data sufficiency** panel: per-domain status chips, hard-constraint counts, final confidence + reason.
+- Unsupported constraints now headed **"Field validation required"**.
+- `resultNormalizer` guarantees all new shapes (malformed → hidden with a warning, never a crash).
+
+### Changed
+- `config.py`: `APP_VERSION` → `1.5.0`; `ENGINE_VERSION` fallback → `stratageo-engine-00055`; `RELEASE_NAME` → "Analysis Intelligence Lite".
+- `package.json` / `package-lock.json`: version → `1.5.0`.
+
+### Tests
+- 13 new backend tests (`tests/test_v15_intelligence.py`): four-prompt classification pins + determinism, stability labels, payload contract, supermarket verdict capped below strong recommendation while rent/floorplate unknown, dark-kitchen `routing: verified`, degraded-provider sufficiency.
+- 4 new frontend normalizer tests: old-payload compatibility, well-formed v1.5 payload, malformed-field dropping, partial-object defaults.
+
+---
+
 ## [1.4.9] — 2026-07-03 — PlannerLite Smart Resource Gating
 
 **Tests:** 513 backend passed · 44 frontend passed · **Readiness:** deployed to production

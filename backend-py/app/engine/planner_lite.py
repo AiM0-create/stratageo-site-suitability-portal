@@ -66,6 +66,60 @@ _AVOID_RAIL_RE = re.compile(
 )
 _DARK_KITCHEN_RE = re.compile(r"\b(dark|cloud|ghost)\s*.?\s*kitchen\b|\bdelivery.?only\b", re.I)
 
+# ── v1.5-Lite: intelligence classification regexes ────────────────────────────
+_LARGE_FORMAT_RE = re.compile(
+    r"\bsupermarket\b|\bhypermarket\b|\bdepartment\s+store\b|\blarge.?format\b"
+    r"|\bbig.?box\b|\bwarehouse\b|\bfloor\s?plate\b",
+    re.I,
+)
+_HOSPITALITY_RE = re.compile(
+    r"\bpremium\b|\bluxury\b|\bfine.?dining\b|\bresort\b|\bhotel\b|\bboutique\b"
+    r"|\briverside\b|\bdestination\b|\bupscale\b",
+    re.I,
+)
+_HEALTHCARE_RE = re.compile(r"\bclinic\b|\bhospital\b|\bmaternity\b|\bhealthcare\b|\bdiagnostic\b", re.I)
+_EDUCATION_RE = re.compile(r"\bschool\b|\bpreschool\b|\bcollege\b|\bcoaching\s+centre\b|\beducation\b", re.I)
+_LOGISTICS_RE = re.compile(r"\blogistics\b|\bwarehouse\b|\bfulfilment\b|\bfulfillment\b|\bdistribution\b", re.I)
+_FOOD_RE = re.compile(r"\bcafe\b|\bcafé\b|\bqsr\b|\brestaurant\b|\bcoffee\b|\bfast.?food\b|\bfood\b|\bbakery\b", re.I)
+_ARTERIAL_RE = re.compile(r"\bprimary\s+arterial\b|\barterial\s+road\b|\bmain\s+road\s+frontage\b", re.I)
+_BETWEEN_RE = re.compile(r"\bbetween\s+.{3,60}\s+and\s+", re.I)
+_NEAR_RE = re.compile(r"\bnear\b|\bclose\s+to\b|\bcrossing\b|\bjunction\b|\badjacent\s+to\b", re.I)
+_ALONG_RE = re.compile(r"\balong\b|\bcorridor\b", re.I)
+_STRICT_RE = re.compile(r"\bstrict(?:ly)?\b|\bexactly\b|\bmust\s+be\b", re.I)
+
+# Canonical archetype key → v1.5 business archetype family. Keys the registry
+# doesn't know fall back to text regexes in _business_archetype().
+_ARCHETYPE_FAMILY = {
+    "student_qsr_cafe": "food_footfall",
+    "generic_qsr_cafe": "food_footfall",
+    "premium_restaurant": "hospitality_destination",
+    "dark_kitchen": "delivery_kitchen",
+    "clinic_healthcare": "healthcare",
+    "preschool_school": "education",
+    "warehouse_logistics": "logistics",
+    "large_format_retail": "large_format_retail",
+    "retail_store": "generic",
+    "ev_charger": "generic",
+    "generic": "generic",
+}
+
+# Factor-family classification (shared with engine/stability.py scenarios).
+_FAMILY_RES = [
+    ("competition", re.compile(r"competition|competing|saturation|rival", re.I)),
+    ("cotenancy", re.compile(r"co.?tenancy|anchor|ecosystem|commercial\s+(land|co)", re.I)),
+    ("access", re.compile(r"\broad\b|transit|access|pedestrian|arterial|highway|metro|walk|frontage", re.I)),
+    ("demand", re.compile(
+        r"demand|student|residential|catchment|footfall|population|office|workforce"
+        r"|affluen|tourist|leisure|delivery", re.I)),
+]
+
+
+def _factor_family(name: str) -> str:
+    for fam, rx in _FAMILY_RES:
+        if rx.search(name or ""):
+            return fam
+    return "other"
+
 
 @dataclass
 class SkippedStage:
@@ -103,6 +157,11 @@ class AnalysisPlan:
     max_runtime_target_seconds: int = 90
     provider_budgets: dict = field(default_factory=dict)
     provisional_reasons: list[str] = field(default_factory=list)
+    # v1.5-Lite — deterministic prompt/spec classification: businessArchetype,
+    # locationIntent, riskTriggers, analysisMode, hardGates, softFactors,
+    # unknownConstraints. Pure metadata; never changes which stages run beyond
+    # the existing gates above.
+    intelligence: dict = field(default_factory=dict)
 
     def should_run(self, stage: str) -> bool:
         return stage in self.required_stages or stage in self.optional_stages
@@ -126,6 +185,7 @@ class AnalysisPlan:
             "maxRuntimeTargetSeconds": self.max_runtime_target_seconds,
             "providerBudgets": self.provider_budgets,
             "provisionalReasons": list(self.provisional_reasons),
+            "intelligence": dict(self.intelligence),
         }
 
     def to_preview_dict(self) -> dict:
@@ -151,6 +211,10 @@ class AnalysisPlan:
             "skipped": [{"stage": sk.stage, "reason": sk.reason} for sk in self.skipped_stages],
             "cannotVerify": [uc.display_label for uc in self.unsupported_constraints],
             "notes": list(self.provisional_reasons),
+            # v1.5-Lite — compact classification for the spec card
+            "archetype": self.intelligence.get("businessArchetype"),
+            "analysisMode": self.intelligence.get("analysisMode"),
+            "riskTriggers": self.intelligence.get("riskTriggers", []),
         }
 
 
@@ -207,6 +271,137 @@ def _routing_relevant(spec) -> tuple[bool, str]:
     if ri is not None and getattr(ri, "hasStrictRouteConstraint", False):
         return True, "strict drive/walk-time phrasing detected in the prompt"
     return False, "no drive/walk-time or delivery-radius constraint stated"
+
+
+# ── v1.5-Lite: deterministic classification (pure metadata, no provider calls) ─
+
+def _business_archetype(spec, text: str) -> str:
+    """Canonical archetype key first (deterministic registry), text fallback."""
+    key = getattr(spec, "archetypeKey", None) or ""
+    if key in _ARCHETYPE_FAMILY:
+        return _ARCHETYPE_FAMILY[key]
+    if _DARK_KITCHEN_RE.search(text):
+        return "delivery_kitchen"
+    if _LARGE_FORMAT_RE.search(text):
+        return "logistics" if _LOGISTICS_RE.search(text) else "large_format_retail"
+    if _HOSPITALITY_RE.search(text) and _FOOD_RE.search(text):
+        return "hospitality_destination"
+    if _HEALTHCARE_RE.search(text):
+        return "healthcare"
+    if _EDUCATION_RE.search(text):
+        return "education"
+    if _LOGISTICS_RE.search(text):
+        return "logistics"
+    if _FOOD_RE.search(text):
+        return "food_footfall"
+    return "generic"
+
+
+def _location_intent(spec, text: str, *, water: bool, routing: bool) -> str:
+    if water:
+        return "riverfront_or_waterfront"
+    if routing:
+        return "within_travel_time"
+    if _BETWEEN_RE.search(text):
+        return "between_landmarks"
+    if _NEAR_RE.search(text):
+        return "near_anchor"
+    if _ALONG_RE.search(text):
+        return "along_corridor"
+    if getattr(spec, "exclusions", None):
+        return "outside_exclusion_zone"
+    sa = getattr(spec, "studyArea", None)
+    if sa is not None and getattr(sa, "type", "") == "places" and getattr(sa, "places", None):
+        return "inside_locality"
+    return "unspecified"
+
+
+def _classify_intelligence(
+    spec, text: str, plan: "AnalysisPlan", *,
+    water: bool, buildability: bool, routing: bool,
+) -> dict:
+    """Assemble the v1.5-Lite classification from already-computed relevance
+    decisions + spec fields. Deterministic: same spec → same dict.
+
+    Runtime-only triggers (low_data_confidence, provider_degraded) are NOT
+    plan-time knowable — they surface in analysisCompleteness/dataSufficiencyV2
+    instead of here.
+    """
+    archetype = _business_archetype(spec, text)
+    wf = getattr(spec, "waterfront", None)
+    strict = bool(
+        (wf is not None and getattr(wf, "strictness", None) == "strict")
+        or _STRICT_RE.search(text)
+    )
+    unknown_keys = [uc.constraint for uc in plan.unsupported_constraints]
+
+    risk: list[str] = []
+    if water:
+        risk.append("waterfront")
+    if _FOOTPRINT_RE.search(text) or _LARGE_FORMAT_RE.search(text):
+        risk.append("large_floorplate")
+    if _HEALTHCARE_RE.search(text) or _EDUCATION_RE.search(text):
+        risk.append("regulated_use")
+    if archetype == "delivery_kitchen" or (routing and _DARK_KITCHEN_RE.search(text)):
+        risk.append("delivery_time_sensitive")
+    elif routing and any(
+        getattr(rc, "mode", "") == "drive" for rc in (getattr(spec, "routeConstraints", None) or [])
+    ):
+        risk.append("delivery_time_sensitive")
+    if strict:
+        risk.append("strict_boundary")
+    if _ARTERIAL_RE.search(text):
+        risk.append("primary_arterial_required")
+    if "rent_or_lease_price" in unknown_keys:
+        risk.append("rent_cap")
+
+    if water and strict:
+        mode = "strict_corridor"
+    elif routing:
+        mode = "routing_required"
+    elif buildability:
+        mode = "buildability_lite_required"
+    elif archetype == "large_format_retail":
+        mode = "large_format_screening"
+    else:
+        mode = "fast_screening"
+
+    # Hard gates: what the engine will enforce as pass/fail, with the
+    # verification class each relies on. Unsupported constraints are listed
+    # separately (never gates — they cannot be verified, only disclosed).
+    gates: list[dict] = []
+    for e in getattr(spec, "exclusions", None) or []:
+        gates.append({"gate": f"exclusion:{e.name}", "type": "buffer_exclusion",
+                      "verification": "geometry"})
+    for c in getattr(spec, "corridors", None) or []:
+        gates.append({"gate": f"corridor:{c.name}", "type": "corridor",
+                      "verification": "geometry"})
+    for rc in getattr(spec, "routeConstraints", None) or []:
+        gates.append({"gate": f"route:{rc.name}", "type": "travel_time",
+                      "verification": "network_routing"})
+    if wf is not None and getattr(wf, "isWaterfront", False):
+        gates.append({"gate": "waterfront_band", "type": "corridor",
+                      "verification": "geometry"})
+
+    soft = [
+        {
+            "id": lid,
+            "name": info.get("name", lid),
+            "family": _factor_family(info.get("name", lid)),
+            "support": info.get("support", "observed"),
+        }
+        for lid, info in plan.factor_support.items()
+    ]
+
+    return {
+        "businessArchetype": archetype,
+        "locationIntent": _location_intent(spec, text, water=water, routing=routing),
+        "analysisMode": mode,
+        "riskTriggers": risk,
+        "hardGates": gates,
+        "softFactors": soft,
+        "unknownConstraints": unknown_keys,
+    }
 
 
 _UNSUPPORTED_RULES = [
@@ -370,5 +565,11 @@ def create_analysis_plan(spec, raw_intent=None, study_area_hint=None) -> Analysi
     if routing:
         target += 45
     plan.max_runtime_target_seconds = min(target, s.job_max_runtime_seconds)
+
+    # v1.5-Lite — deterministic classification (metadata only; the stage gates
+    # above are the sole behavioral decisions).
+    plan.intelligence = _classify_intelligence(
+        spec, text, plan, water=water, buildability=buildability, routing=routing,
+    )
 
     return plan

@@ -175,6 +175,74 @@ describe('normalizeAnalysisResult', () => {
     expect(r.locations).toHaveLength(1);
   });
 
+  // ── v1.5-Lite: analysisRecommendation / dataSufficiencyV2 / candidate labels ──
+
+  it('old payload without v1.5 keys renders with no v1.5 fields and no warnings', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's', locations: [{ name: 'Z', lat: 22.5, lng: 88.3, mcda_score: 7 }],
+    }) as any;
+    expect(r.analysisRecommendation).toBeUndefined();
+    expect(r.dataSufficiencyV2).toBeUndefined();
+    expect(r.normalizationWarnings).toBeUndefined();
+    expect(r.locations[0].investigationLabel).toBeUndefined();
+  });
+
+  it('normalizes a well-formed v1.5 payload', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's',
+      analysisRecommendation: 'PROVISIONAL_CANDIDATE',
+      dataSufficiencyV2: {
+        geocoding: 'verified', boundary_or_corridor: 'verified',
+        demand_data: 'proxy', competition_data: 'verified',
+        road_access: 'verified', routing: 'not_required',
+        buildability_lite: 'not_required',
+        hard_constraints: { verified_count: 2, unknown_count: 2, failed_count: 0 },
+        external_provider_health: 'ok',
+        final_confidence: 'medium',
+        confidence_reason: '2 constraint(s) cannot be verified from data.',
+      },
+      locations: [{
+        name: 'Z1', lat: 22.5, lng: 88.3, mcda_score: 6.8,
+        investigationLabel: 'PROVISIONAL_CANDIDATE',
+        stabilityLabel: 'STABLE_TOP_3',
+        stabilityNote: 'Stays in the top 3 under every weighting scenario.',
+      }],
+    }) as any;
+    expect(r.analysisRecommendation).toBe('PROVISIONAL_CANDIDATE');
+    expect(r.dataSufficiencyV2.final_confidence).toBe('medium');
+    expect(r.dataSufficiencyV2.demand_data).toBe('proxy');
+    expect(r.dataSufficiencyV2.hard_constraints.unknown_count).toBe(2);
+    expect(r.locations[0].investigationLabel).toBe('PROVISIONAL_CANDIDATE');
+    expect(r.locations[0].stabilityLabel).toBe('STABLE_TOP_3');
+  });
+
+  it('drops malformed v1.5 fields instead of crashing the drawer', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's', locations: [{
+        name: 'Z', lat: 22.5, lng: 88.3, mcda_score: 5,
+        investigationLabel: { nope: true }, stabilityLabel: 42,
+      }],
+      analysisRecommendation: 'TOTALLY_INVALID_VALUE',
+      dataSufficiencyV2: 'oops',
+    }) as any;
+    expect(r.analysisRecommendation).toBeUndefined();      // unknown enum → dropped
+    expect(r.dataSufficiencyV2).toBeUndefined();
+    expect(r.normalizationWarnings.join(' ')).toContain('dataSufficiencyV2');
+    expect(r.locations[0].investigationLabel).toBeUndefined();
+    expect(r.locations[0].stabilityLabel).toBeUndefined();
+  });
+
+  it('fills safe defaults for a partial dataSufficiencyV2', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's', locations: [],
+      dataSufficiencyV2: { final_confidence: 'low' },
+    }) as any;
+    expect(r.dataSufficiencyV2.geocoding).toBe('unknown');
+    expect(r.dataSufficiencyV2.hard_constraints).toEqual(
+      { verified_count: 0, unknown_count: 0, failed_count: 0 });
+    expect(r.dataSufficiencyV2.final_confidence).toBe('low');
+  });
+
   it('leaves a healthy result essentially untouched (no spurious warnings)', () => {
     const healthy = {
       summary: 'ok', business_type: 'cafe', target_location: 'Kolkata',
