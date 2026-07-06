@@ -36,7 +36,7 @@ def _base_spec(objective: str, business: str, *, layers=None, waterfront=None,
         "version": "2.2",
         "objective": objective,
         "businessType": business,
-        "studyArea": {"type": "places", "places": ["Kolkata"]},
+        "studyArea": {"type": "places", "places": ["Pune"]},
         "layers": layers or [
             {"id": "demand", "name": "Demand proxy", "weight": 0.6,
              "direction": "positive",
@@ -95,7 +95,7 @@ def _supermarket_spec() -> SpecV2:
 
 def _dark_kitchen_spec() -> SpecV2:
     return _base_spec(
-        "I need a dark kitchen location in South Kolkata exactly within a "
+        "I need a dark kitchen location in South Pune exactly within a "
         "10-minute delivery drive of Ballygunge Phari, strictly outside a 1km "
         "walking radius of any metro station",
         "dark kitchen",
@@ -108,12 +108,17 @@ def _dark_kitchen_spec() -> SpecV2:
 
 # ── 1-4. Plan-level rules for the four live prompts ───────────────────────────
 
-def test_cafe_plan_skips_buildability_and_water():
+def test_cafe_plan_skips_water_but_requires_buildability():
+    # v1.6.2 — "quick-service cafe" is a _COMMERCIAL_RE match: a cafe cannot
+    # legally sit on rail land / a ghat / protected open space, so buildability
+    # (and its frontage_proxy companion) is now correctly REQUIRED regardless
+    # of city. Water stays skipped: no water/coastal-metro signal for "Pune".
     plan = create_analysis_plan(_cafe_spec())
     skipped = {s.stage for s in plan.skipped_stages}
     assert "water_geometry" in skipped
-    assert "buildability" in skipped
-    assert "frontage_proxy" in skipped
+    assert "buildability" not in skipped
+    assert plan.should_run("buildability")
+    assert plan.should_run("frontage_proxy")
     assert "routing" in skipped                  # no drive/walk-time constraint stated
     assert plan.should_run("places_aggregate")   # competition needs POI counts
     assert plan.should_run("pass_a_scoring")
@@ -130,12 +135,14 @@ def test_riverside_plan_requires_water_and_keeps_buildability():
     assert not plan.is_skipped("water_geometry")
 
 
-def test_supermarket_plan_marks_rent_footprint_unverified_and_skips_buildability():
+def test_supermarket_plan_marks_rent_footprint_unverified_and_runs_buildability():
+    # v1.6.2 — "supermarket" is a _COMMERCIAL_RE match, so buildability is now
+    # correctly required (a supermarket cannot sit on rail/ghat/protected land).
     plan = create_analysis_plan(_supermarket_spec())
     keys = {c.constraint for c in plan.unsupported_constraints}
     assert "rent_or_lease_price" in keys
     assert "floor_area_footprint" in keys
-    assert plan.is_skipped("buildability")
+    assert plan.should_run("buildability")
     assert plan.is_skipped("water_geometry")
     # unsupported constraints are labeled, never scored
     for c in plan.unsupported_constraints:
@@ -162,10 +169,17 @@ def test_plan_preview_shape_for_spec_card():
 
 
 def test_plan_budgets_reflect_skips():
+    # v1.6.2 — cafe now also runs buildability (correctly), so it plans MORE
+    # overpass calls than before but still fewer than riverside (which adds
+    # both the water fetch AND a corridor fetch on top of buildability).
     cafe = create_analysis_plan(_cafe_spec())
     river = create_analysis_plan(_riverside_spec())
     assert cafe.provider_budgets["overpassCallsPlanned"] < river.provider_budgets["overpassCallsPlanned"]
-    assert cafe.max_runtime_target_seconds < river.max_runtime_target_seconds
+    # Dark kitchen (South Pune) genuinely skips both water and buildability —
+    # the clearest "skips everything gated" baseline for the runtime-target check.
+    dark = create_analysis_plan(_dark_kitchen_spec())
+    assert dark.provider_budgets["overpassCallsPlanned"] < river.provider_budgets["overpassCallsPlanned"]
+    assert dark.max_runtime_target_seconds <= river.max_runtime_target_seconds
 
 
 # ── E2E harness (mirrors test_v147; all providers mocked, with call spies) ────
@@ -261,29 +275,33 @@ def _run_pipeline(spec: SpecV2, *, healthy_places: bool = True):
     return job, spies
 
 
-# ── 5/8/10. Cafe e2e: zero skipped-stage provider calls, fast success ─────────
+# ── 5/8/10. Cafe e2e: water genuinely skipped, buildability genuinely runs ────
 
-def test_cafe_pipeline_skips_geometry_calls_and_returns_candidates():
+def test_cafe_pipeline_skips_water_but_runs_buildability():
     job, spies = _run_pipeline(_cafe_spec())
     assert job.status == "done", f"job failed: {job.error}"
     r = job.result
     assert r["status"] == "success"
     assert r["locations"], "candidates must still be returned"
-    # No provider call for skipped stages: water geometry, buildability
-    # area/named fetches, frontage road lines must never fire.
-    assert spies["area"] == 0
-    assert spies["named"] == 0
-    assert spies["line"] == 0
+    # Water body geometry (the water_geometry stage) never fetched — no water
+    # tag ever requested — but buildability (v1.6.2: correctly required for a
+    # commercial "cafe" brief) DOES make its own area/named/line calls.
+    assert not any(
+        t.startswith(("natural=water", "waterway", "water="))
+        for t in spies["water_tags_seen"]
+    )
+    assert spies["area"] > 0 or spies["named"] > 0
     ac = r["analysisCompleteness"]
     skipped = {s["stage"] for s in ac["skippedStages"]}
-    assert {"water_geometry", "buildability", "frontage_proxy"} <= skipped
+    assert "water_geometry" in skipped
+    assert "buildability" not in skipped
     # Skipped-irrelevant ≠ failure and does not punish confidence.
     assert ac["provisional"] is False
     assert ac["confidenceLevel"] == "H"
     assert ac["coreScoringComplete"] is True
-    # buildabilityStatus is honest — never a fabricated "viable" verdict
+    # buildabilityStatus is honest — genuinely checked now, never "unchecked".
     for loc in r["locations"]:
-        assert loc.get("buildabilityStatus") in ("unchecked", "excluded")
+        assert loc.get("buildabilityStatus") in ("viable", "weak", "excluded")
 
 
 # ── Riverside e2e: water/corridor genuinely runs ──────────────────────────────
@@ -333,8 +351,9 @@ def test_supermarket_unsupported_constraints_suppress_recommended():
         loc.get("recommendationStatus") != "RECOMMENDED"
         for loc in r["locations"]
     )
-    # Buildability skipped → no Overpass geometry calls for it.
-    assert spies["area"] == 0 and spies["named"] == 0
+    # v1.6.2 — buildability now correctly RUNS for a supermarket brief
+    # (_COMMERCIAL_RE match), so its area/named calls DO fire.
+    assert spies["area"] > 0 or spies["named"] > 0
 
 
 # ── Dark kitchen e2e: routing runs, buildability/water skipped ────────────────

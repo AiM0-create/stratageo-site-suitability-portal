@@ -66,6 +66,75 @@ _AVOID_RAIL_RE = re.compile(
 )
 _DARK_KITCHEN_RE = re.compile(r"\b(dark|cloud|ghost)\s*.?\s*kitchen\b|\bdelivery.?only\b", re.I)
 
+# v1.6.2 — geography-aware water fallback. A study area resolved to a coastal
+# or major-port Indian metro carries a real risk of hexes landing on water /
+# dock land even when the PROMPT itself has zero water wording (e.g. "high-end
+# gym in Mumbai" — no river/coast keyword, but Mumbai is a peninsula city with
+# extensive dockland). The templated objective (deterministic_planner.py)
+# always embeds the resolved place name ("... for a {biz} in {place}"), so
+# this matches against the same _spec_text() already scanned for _WATER_RE —
+# no new provider call, still fully deterministic. Scoped to well-known
+# coastal/port metros rather than an exhaustive gazetteer to avoid false
+# positives on unrelated name collisions.
+_COASTAL_METRO_RE = re.compile(
+    r"\b(mumbai|bombay|navi\s+mumbai|thane|vasai|virar|chennai|madras|kolkata|calcutta"
+    r"|kochi|cochin|ernakulam|visakhapatnam|vizag|mangalore|mangaluru|surat|goa"
+    r"|panaji|panjim|puducherry|pondicherry|thiruvananthapuram|trivandrum"
+    r"|kozhikode|calicut|kannur|alappuzha|alleppey|kollam|quilon|kandla|gandhidham"
+    r"|paradip|puri|tuticorin|thoothukudi|rameswaram|karwar|udupi|diu\b|daman"
+    r"|porbandar|dwarka|bhavnagar|jamnagar|nagapattinam)\b",
+    re.I,
+)
+
+# ── v1.6.2 — buildability flags: single source of truth ───────────────────────
+# Previously duplicated (with a NARROWER, out-of-sync copy) between here and
+# services/jobs.py. jobs.py._buildability_relevant() used only _LAND_DEV_RE /
+# _AVOID_RAIL_RE for its "is buildability relevant" decision, while the actual
+# mask-selection function (_buildability_flags, formerly in jobs.py) also
+# fired on a broad commercial-business regex (_COMMERCIAL_RE — includes "gym",
+# "restaurant", "retail", etc.). Whenever the planner's narrower check decided
+# buildability was NOT relevant, jobs.py forcibly zeroed the railway/ghat/
+# protected flags that _buildability_flags() had correctly set — silently
+# dropping no-build-land protection for the vast majority of commercial
+# briefs. Observed live: "high-end gym in Mumbai" (a _COMMERCIAL_RE match) got
+# zero buildability masking and a candidate landed on port/dockyard land.
+# Fix: the planner's relevance decision now calls this SAME function, so it
+# can never diverge from what jobs.py actually applies.
+_COMMERCIAL_RE = re.compile(
+    r"restaurant|cafe|café|coffee|qsr|quick.?service|retail|shop|store|outlet|mall"
+    r"|showroom|kiosk|bar\b|pub\b|brewery|food|f&b|dining|hotel|resort|lodg|hospitality"
+    r"|supermarket|grocery|bakery|clinic|salon|gym|bank|pharmacy",
+    re.I,
+)
+_PARK_USE_RE = re.compile(
+    r"park\s+kiosk|open.?air|in\s+the\s+park|park\s+caf|promenade\s+kiosk|garden\s+caf",
+    re.I,
+)
+
+
+def _buildability_flags(spec) -> dict:
+    """Decide which deterministic no-build masks apply to this brief (v1.0.3).
+
+    Returns flags for railway / ghat / protected-open-space / commercial-proxy.
+    Applies to WATERFRONT and COMMERCIAL briefs (a restaurant cannot be built on
+    rail land / a ghat / in a park); railway also when the user explicitly says to
+    avoid it. A park-use brief (park kiosk / open-air cafe) suppresses open-space
+    exclusion. Non-commercial, non-waterfront briefs are left untouched.
+    """
+    text = f"{getattr(spec, 'objective', '') or ''} {getattr(spec, 'businessType', '') or ''}".lower()
+    wf = getattr(spec, "waterfront", None)
+    is_wf = bool(wf and getattr(wf, "isWaterfront", False))
+    is_commercial = bool(_COMMERCIAL_RE.search(text))
+    avoid_rail = bool(_AVOID_RAIL_RE.search(text))
+    base = is_wf or is_commercial
+    return {
+        "railway": base or avoid_rail,
+        "ghat": base,
+        "protected": base,
+        "park_exception": bool(_PARK_USE_RE.search(text)),
+        "commercial_proxy": is_commercial or is_wf,
+    }
+
 # ── v1.5-Lite: intelligence classification regexes ────────────────────────────
 _LARGE_FORMAT_RE = re.compile(
     r"\bsupermarket\b|\bhypermarket\b|\bdepartment\s+store\b|\blarge.?format\b"
@@ -244,6 +313,13 @@ def _water_relevant(spec, text: str) -> tuple[bool, str]:
     m = _WATER_RE.search(text)
     if m:
         return True, f"prompt mentions '{m.group(0)}'"
+    m_coast = _COASTAL_METRO_RE.search(text)
+    if m_coast:
+        return True, (
+            f"study area '{m_coast.group(0)}' is a coastal/port metro — "
+            "candidates can land on water/dock land even with no water "
+            "wording in the prompt"
+        )
     # v1.5.2 determinism fix: a water-tagged EXCLUSION alone no longer makes
     # water (and, transitively, the whole buildability cascade) relevant. The
     # LLM spec-builder was observed non-deterministically attaching a default
@@ -267,13 +343,22 @@ def _water_relevant(spec, text: str) -> tuple[bool, str]:
 def _buildability_relevant(spec, text: str, water: bool) -> tuple[bool, str]:
     if water:
         return True, "waterfront brief — ghat/heritage/no-build land is a real risk"
+    # v1.6.2 — same decision function jobs.py uses to pick masks (see
+    # _buildability_flags docstring above). A commercial/footfall business
+    # (the vast majority of prompts — "gym", "restaurant", "retail", etc.)
+    # cannot legally sit on rail land, a ghat, or protected open space, so
+    # this check now matches what actually gets applied instead of a
+    # narrower, independently-drifting text regex.
+    flags = _buildability_flags(spec)
+    if flags.get("commercial_proxy"):
+        return True, "commercial/footfall business — cannot legally sit on rail/ghat/protected land"
+    if flags.get("railway"):
+        return True, "user explicitly asked to avoid railway land"
     m = _LAND_DEV_RE.search(text)
     if m:
         return True, f"prompt mentions '{m.group(0)}' — land/parcel development signal"
-    if _AVOID_RAIL_RE.search(text):
-        return True, "user explicitly asked to avoid railway land"
     return False, (
-        "no waterfront / land-development / railway-avoidance signal — "
+        "no commercial-footfall / land-development / railway-avoidance signal — "
         "parcel-level validation remains an offline field task"
     )
 
@@ -369,14 +454,18 @@ def _classify_intelligence(
     if "rent_or_lease_price" in unknown_keys:
         risk.append("rent_cap")
 
+    # v1.6.2 — large_format_retail checked BEFORE buildability: now that
+    # buildability correctly fires for nearly every commercial archetype (see
+    # _buildability_flags), checking it first would make the more specific
+    # "large_format_screening" label unreachable for supermarkets/hypermarkets.
     if water and strict:
         mode = "strict_corridor"
     elif routing:
         mode = "routing_required"
-    elif buildability:
-        mode = "buildability_lite_required"
     elif archetype == "large_format_retail":
         mode = "large_format_screening"
+    elif buildability:
+        mode = "buildability_lite_required"
     else:
         mode = "fast_screening"
 

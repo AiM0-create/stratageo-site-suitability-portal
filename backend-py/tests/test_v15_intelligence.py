@@ -42,7 +42,10 @@ def test_cafe_classification():
     intel = create_analysis_plan(_cafe_spec()).intelligence
     assert intel["businessArchetype"] == "food_footfall"
     assert intel["locationIntent"] == "near_anchor"
-    assert intel["analysisMode"] == "fast_screening"
+    # v1.6.2 — buildability now correctly required for a commercial cafe
+    # brief (see planner_lite._buildability_flags), so the mode reflects
+    # that instead of "fast_screening".
+    assert intel["analysisMode"] == "buildability_lite_required"
     assert "waterfront" not in intel["riskTriggers"]
     assert intel["unknownConstraints"] == []
     # soft factors carry family + support labels
@@ -147,7 +150,9 @@ def test_cafe_payload_carries_intelligence_sufficiency_and_labels():
     ds2 = r["dataSufficiencyV2"]
     assert ds2["geocoding"] == "verified"
     assert ds2["routing"] == "not_required"          # no travel-time constraint stated
-    assert ds2["buildability_lite"] == "not_required"
+    # v1.6.2 — buildability now correctly runs for a commercial cafe brief
+    # (never degraded in this mocked e2e run, so "verified", not "not_required").
+    assert ds2["buildability_lite"] == "verified"
     assert ds2["final_confidence"] in ("high", "medium", "low")
     assert ds2["confidence_reason"]
     assert ds2["external_provider_health"] in ("ok", "degraded")

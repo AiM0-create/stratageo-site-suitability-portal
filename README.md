@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.6.1 — Confidence, Report & Quotas**
+**Current version: v1.6.2 — Smart Water/Buildability Relevance** *(backend-only fix; no frontend code changed, so the UI's `v…` badge still reads v1.6.1)*
 
 ---
 
@@ -20,6 +20,15 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.6.2 Highlights
+
+- **Fixed a live-observed correctness bug**: "high-end gym in Mumbai" (a bare screening prompt with zero water/land-development wording) put a candidate on the coastline/dockyard edge and another near Mumbai Port Trust/CSMT railway land.
+- **Buildability relevance is now a single source of truth** — the planner's "should this stage even run?" gate previously used a narrower, independently-drifting check than the one that actually picks which no-build masks to apply, so most commercial briefs ("gym", "cafe", "supermarket", …) silently lost their railway/ghat/protected-land protection. The two are now the same function; they can't diverge again.
+- **Water relevance is geography-aware, not just prompt-text-aware** — a resolved coastal/port metro (Mumbai, Chennai, Kolkata, Kochi, Visakhapatnam, and other major Indian coastal cities) now triggers the water mask even when the prompt itself says nothing about water.
+- **No timeout regression** — both fixes make the buildability stage run more often, but each run is still bounded by the existing v1.5.2 stage budget + concurrency + per-fetch degradation, which caps worst-case wall clock independent of how often the stage fires (pinned by a new regression test).
 
 ---
 
@@ -304,7 +313,7 @@ After deploy, verify:
 curl https://<your-cloud-run-url>/health
 ```
 
-Expected response includes `appVersion: "1.6.1"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
+Expected response includes `appVersion: "1.6.2"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
 
 **Rollback discipline:** before every backend deploy, tag the currently-live commit first — `git tag -a rollback-pre-vX.Y.Z <live-commit-sha> -m "..." && git push origin rollback-pre-vX.Y.Z` — so `git checkout` back to a known-good state is always one command away (see [Rollback](#rollback) below).
 
@@ -348,7 +357,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.6.1** *(current)* | Confidence, Report & Quotas — unified confidence verdict, PDF weight-audit table, per-customer admin-granted quota allotments, server-side auth/quota enforcement (off by default), chat rate limiting |
+| **v1.6.2** *(current, backend-only)* | Smart Water/Buildability Relevance — fixed a live bug where commercial briefs could land on port/rail/water land; buildability relevance now shares one source of truth with mask selection, water relevance is geography-aware (coastal metros), no timeout regression |
+| **v1.6.1** | Confidence, Report & Quotas — unified confidence verdict, PDF weight-audit table, per-customer admin-granted quota allotments, server-side auth/quota enforcement (off by default), chat rate limiting |
 | **v1.6.0** | Factor Weight Sliders — plan-card weight adjustments preserved across chat turns (fixes a silent-wipe bug), post-run sliders re-rank + instantly recolor the map client-side, weight audit trail (default vs. executed), fixed a fabricated-zero scoring bug in the reweighting engine |
 | **v1.5.2** | Reliability & Consistency — buildability stage budget + concurrent fetches (fixes live 240s timeouts), deterministic stage planning & templated objective (identical prompt → identical plan), small-format grocery archetype fix, block-scale res-10 grids on request, screening→refined score transparency |
 | **v1.5.1** | Hard Constraint Verification Visibility — per-requested-constraint status panel (Verified / Proxy verified / Not verifiable / Requested but not enforced / Failed), per-candidate warning chips, strong-verdict safety cap |

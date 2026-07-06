@@ -41,6 +41,67 @@ change — only the frontend usage log and Admin Dashboard changed.
 
 ---
 
+## [1.6.2] — 2026-07-07 — Smart Water/Buildability Relevance (backend-only)
+
+No frontend code changed in this release; `package.json`/the UI's `v…` badge
+stay at 1.6.1. Backend-only fix, backend-only redeploy.
+
+### Fixed
+- **Live-observed bug: commercial briefs could land on port/rail/water land.**
+  "High-end gym in Mumbai" — a bare screening prompt with zero water or
+  land-development wording — put a recommended candidate on the Mumbai
+  coastline/dockyard edge, and another near Mumbai Port Trust/CSMT railway
+  land. Root cause was two independent gaps:
+  1. The PlannerLite relevance gate's `_buildability_relevant()` used a
+     narrower, independently-drifting check than
+     `jobs.py._buildability_flags()` (moved to `engine/planner_lite.py` as
+     the single source of truth) — the function that actually decides which
+     no-build masks to apply. `_buildability_flags()` already correctly
+     recognized "gym" as commercial (via `_COMMERCIAL_RE`); the narrower gate
+     did not, so whenever the gate said "skip", `jobs.py` forcibly zeroed the
+     railway/ghat/protected flags the flags function had correctly set —
+     silently dropping no-build-land protection for most commercial briefs.
+     Fixed: the gate now calls the exact same function, so the two can never
+     diverge again.
+  2. `_water_relevant()` was pure prompt-text matching with no geography
+     awareness — a coastal peninsula city like Mumbai carries a real
+     water/dock risk that the prompt itself may never mention. Added a
+     deterministic coastal/port-metro check (Mumbai, Chennai, Kolkata, Kochi,
+     Visakhapatnam, and other major Indian coastal cities) that triggers the
+     water mask from the resolved study area alone.
+- **No buildability-timeout regression.** Both fixes make the buildability
+  stage run more often (it was previously wrongly skipped for most
+  commercial prompts), but the v1.5.2 stage budget + bounded concurrency +
+  per-fetch graceful degradation already bound worst-case wall clock
+  independent of trigger frequency — broader (correct) triggering doesn't
+  reintroduce the 240s job timeouts that fix addressed. Pinned by a new
+  regression test asserting the plan's runtime target stays within the job
+  ceiling for the exact Mumbai-gym scenario.
+
+### Tests
+- New `test_v162_smart_masks.py` (5 tests): the exact Mumbai-gym regression,
+  an isolation test proving the water trigger works from city alone (a
+  business type matching neither the commercial nor land-development regex),
+  a landlocked-city counterfactual (proves the fix is geography-aware, not
+  an across-the-board always-on change), an invariant that buildability
+  relevance can never diverge from `_buildability_flags()` again, and the
+  timeout-safety check.
+- Updated 9 existing tests across `test_v149_planner_lite.py`,
+  `test_v15_intelligence.py`, `test_hard_constraint_visibility.py`, and
+  `test_v152_reliability.py` whose fixtures/assertions had encoded the old
+  (buggy) skip-buildability-for-commercial-briefs behavior as expected —
+  cafe/supermarket fixtures now correctly show buildability required, and
+  the shared live-prompt fixtures moved their default study area from
+  "Kolkata" (itself a real port/river city, now correctly water-relevant) to
+  "Pune" (landlocked) to keep testing genuine irrelevance-skip coverage.
+- **584 passed** (579 + 5 new).
+
+### Rollback plan
+Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`,
+backend revision `stratageo-engine-00060-dxr`).
+
+---
+
 ## [1.6.1] — 2026-07-07 — Confidence, Report & Quotas
 
 ### Added

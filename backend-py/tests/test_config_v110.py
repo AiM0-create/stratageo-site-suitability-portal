@@ -7,9 +7,9 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def test_version_is_120():
-    # Updated to v1.6.1 — Confidence, Report & Quotas
-    assert APP_VERSION == "1.6.1"
-    assert ENGINE_VERSION == "stratageo-engine-00060"
+    # Updated to v1.6.2 — Smart Water/Buildability Relevance
+    assert APP_VERSION == "1.6.2"
+    assert ENGINE_VERSION == "stratageo-engine-00061"
 
 
 # ── Model defaults (v1.1.1 — gpt-5.4 family) ─────────────────────────────────

@@ -178,16 +178,15 @@ def test_waterfront_enforced_is_verified():
 
 # ── 5. Buildability framing ──────────────────────────────────────────────────
 
-def test_cafe_buildability_not_required_and_not_requested():
-    """The cafe prompt skips buildability as irrelevant — the entry must be
-    not_required and excluded from requestedCount (no noise, per Part 8)."""
+def test_cafe_buildability_is_proxy_verified():
+    """v1.6.2 — a cafe is a _COMMERCIAL_RE match: buildability now correctly
+    runs (a cafe cannot legally sit on rail/ghat/protected land), so its entry
+    is proxy_verified like any other commercial/waterfront brief — no longer
+    not_required."""
     hcv = _build(_cafe_spec())
     b = _by_id(hcv, "buildability_lite")
-    assert b["status"] == "not_required"
-    assert b["requested"] is False
-    assert b["severity"] == "info"
-    # not_required never produces a candidate warning
-    assert all(w["constraintId"] != "buildability_lite" for w in candidate_warnings(hcv))
+    assert b["status"] == "proxy_verified"
+    assert b["fieldValidationRequired"] is True
 
 
 def test_riverside_buildability_is_proxy_verified_never_verified():

@@ -58,7 +58,9 @@ from ..engine.metro import (
     metro_stations_to_pois,
 )
 from ..engine.route_policy import validate_strict_route_constraints
-from ..engine.planner_lite import create_analysis_plan, _factor_family
+from ..engine.planner_lite import (
+    create_analysis_plan, _factor_family, _buildability_flags, _COMMERCIAL_RE,
+)
 from ..engine.stability import compute_ranking_stability
 from ..engine.hard_constraints import (
     build_hard_constraint_verification,
@@ -70,49 +72,13 @@ logger = logging.getLogger(__name__)
 
 import re as _re  # noqa: E402  (local helper regexes)
 
-# Commercial / footfall briefs where no-build land (rail/ghat/heritage/open-space)
-# should be hard-excluded — a restaurant/shop cannot sit on a railway yard or in a
-# graveyard. Kept deliberately broad but evidence-gated (we only mask where OSM
-# positively marks no-build land).
-_COMMERCIAL_RE = _re.compile(
-    r"restaurant|cafe|café|coffee|qsr|quick.?service|retail|shop|store|outlet|mall"
-    r"|showroom|kiosk|bar\b|pub\b|brewery|food|f&b|dining|hotel|resort|lodg|hospitality"
-    r"|supermarket|grocery|bakery|clinic|salon|gym|bank|pharmacy",
-    _re.I,
-)
-_AVOID_RAIL_RE = _re.compile(
-    r"avoid\s+railway|railway\s+land|away\s+from\s+(the\s+)?railway|not\s+(on|near)\s+railway"
-    r"|no\s+railway|exclude\s+railway",
-    _re.I,
-)
-_PARK_USE_RE = _re.compile(
-    r"park\s+kiosk|open.?air|in\s+the\s+park|park\s+caf|promenade\s+kiosk|garden\s+caf",
-    _re.I,
-)
-
-
-def _buildability_flags(spec) -> dict:
-    """Decide which deterministic no-build masks apply to this brief (v1.0.3).
-
-    Returns flags for railway / ghat / protected-open-space / commercial-proxy.
-    Applies to WATERFRONT and COMMERCIAL briefs (a restaurant cannot be built on
-    rail land / a ghat / in a park); railway also when the user explicitly says to
-    avoid it. A park-use brief (park kiosk / open-air cafe) suppresses open-space
-    exclusion. Non-commercial, non-waterfront briefs are left untouched.
-    """
-    text = f"{spec.objective} {spec.businessType}".lower()
-    is_wf = bool(spec.waterfront and spec.waterfront.isWaterfront)
-    is_commercial = bool(_COMMERCIAL_RE.search(text))
-    avoid_rail = bool(_AVOID_RAIL_RE.search(text))
-    base = is_wf or is_commercial
-    return {
-        "railway": base or avoid_rail,
-        "ghat": base,
-        "protected": base,
-        "park_exception": bool(_PARK_USE_RE.search(text)),
-        "commercial_proxy": is_commercial or is_wf,
-    }
-
+# v1.6.2 — _COMMERCIAL_RE, _AVOID_RAIL_RE, _PARK_USE_RE, and _buildability_flags
+# moved to engine/planner_lite.py so the planner's relevance GATE (should the
+# buildability stage even run?) can never diverge from the flags this module
+# actually APPLIES — the previous split copy caused live-observed no-build-land
+# protection to be silently dropped for most commercial briefs. _COMMERCIAL_RE
+# is still used below (_cap_competition_whitespace, _min_viable_score) and is
+# re-exported from planner_lite via the import above.
 
 _PREMIUM_RE = _re.compile(r"premium|luxury|high.?end|upscale|fine.?dining|flagship|5.?star|boutique", _re.I)
 

@@ -67,6 +67,21 @@ v1.6.1: Confidence, Report, Quotas, Security (Phase 3) — (1) unifiedConfidence
   docs/PHASE3-SECURITY-REVIEW.md for the full review; flipping
   STRATAGEO_REQUIRE_USER_AUTH to true is a deliberate go-live action, not
   bundled with this deploy.
+v1.6.2: Smart water/buildability relevance — fixes a live-observed failure
+  ("high-end gym in Mumbai" put a candidate on the coastline/dockyard edge and
+  another near Port Trust/CSMT railway land). Two gaps, both closed: (1) the
+  PlannerLite relevance gate's buildability check used a narrower,
+  independently-drifting regex than the one jobs.py._buildability_flags()
+  actually applies — the two are now the SAME function, so a commercial
+  brief ("gym", "cafe", "supermarket", etc.) can never again have its
+  no-build-land protection silently zeroed by the gate; (2) water relevance
+  was pure prompt-text matching with zero geography awareness — a resolved
+  coastal/port metro (Mumbai, Chennai, Kolkata, Kochi, …) now triggers the
+  water mask even with no water wording in the prompt at all. Neither change
+  reintroduces the v1.5.2 buildability-timeout problem: broader triggering
+  still runs inside the same bounded stage budget + concurrency + per-fetch
+  degradation, which bounds worst-case wall clock independent of trigger
+  frequency (pinned by a new regression test).
 """
 from functools import lru_cache
 from typing import Literal
@@ -74,17 +89,17 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.6.1"
+APP_VERSION     = "1.6.2"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00060"
+ENGINE_VERSION  = "stratageo-engine-00061"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
-# v1.6.0/v1.6.1 — the SpecV2 wire schema and the EvidenceTrail schema are
-# structurally unchanged; hardConstraintVerification / screeningScore /
+# v1.6.0/v1.6.1/v1.6.2 — the SpecV2 wire schema and the EvidenceTrail schema
+# are structurally unchanged; hardConstraintVerification / screeningScore /
 # rankingBasis / canonicalWeights / weightsAdjustedByUser / unifiedConfidence
 # are additive keys outside these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Confidence, Report & Quotas"
+RELEASE_NAME    = "Smart Water/Buildability Relevance"
 
 
 class Settings(BaseSettings):

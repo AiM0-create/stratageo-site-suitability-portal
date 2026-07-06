@@ -326,3 +326,37 @@ Tag `rollback-pre-v1.6.1` points at the previously-live commit (`d845fc9`, backe
 
 ### Go-live note (not part of this deploy)
 `STRATAGEO_REQUIRE_USER_AUTH` ships OFF. Flipping it to `true` (plus setting `MAX_PROMPTS_PER_USER` per the paid tier) is a separate, deliberate action — see `docs/PHASE3-SECURITY-REVIEW.md` § "Suggested go-live sequence for the paid tier". Not performed automatically by this release.
+
+---
+
+## v1.6.2 — Smart Water/Buildability Relevance (backend-only)
+
+### 38. `backend-py/app/engine/planner_lite.py` + `backend-py/app/services/jobs.py` — buildability single source of truth
+- **What:** `_COMMERCIAL_RE`, `_AVOID_RAIL_RE`, `_PARK_USE_RE`, and `_buildability_flags()` moved from `jobs.py` into `planner_lite.py` (jobs.py now imports them). `planner_lite._buildability_relevant()` rewritten to call `_buildability_flags(spec)` directly and return relevant=True whenever `commercial_proxy` or `railway` would fire, instead of its own narrower, independently-maintained regex pair (`_LAND_DEV_RE`/`_AVOID_RAIL_RE` only — no commercial-business check at all). `_buildability_flags()` also hardened with `getattr(..., default)` attribute access so it tolerates duck-typed spec stubs (previously assumed a real `SpecV2` with `.objective`/`.businessType`/`.waterfront`).
+- **Why (root cause):** `jobs.py`'s `_buildability_flags()` already correctly recognized "gym" (and every other word in the broad `_COMMERCIAL_RE`) as a commercial business needing no-build-land protection. But `jobs.py` line ~1290 forcibly zeroed the railway/ghat/protected flags whenever the PLANNER's separate (narrower) relevance check said "not relevant" — so a cafe/gym/supermarket/etc. brief had its correctly-computed protection silently stripped. Live-observed: a "high-end gym in Mumbai" candidate landed on port/dockyard land. `_buildability_flags()` itself was never wrong; the two-function split let them drift apart.
+- **Risk:** low — the fix REMOVES a divergence risk rather than introducing new logic; `_buildability_flags()`'s decision logic is unchanged, only its physical location and the gate's dependency on it. **Rollback:** revert commit.
+
+### 39. `backend-py/app/engine/planner_lite.py` — geography-aware water relevance
+- **What:** new `_COASTAL_METRO_RE` (Mumbai/Bombay, Chennai/Madras, Kolkata/Calcutta, Kochi/Cochin, Visakhapatnam/Vizag, Mangalore, Surat, Goa, Puducherry, Thiruvananthapuram, Kozhikode, and ~15 more major Indian coastal/port cities). `_water_relevant()` now also returns True when this matches the resolved study-area text (already embedded in the templated objective — no new provider call).
+- **Why:** water relevance was pure prompt-text matching; a coastal peninsula city carries real water/dock risk regardless of whether the prompt happens to mention water. Scoped to well-known coastal/port metros (not an exhaustive gazetteer) to avoid false positives on unrelated name collisions.
+- **Risk:** low-medium (broadens water-stage triggering for the listed cities) — mitigated by a landlocked-city counterfactual test proving the same business type in e.g. Pune does NOT trigger either stage. **Rollback:** revert commit.
+
+### 40. `backend-py/app/engine/planner_lite.py` — analysisMode priority reorder
+- **What:** `large_format_retail` archetype check moved BEFORE the `buildability` check in `_classify_intelligence()`'s mode-selection chain.
+- **Why:** now that buildability correctly fires for nearly every commercial archetype, checking it first would have made the more specific `"large_format_screening"` label unreachable for supermarkets/hypermarkets (`"buildability_lite_required"` would always win first). Purely informational metadata (plan-card display) — no gate/enforcement behavior changed.
+- **Risk:** low. **Rollback:** revert commit.
+
+### 41. Tests
+- New `backend-py/tests/test_v162_smart_masks.py` (5 tests): the exact Mumbai-gym regression (`test_gym_in_mumbai_triggers_both_water_and_buildability`); a geography-only isolation test using a business type matching neither `_COMMERCIAL_RE` nor `_LAND_DEV_RE` (proves the city alone drives the water trigger); the landlocked-city counterfactual (proves the fix isn't an always-on regression); an invariant test asserting `_buildability_relevant()` can never diverge from `_buildability_flags()` across 6 business/city combinations; and a timeout-safety check confirming the plan's runtime target stays within `job_max_runtime_seconds` for the Mumbai-gym case.
+- Updated 9 existing tests whose fixtures/assertions had encoded the OLD (buggy) behavior as expected: `test_v149_planner_lite.py` (cafe/supermarket plan + e2e tests now expect buildability to RUN, not skip; budget-comparison test rebased on the dark-kitchen fixture as the "skips everything" baseline), `test_v15_intelligence.py` (cafe's `analysisMode` → `buildability_lite_required`; cafe's `dataSufficiencyV2.buildability_lite` → `verified`), `test_hard_constraint_visibility.py` (cafe's `buildability_lite` HCV entry → `proxy_verified`). `_buildability_flags()` itself was also hardened with `getattr` defaults (item 38) so it tolerates `test_v152_reliability.py`'s duck-typed `_SpecStub`, fixing that file's water-exclusion-determinism test without changing its assertions. The shared live-prompt fixtures' default study area moved from "Kolkata" (itself a genuine port/river city — now correctly water-relevant, which is why it was changed) to "Pune" (landlocked) so the "skip when genuinely irrelevant" tests keep testing that scenario cleanly.
+- **584 passed** (579 + 5 new).
+
+### Validation (this release)
+| Check | Result |
+|---|---|
+| Backend | **584 passed** |
+| Frontend | unchanged — no frontend files touched, no rebuild/redeploy needed |
+| API/cost impact | none — pure relevance-decision logic; broader buildability triggering stays bounded by the existing v1.5.2 stage budget/concurrency, verified by test 41's timeout-safety check |
+
+### Rollback plan
+Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`, backend revision `stratageo-engine-00060-dxr`), tagged immediately before this deploy.
