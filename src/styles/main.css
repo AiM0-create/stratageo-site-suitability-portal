@@ -1305,6 +1305,19 @@ body {
 .sg-admin-source-osm { background: #fff3e0; color: #e65100; }
 .sg-admin-source-demo { background: var(--gray-100); color: var(--gray-500); }
 
+/* ─── Prompt comparison / non-determinism detection (v1.5.3) ─── */
+.sg-admin-badge-mismatch {
+  padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700;
+  background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; margin-left: 4px;
+}
+.sg-admin-row-mismatch { background: #fef2f2; }
+.sg-admin-row-output td { border-bottom: 1px solid var(--gray-200); padding: 0; }
+.sg-admin-output-panel {
+  padding: 8px 12px; background: var(--gray-50); font-size: 11px; color: var(--gray-700);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.sg-admin-output-panel code { font-size: 10px; background: var(--gray-100); padding: 1px 4px; border-radius: 3px; }
+
 /* ─── Prompt Guide ─── */
 .assistant-prompt-reminder {
   display: flex; align-items: flex-start; gap: 6px;

@@ -14,6 +14,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'users' | 'prompts'>('overview');
   const [expandedPrompts, setExpandedPrompts] = useState<Record<string, boolean>>({});
+  const [expandedOutputs, setExpandedOutputs] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const copyText = useCallback(async (id: string, text: string) => {
@@ -48,6 +49,75 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
   const filteredPrompts = selectedUser
     ? stats?.recentPrompts.filter(p => p.userId === selectedUser) || []
     : stats?.recentPrompts || [];
+
+  // ── Non-determinism detection (v1.5.3) ──
+  // Two runs with the SAME planningFingerprint are the SAME resolved prompt +
+  // archetype schema + engine version — they should always produce the same
+  // candidate count / top score / verdict. Group by fingerprint and flag any
+  // group where those disagree; that's a genuine reproducibility bug, not a
+  // "different prompt" false positive.
+  const mismatchFingerprints = React.useMemo(() => {
+    const groups: Record<string, PromptEntry[]> = {};
+    for (const p of filteredPrompts) {
+      if (!p.planningFingerprint) continue;
+      (groups[p.planningFingerprint] ??= []).push(p);
+    }
+    const flagged = new Set<string>();
+    for (const [fp, entries] of Object.entries(groups)) {
+      if (entries.length < 2) continue;
+      const distinct = new Set(entries.map(e =>
+        `${e.resultCount}|${e.topScore?.toFixed(1)}|${e.analysisRecommendation}`));
+      if (distinct.size > 1) flagged.add(fp);
+    }
+    return flagged;
+  }, [filteredPrompts]);
+
+  const exportComparisonReport = useCallback(() => {
+    const groups: Record<string, PromptEntry[]> = {};
+    for (const p of filteredPrompts) {
+      const key = p.planningFingerprint || `(no fingerprint) ${p.prompt}`;
+      (groups[key] ??= []).push(p);
+    }
+    const lines: string[] = [
+      '# Prompt Comparison Report',
+      '',
+      `Generated: ${new Date().toISOString()}`,
+      `Total prompts: ${filteredPrompts.length} · Distinct fingerprints: ${Object.keys(groups).length} · Mismatches flagged: ${mismatchFingerprints.size}`,
+      '',
+      'Entries with the same `planningFingerprint` are the same resolved prompt + archetype + engine version — they should always produce the same result count / top score / verdict. `⚠ MISMATCH` means they did not.',
+      '',
+    ];
+    for (const [key, entries] of Object.entries(groups)) {
+      const isMismatch = mismatchFingerprints.has(key);
+      entries.sort((a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0));
+      lines.push(`## ${isMismatch ? '⚠ MISMATCH — ' : ''}${entries[0].prompt}`);
+      lines.push('');
+      lines.push(`Fingerprint: \`${entries[0].planningFingerprint || 'n/a'}\` · Runs: ${entries.length}`);
+      lines.push('');
+      lines.push('| Time | User | Status | Verdict | Candidates | Top Score | Skipped Stages | Hard Constraints (V/P/U/UE/F) |');
+      lines.push('|---|---|---|---|---|---|---|---|');
+      for (const e of entries) {
+        const hc = e.hardConstraints;
+        const hcStr = hc ? `${hc.verified}/${hc.proxyVerified}/${hc.notVerifiable}/${hc.unenforced}/${hc.failed}` : '—';
+        lines.push(
+          `| ${e.timestamp ? e.timestamp.toISOString() : '—'} | ${e.email} | ${e.analysisStatus || '—'} `
+          + `| ${e.analysisRecommendation || '—'} | ${e.resultCount}${e.requestedTopN ? ` / ${e.requestedTopN}` : ''} `
+          + `| ${e.topScore?.toFixed(1) ?? '—'} | ${(e.skippedStages || []).join(', ') || '—'} | ${hcStr} |`,
+        );
+        if (e.candidates?.length) {
+          lines.push(`| | | | candidates: ${e.candidates.map(c => `${c.name} (${c.score?.toFixed(1) ?? '—'}${c.investigationLabel ? `, ${c.investigationLabel}` : ''})`).join('; ')} | | | | |`);
+        }
+      }
+      lines.push('');
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `prompt-comparison-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filteredPrompts, mismatchFingerprints]);
 
   return (
     <div className="sg-admin-overlay" onClick={onClose}>
@@ -248,14 +318,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                       {copiedId === 'all' ? '✓ Copied' : `Copy all (${filteredPrompts.length})`}
                     </button>
                   )}
+                  {filteredPrompts.length > 0 && (
+                    <button
+                      className="sg-admin-btn-sm"
+                      onClick={exportComparisonReport}
+                      title="Download a structured .md report grouping runs by planningFingerprint, flagging any where the same prompt produced a different result"
+                    >
+                      Export comparison report (.md)
+                    </button>
+                  )}
+                  {mismatchFingerprints.size > 0 && (
+                    <span className="sg-admin-badge-mismatch" title="Same prompt/fingerprint produced different results across runs">
+                      ⚠ {mismatchFingerprints.size} mismatch{mismatchFingerprints.size > 1 ? 'es' : ''} detected
+                    </span>
+                  )}
                 </div>
                 <table className="sg-admin-table">
                   <thead>
                     <tr>
+                      <th></th>
                       <th>Email</th>
                       <th>Prompt</th>
                       <th>Sector</th>
                       <th>City</th>
+                      <th>Verdict</th>
                       <th>Score</th>
                       <th>Results</th>
                       <th>Tokens</th>
@@ -266,11 +352,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPrompts.map(p => (
-                      <tr key={p.id}>
+                    {filteredPrompts.map(p => {
+                      const hasOutput = !!(p.planningFingerprint || p.analysisRecommendation || p.candidates?.length);
+                      const isMismatch = !!p.planningFingerprint && mismatchFingerprints.has(p.planningFingerprint);
+                      return (
+                      <React.Fragment key={p.id}>
+                      <tr className={isMismatch ? 'sg-admin-row-mismatch' : ''}>
+                        <td>
+                          {hasOutput && (
+                            <button
+                              className="sg-admin-btn-sm"
+                              onClick={() => setExpandedOutputs(e => ({ ...e, [p.id]: !e[p.id] }))}
+                              title={expandedOutputs[p.id] ? 'Hide output' : 'Show output'}
+                            >
+                              {expandedOutputs[p.id] ? '▾' : '▸'} Output
+                            </button>
+                          )}
+                        </td>
                         <td className="sg-admin-cell-email">{p.email}</td>
                         <td className="sg-admin-cell-prompt">
                           {p.isFollowUp && <span className="sg-admin-badge-followup">F/U</span>}
+                          {isMismatch && <span className="sg-admin-badge-mismatch" title="Same fingerprint, different result across runs">⚠</span>}
                           <span
                             className="sg-admin-prompt-text"
                             onClick={() => setExpandedPrompts(e => ({ ...e, [p.id]: !e[p.id] }))}
@@ -289,17 +391,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                         </td>
                         <td>{p.sector}</td>
                         <td>{p.city}</td>
+                        <td>{p.analysisRecommendation ? <span className="sg-admin-source-badge">{p.analysisRecommendation.replace(/_/g, ' ')}</span> : '-'}</td>
                         <td>{p.topScore?.toFixed(1) || '-'}</td>
-                        <td>{p.resultCount || '-'}</td>
+                        <td>{p.resultCount || '-'}{p.requestedTopN ? ` / ${p.requestedTopN}` : ''}</td>
                         <td>{p.tokensUsed ? p.tokensUsed.toLocaleString() : '-'}</td>
                         <td><span className={`sg-admin-source-badge sg-admin-source-${p.dataSource || 'osm'}`}>{p.dataSource === 'google-places' ? 'Places' : p.dataSource === 'hybrid' ? 'Hybrid' : p.dataSource === 'demo' ? 'Demo' : 'OSM'}</span></td>
                         <td>{(p.latencyMs / 1000).toFixed(1)}s</td>
                         <td>{p.pdfExported ? '✓' : '-'}</td>
                         <td>{p.timestamp ? timeAgo(p.timestamp) : '-'}</td>
                       </tr>
-                    ))}
+                      {expandedOutputs[p.id] && hasOutput && (
+                        <tr className="sg-admin-row-output">
+                          <td colSpan={13}>
+                            <div className="sg-admin-output-panel">
+                              {p.planningFingerprint && (
+                                <div><b>Fingerprint:</b> <code>{p.planningFingerprint}</code>{isMismatch && <span className="sg-admin-badge-mismatch"> ⚠ differs from other run(s) of this same fingerprint</span>}</div>
+                              )}
+                              {p.analysisStatus && <div><b>Status:</b> {p.analysisStatus}</div>}
+                              {p.skippedStages && p.skippedStages.length > 0 && (
+                                <div><b>Skipped stages:</b> {p.skippedStages.join(', ')}</div>
+                              )}
+                              {p.hardConstraints && (
+                                <div>
+                                  <b>Hard constraints:</b>{' '}
+                                  <span style={{ color: '#059669' }}>{p.hardConstraints.verified} verified</span>
+                                  {' · '}<span style={{ color: '#d97706' }}>{p.hardConstraints.proxyVerified} proxy</span>
+                                  {' · '}<span style={{ color: '#92400e' }}>{p.hardConstraints.notVerifiable} not verifiable</span>
+                                  {' · '}<span style={{ color: '#dc2626' }}>{p.hardConstraints.unenforced} unenforced</span>
+                                  {' · '}<span style={{ color: '#dc2626' }}>{p.hardConstraints.failed} failed</span>
+                                </div>
+                              )}
+                              {p.candidates && p.candidates.length > 0 && (
+                                <div>
+                                  <b>Candidates:</b>
+                                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                    {p.candidates.map((c, i) => (
+                                      <li key={i}>{c.name} — {c.score?.toFixed(1) ?? '—'}/10{c.investigationLabel ? ` (${c.investigationLabel.replace(/_/g, ' ')})` : ''}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
+                      );
+                    })}
                     {filteredPrompts.length === 0 && (
-                      <tr><td colSpan={11} className="sg-admin-empty">No prompts yet</td></tr>
+                      <tr><td colSpan={13} className="sg-admin-empty">No prompts yet</td></tr>
                     )}
                   </tbody>
                 </table>

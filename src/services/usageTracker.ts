@@ -5,6 +5,22 @@
 import { collection, addDoc, serverTimestamp, query, orderBy, getDocs, where, limit as fbLimit } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
+/** Compact per-candidate snapshot — enough to compare runs, not a full result dump. */
+export interface CandidateSnapshot {
+  name: string;
+  score: number | null;
+  investigationLabel?: string;
+}
+
+/** Compact hard-constraint-verification snapshot (counts only). */
+export interface HardConstraintSnapshot {
+  verified: number;
+  proxyVerified: number;
+  notVerifiable: number;
+  unenforced: number;
+  failed: number;
+}
+
 export interface PromptLog {
   userId: string;
   email: string;
@@ -19,12 +35,35 @@ export interface PromptLog {
   isFollowUp: boolean;
   tokensUsed: number;
   dataSource: 'google-places' | 'osm' | 'hybrid' | 'demo';
+  // ── Output snapshot (v1.5.3) — enough to compare two runs of the same
+  // prompt and catch non-determinism, without storing the full hex grid /
+  // evidence trail. All optional: older log calls (or the legacy demo path)
+  // simply omit them.
+  analysisStatus?: string;                    // success | no_viable_site | failed
+  analysisRecommendation?: string;            // RECOMMENDED_INVESTIGATION_ZONE | ...
+  planningFingerprint?: string;               // same prompt+archetype+schema => same value
+  specFingerprint?: string;                   // same structural spec => same value
+  requestedTopN?: number;
+  candidates?: CandidateSnapshot[];            // top candidates, compact
+  hardConstraints?: HardConstraintSnapshot;
+  skippedStages?: string[];                    // PlannerLite stages skipped this run
+}
+
+/** Firestore rejects `undefined` field values — strip them before writing so
+ * optional output-snapshot fields (and any future optional field) never
+ * break the write for callers that don't have them yet. */
+function stripUndefined<T extends Record<string, any>>(obj: T): T {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as T;
 }
 
 export async function logPrompt(data: Omit<PromptLog, 'timestamp'>): Promise<void> {
   try {
     await addDoc(collection(db, 'prompts'), {
-      ...data,
+      ...stripUndefined(data),
       timestamp: serverTimestamp(),
     });
   } catch (err) {
@@ -59,6 +98,15 @@ export interface PromptEntry {
   pdfExported: boolean;
   tokensUsed: number;
   dataSource: string;
+  // ── Output snapshot (v1.5.3) — all optional, absent on older log entries.
+  analysisStatus?: string;
+  analysisRecommendation?: string;
+  planningFingerprint?: string;
+  specFingerprint?: string;
+  requestedTopN?: number;
+  candidates?: CandidateSnapshot[];
+  hardConstraints?: HardConstraintSnapshot;
+  skippedStages?: string[];
 }
 
 export interface AdminStats {
@@ -136,6 +184,14 @@ export async function fetchAdminStats(): Promise<AdminStats> {
       pdfExported: data.pdfExported || false,
       tokensUsed: tokens,
       dataSource: source,
+      analysisStatus: data.analysisStatus || undefined,
+      analysisRecommendation: data.analysisRecommendation || undefined,
+      planningFingerprint: data.planningFingerprint || undefined,
+      specFingerprint: data.specFingerprint || undefined,
+      requestedTopN: data.requestedTopN ?? undefined,
+      candidates: Array.isArray(data.candidates) ? data.candidates : undefined,
+      hardConstraints: data.hardConstraints || undefined,
+      skippedStages: Array.isArray(data.skippedStages) ? data.skippedStages : undefined,
     });
 
     if (data.sector) sectorCounts[data.sector] = (sectorCounts[data.sector] || 0) + 1;

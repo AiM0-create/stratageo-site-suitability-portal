@@ -4,6 +4,35 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [Unreleased — frontend-only] — 2026-07-06 — Admin Prompt/Output Comparison Log
+
+No `APP_VERSION` bump: the backend is untouched and not redeployed by this
+change — only the frontend usage log and Admin Dashboard changed.
+
+### Added
+- **Output snapshot on every logged prompt** (`usageTracker.ts`) — each completed
+  v2 analysis now logs, alongside the existing prompt/latency/score fields: its
+  `planningFingerprint`/`specFingerprint`, `analysisRecommendation`, requested
+  vs. actual candidate count, a compact top-candidate list (name/score/
+  investigation label), a hard-constraint-verification count summary, and
+  which PlannerLite stages were skipped. All fields optional and stripped of
+  `undefined` before the Firestore write, so older log entries and the legacy
+  demo path are unaffected.
+- **Admin Dashboard → Prompts tab**: an expandable "Output" row per prompt
+  showing the snapshot above.
+- **Automatic non-determinism detection** — entries are grouped by
+  `planningFingerprint` (a stable hash of prompt + archetype + schema); if the
+  same fingerprint produced a different candidate count / top score / verdict
+  across runs, every row in that group is flagged `⚠` and a summary badge
+  ("N mismatches detected") appears in the toolbar.
+- **"Export comparison report (.md)" button** — downloads a structured
+  Markdown report grouping all visible prompt runs by fingerprint, with a
+  table per group and `⚠ MISMATCH` headers where runs disagree — built for
+  side-by-side review of whether the engine is behaving deterministically for
+  repeated prompts.
+
+---
+
 ## [1.5.2] — 2026-07-06 — Reliability & Consistency
 
 **Tests:** 556 backend passed · 53 frontend passed · **Readiness:** deployed to production

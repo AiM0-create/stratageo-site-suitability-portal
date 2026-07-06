@@ -512,6 +512,11 @@ const App: React.FC = () => {
 
       if (user) {
         saveAnalysis(user.uid, user.email, lastPrompt || specToUse.objective, analysisResultData, analysisResultData.spec).catch(() => {});
+        // v1.5.3 — output snapshot for admin comparison (same prompt, did we
+        // get the same result?). All fields optional/absent-safe; this is the
+        // v2 conversational engine path so the fingerprints/hardConstraint
+        // fields are populated whenever the backend supplied them.
+        const hcv = (analysisResultData as any).hardConstraintVerification;
         logPrompt({
           userId: user.uid,
           email: user.email,
@@ -525,6 +530,23 @@ const App: React.FC = () => {
           isFollowUp: false,
           tokensUsed: chatTokensRef.current,
           dataSource: 'hybrid' as any,
+          analysisStatus: analysisResultData.status,
+          analysisRecommendation: analysisResultData.analysisRecommendation,
+          planningFingerprint: (analysisResultData as any).planningFingerprint,
+          specFingerprint: (analysisResultData as any).specFingerprint,
+          requestedTopN: (analysisResultData as any).outputCount?.topNResolved,
+          candidates: analysisResultData.locations
+            .filter(l => !l.excluded)
+            .slice(0, 5)
+            .map(l => ({ name: l.name, score: l.mcda_score ?? null, investigationLabel: (l as any).investigationLabel })),
+          hardConstraints: hcv ? {
+            verified: hcv.verifiedCount ?? 0,
+            proxyVerified: hcv.proxyVerifiedCount ?? 0,
+            notVerifiable: hcv.unknownCount ?? 0,
+            unenforced: hcv.unenforcedCount ?? 0,
+            failed: hcv.failedCount ?? 0,
+          } : undefined,
+          skippedStages: analysisResultData.analysisCompleteness?.skippedStages?.map(s => s.stage),
         });
         chatTokensRef.current = 0;
       }
