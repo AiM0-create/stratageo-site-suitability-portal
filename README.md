@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.5.0 — Analysis Intelligence Lite**
+**Current version: v1.5.2 — Reliability & Consistency**
 
 ---
 
@@ -20,6 +20,26 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.5.2 Highlights
+
+- **No more buildability timeouts** — the up-to-6 land-exclusion Overpass fetches (railway / ghat / heritage / maidan / road-frontage) now run **concurrently (2 at a time, Overpass mirror etiquette) under a single 90-second stage budget**. Any fetch that can't fit degrades honestly ("skipped — confidence reduced") instead of blowing the 240-second job ceiling — the failure observed live on 2 of 4 canonical test prompts is fixed and re-verified live.
+- **Deterministic stage planning** — an LLM-attached water exclusion with no water signal in the actual prompt can no longer flip the water/buildability stage plan between runs of the identical prompt. Stage relevance is now decided only by the user's words, the waterfront flag, or a real water corridor.
+- **Deterministic objective** — the analysis objective shown on the plan card is template-generated from parsed inputs (top-N, business type, study area), so the identical prompt produces a byte-identical objective every run; waterfront cues are still detected from the user's raw words.
+- **Right playbook for small-format grocery** — "small / organic / kirana / convenience / neighbourhood" grocery briefs now get the neighbourhood-retail factor set (walk footfall, co-tenancy, competition, transit; res-9 grid) instead of the hypermarket playbook. "Massive discount supermarket" still correctly gets large-format.
+- **Block-scale grids on request** — prompts asking for "specific intersections or blocks" get an H3 res-10 grid (~66 m cells), driven purely by the user's own words.
+- **Screening vs refined score transparency** — the map colors cells by the fast screening score; final ranking uses refined (isochrone/routing/Places-verified) scores. Every candidate now carries both, and the card shows "map/screening 7.2 → refined 6.4" whenever they meaningfully differ.
+
+---
+
+## v1.5.1 Highlights
+
+- **Hard Constraint Verification panel** — every requested hard constraint now gets an explicit status in the results drawer: **Verified / Proxy verified / Not verifiable from available data / Requested but not enforced / Failed / Not required**, with counts, reasons, and per-candidate warning chips for anything unresolved.
+- Rent / floor-area / zoning / parcel / ownership constraints are always *Not verifiable* (field validation required); an unresolved metro exclusion or unavailable routing shows *Requested but not enforced* — never silently kept.
+- A safety cap guarantees an unresolved requested hard constraint can never coexist with the strongest "Recommended Investigation Zone" verdict.
+- Pure visibility layer over state the pipeline already computed — zero new provider calls, zero scoring changes.
 
 ---
 
@@ -264,7 +284,7 @@ After deploy, verify:
 curl https://<your-cloud-run-url>/health
 ```
 
-Expected response includes `appVersion: "1.4.9"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
+Expected response includes `appVersion: "1.5.2"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
 
 **Rollback discipline:** before every backend deploy, tag the currently-live commit first — `git tag -a rollback-pre-vX.Y.Z <live-commit-sha> -m "..." && git push origin rollback-pre-vX.Y.Z` — so `git checkout` back to a known-good state is always one command away (see [Rollback](#rollback) below).
 
@@ -308,7 +328,9 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.5.0** *(current)* | Analysis Intelligence Lite — deterministic archetype/intent/risk classification, scenario ranking stability, granular `dataSufficiencyV2`, investigation-zone label taxonomy, all surfaced in the UI; zero new provider calls |
+| **v1.5.2** *(current)* | Reliability & Consistency — buildability stage budget + concurrent fetches (fixes live 240s timeouts), deterministic stage planning & templated objective (identical prompt → identical plan), small-format grocery archetype fix, block-scale res-10 grids on request, screening→refined score transparency |
+| **v1.5.1** | Hard Constraint Verification Visibility — per-requested-constraint status panel (Verified / Proxy verified / Not verifiable / Requested but not enforced / Failed), per-candidate warning chips, strong-verdict safety cap |
+| **v1.5.0** | Analysis Intelligence Lite — deterministic archetype/intent/risk classification, scenario ranking stability, granular `dataSufficiencyV2`, investigation-zone label taxonomy, all surfaced in the UI; zero new provider calls |
 | **v1.4.9** | PlannerLite smart resource gating — skips irrelevant water/buildability/routing/Places-refinement stages per prompt; `analysisCompleteness` payload; unsupported constraints labeled up front |
 | **v1.4.8** | Google Places API (New) provider layer, Places Aggregate count refinement, Google Routes primary route validator — legacy Places/OSM/ORS retained as fallback throughout |
 | **v1.4.1–1.4.7** | Execution-flow reliability, per-provider timeout/degradation, results-crash safety, numeric scoring contract (`engine/contracts.py`), three-state result payload (`success`/`no_viable_site`/`failed`) |

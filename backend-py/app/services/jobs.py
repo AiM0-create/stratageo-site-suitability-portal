@@ -1486,6 +1486,18 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     candidates = scoring.select_candidates(
         composite, hexes, excluded, top_k, spec.output.minCandidateSeparationHexRings,
     )
+    # v1.5.2 — ranking-basis transparency (user-reported confusion: "recommended
+    # cells were not the highest suitability scores"). Two legitimate mechanisms
+    # cause a pick to differ from the darkest map cell; both are now disclosed.
+    notes.append(
+        "Ranking basis: the map colors every cell by its screening score; the "
+        "shortlisted candidates are then re-verified with real isochrone / "
+        "routing / traffic data and FINAL ranking uses those refined scores — "
+        "so a pick's final score can differ from its map color. Additionally, "
+        f"cells within {spec.output.minCandidateSeparationHexRings} hex ring(s) "
+        "of an already-chosen candidate are skipped as near-duplicates, so a "
+        "darker neighbouring cell may be intentionally unselected."
+    )
     if not candidates:
         # v1.0.3 — graceful "insufficient viable land": every hex was removed by the
         # water / corridor / buildability masks. Do NOT crash and do NOT fabricate
@@ -1905,6 +1917,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     for rank, (ci, name) in enumerate(zip(finals, names), 1):
         loc = results_mod.build_location(
             spec, hexes, ci, scores, layer_pois, name or f"Candidate {rank}", rank,
+            screening01=float(composite[ci]),
         )
         # Traffic-context (typical-peak congestion ratio) — informational, low confidence.
         ratios = traffic_ctx.get(ci, [])

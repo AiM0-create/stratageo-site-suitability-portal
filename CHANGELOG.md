@@ -4,6 +4,40 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.5.2] — 2026-07-06 — Reliability & Consistency
+
+**Tests:** 556 backend passed · 53 frontend passed · **Readiness:** deployed to production
+
+### Fixed
+- **Buildability stage timeout** — the up-to-6 land-exclusion Overpass fetches (railway area/lines, ghat, heritage/protected, maidan, road-frontage) previously ran sequentially (6 × 30s worst case = 180s) and could blow the 240s job ceiling — observed live on 2 of 4 canonical prompts. Fetches now launch concurrently (semaphore = 2, public-Overpass-mirror etiquette) under a single **90-second stage budget** (`buildability_stage_budget_seconds`, `buildability_fetch_concurrency` in config). A fetch that cannot start or finish inside the remaining budget degrades to an empty mask with an honest note — never a job failure. Live-verified: the riverside prompt that hard-failed now completes in ~135s with zero degraded checks.
+- **Planner determinism** — the LLM spec-builder sometimes attached a default water-tagged exclusion to prompts with no water signal, flipping the water/buildability stage plan between runs of the identical prompt. An uncorroborated water exclusion no longer triggers the water/buildability cascade (its own buffer mask still applies); stage relevance is decided only by the waterfront flag, a real water corridor, or water wording in the user's prompt/constraints.
+- **Small-format grocery mis-archetyping** — "small / mini / organic / kirana / convenience / corner / neighbourhood" grocery briefs were routed to the large-format-retail (hypermarket) playbook (res-8 grid, highway/delivery factors). They now resolve to the neighbourhood retail archetype (walk footfall, co-tenancy, competition, transit; res-9). "Massive discount supermarket" still correctly resolves large-format (pinned by test).
+- **Objective drift** — the plan-card objective was LLM-phrased and drifted between runs of the identical prompt. It is now template-generated from deterministic inputs (regex-parsed top-N, business type, study area) — byte-identical every run. Companion fix: waterfront detection now also reads `rawIntent.rawPrompt`, so water cues survive the templated objective.
+
+### Added
+- **Block-granularity grid rule** — prompts asking for "specific intersections or blocks / street corners" get an H3 res-10 grid (~66 m cells), driven purely by the user's own words; `polyfill()` still auto-degrades with a note if the area would exceed the hex budget.
+- **Screening-vs-refined score transparency** — every candidate carries `screeningScore` (Pass-A composite, same basis as the map choropleth) and `rankingBasis` (`refined` | `screening`); the candidate card shows "map/screening X → refined Y" when they meaningfully differ, and the methodology notes explain both the refined re-ranking and the near-duplicate skip rule.
+- 13 new regression tests (`test_v152_reliability.py`): stage-budget sanity, water-relevance determinism (uncorroborated exclusion, corroborated exclusion, corridor, prompt wording), small-grocery vs discount-supermarket archetype resolution, res-10 granularity rule, byte-identical objective across divergent LLM wordings, waterfront detection surviving the templated objective.
+
+### Unchanged by design
+- Zero new providers or external calls; conservative recommendation logic, caveats, and the hard-constraint verification layer untouched.
+
+---
+
+## [1.5.1] — 2026-07-06 — Hard Constraint Verification Visibility
+
+**Tests:** 543 backend passed · 53 frontend passed · **Readiness:** deployed to production (no APP_VERSION bump at ship time; version folded into 1.5.2)
+
+### Added
+- **`hardConstraintVerification` payload object** — per-requested-hard-constraint status (`verified` / `proxy_verified` / `not_verifiable` / `requested_not_enforced` / `failed` / `not_required`) with category, severity, reason, `affectsRecommendation`, and `fieldValidationRequired`, plus summary counts and an overall `summaryStatus`. Built as a pure mapping over state the pipeline already computed (constraint policy, metro resolution, route availability, waterfront enforcement, buildability degradation) — zero new provider calls, exception-isolated (the key is omitted if the build fails, never a broken payload).
+- **Per-candidate `hardConstraintWarnings`** — compact warning chips on every non-excluded candidate when an analysis-wide requested constraint is unresolved (e.g. "Requested but not enforced: Metro exclusion — no station data could be resolved").
+- **"Hard constraint verification" panel** in the results drawer — counts, per-constraint status lines, and warning cards; rent/floor-area/zoning/parcel/ownership always show *Not verifiable — field validation required*; the arterial-road requirement is honestly split into a Verified corridor gate vs a proxy/not-verifiable frontage claim.
+- **Strong-verdict safety cap** — an unresolved requested hard constraint can never coexist with `RECOMMENDED_INVESTIGATION_ZONE` (re-asserts the existing demotion paths as an explicit invariant).
+- **Pre-run honesty note** in the spec card: a metro exclusion depends on station data resolving at run time and will be marked "requested but not enforced" — never silently kept.
+- 17 new backend tests (`test_hard_constraint_visibility.py`, incl. 2 mocked end-to-end payload pins) + 5 new frontend normalizer tests.
+
+---
+
 ## [1.5.0] — 2026-07-04 — Analysis Intelligence Lite
 
 **Tests:** 526 backend passed · 48 frontend passed · **Readiness:** deployed to production

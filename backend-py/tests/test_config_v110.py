@@ -7,9 +7,9 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def test_version_is_120():
-    # Updated to v1.5.0 — Analysis Intelligence Lite
-    assert APP_VERSION == "1.5.0"
-    assert ENGINE_VERSION == "stratageo-engine-00055"
+    # Updated to v1.5.2 — Reliability & Consistency
+    assert APP_VERSION == "1.5.2"
+    assert ENGINE_VERSION == "stratageo-engine-00058"
 
 
 # ── Model defaults (v1.1.1 — gpt-5.4 family) ─────────────────────────────────

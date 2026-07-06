@@ -879,6 +879,17 @@ def get_canonical(parser_archetype_key: str) -> CanonicalArchetype:
     return copy.deepcopy(arch)
 
 
+# v1.5.2 — size/format qualifiers that mark a grocery brief as a small
+# NEIGHBOURHOOD store rather than a supermarket/hypermarket. Matched against
+# the user's raw prompt only (deterministic; never LLM output).
+import re as _re
+_SMALL_FORMAT_RE = _re.compile(
+    r"\b(small|mini|tiny|organic|kirana|convenience|corner|neighbou?rhood|local"
+    r"|boutique|daily\s+needs|mom.?and.?pop)\b",
+    _re.I,
+)
+
+
 def detect_student_qsr(prompt: str) -> bool:
     """Return True if the prompt describes a student-oriented QSR/cafe."""
     import re
@@ -905,4 +916,14 @@ def resolve_canonical_archetype(
     """
     if parser_key in ("cafe", "qsr_restaurant", "generic") and detect_student_qsr(raw_prompt):
         return get_canonical("student_qsr_cafe")
+    # v1.5.2 — small-format grocery correction. The intent parser maps any
+    # "grocery store" wording to the 'supermarket' key, which resolves to the
+    # LARGE_FORMAT_RETAIL archetype (res-8 grid, highway/arterial + delivery
+    # factors — a hypermarket playbook). A "small organic grocery store" is a
+    # NEIGHBOURHOOD store: walk-catchment footfall, cotenancy, direct
+    # competition, res-9 grid. Observed live: the JP Nagar 2nd Phase organic
+    # grocery prompt got hypermarket factors and visibly coarser hexes than
+    # narrated. Size/format qualifiers in the user's own words decide it.
+    if parser_key == "supermarket" and _SMALL_FORMAT_RE.search(raw_prompt or ""):
+        return get_canonical("retail")
     return get_canonical(parser_key)

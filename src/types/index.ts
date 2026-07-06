@@ -112,6 +112,10 @@ export interface LocationData {
   pois: POI[];
   searchRadiusM: number;
   scoreWithheld?: boolean;     // composite not computable (required data missing)
+  /** v1.5.2 — Pass-A screening composite (same basis as the map choropleth colors). */
+  screeningScore?: number | null;
+  /** v1.5.2 — which score ranked this candidate: 'refined' (post-verification) or 'screening'. */
+  rankingBasis?: 'refined' | 'screening';
   // ── v1.5-Lite (all optional — older payloads simply omit them) ──
   /** Honest investigation-zone taxonomy; preferred over recommendationStatus when present. */
   investigationLabel?: string;

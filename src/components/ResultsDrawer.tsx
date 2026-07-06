@@ -987,6 +987,21 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             ~{(loc as any).scoreBand}
                           </span>
                         )}
+                        {/* v1.5.2: score-basis transparency — the map colors use the
+                            screening score; final ranking uses the refined score after
+                            real routing/isochrone/traffic verification. Shown only when
+                            the two meaningfully differ, so users aren't left wondering
+                            why a pick doesn't match the darkest map cell. */}
+                        {!raw && !loc.excluded && loc.rankingBasis === 'refined'
+                          && typeof loc.screeningScore === 'number'
+                          && Math.abs(loc.screeningScore - loc.mcda_score) >= 0.3 && (
+                          <span
+                            style={{ fontSize: '0.68em', color: '#64748b' }}
+                            title="The map colors every cell by its initial screening score. Shortlisted candidates are then re-verified with real travel-time and place data, and the FINAL ranking uses that refined score — so it can differ from the map color."
+                          >
+                            map/screening {loc.screeningScore.toFixed(1)} → refined {loc.mcda_score.toFixed(1)}
+                          </span>
+                        )}
                         {/* v1.4.0: close-band warning */}
                         {!raw && !loc.excluded && (loc as any).closeBandWarning && (
                           <span style={{ fontSize: '0.68em', color: '#d97706' }}>

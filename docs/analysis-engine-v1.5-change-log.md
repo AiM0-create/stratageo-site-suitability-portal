@@ -192,3 +192,49 @@ Uncommitted working-tree change set; `git checkout -- <files>` (or revert the si
 
 ### Rollback plan
 Single commit; `git revert` restores v1.5.1 behavior exactly. Tag `rollback-pre-phase1-reliability` points at the previously-live commit.
+
+---
+
+# Round 2 Consistency Fixes v1.5.2 (externally reviewed package, cumulative with Phase 1)
+
+**Source:** reviewed package fixing the three issues found in the boss's JP Nagar live test (objective drift, wrong grocery archetype + grid resolution, map-vs-final score confusion). The cumulative `.patch` did NOT apply to master `c13ed6a` (Phase 1 hunks already applied); the standalone post-patch files were verified instead: every delta vs our master is a pure addition, and the package files retain our v1.5.1 + Phase-1 work byte-for-byte.
+
+### 19. `backend-py/app/engine/canonical_archetypes.py` — small-format grocery correction
+- **What:** `_SMALL_FORMAT_RE` (small/mini/organic/kirana/convenience/corner/neighbourhood/local/boutique/daily-needs/mom-and-pop) + a rule in `resolve_canonical_archetype()`: parser key `supermarket` + small-format wording in the RAW prompt → `retail_store` archetype instead of `large_format_retail`.
+- **Why:** the parser maps any "grocery store" wording to `supermarket` → hypermarket playbook (res-8, highway/delivery factors). Observed live on the JP Nagar organic grocery prompt.
+- **Risk:** low — deterministic, raw-prompt-only; "massive discount supermarket" pinned unchanged by test. **Rollback:** revert commit.
+
+### 20. `backend-py/app/engine/deterministic_planner.py` — res-10 rule + templated objective
+- **What:** (a) `_BLOCK_GRANULARITY_RE` (intersections/blocks/street corners/street-level/corner plots) bumps grid to res 10 (user's words only; polyfill still auto-degrades on hex-budget overflow); (b) `spec["objective"]` is now template-generated from resolved topN + businessType + first study-area place — byte-identical across runs of the identical prompt.
+- **Why:** live-observed objective drift ("3 candidate intersections or blocks…" vs "candidate micro-market zones…") and narrated-res-9-but-needs-block-scale mismatch.
+- **Risk:** low-medium (objective rewrite could drop water cues) — mitigated by item 21. **Rollback:** revert commit.
+
+### 21. `backend-py/app/models/spec.py` — waterfront detection reads the raw prompt
+- **What:** `validate_layers` waterfront detection text now appends `rawIntent.rawPrompt` when present.
+- **Why:** the templated objective drops adjectives; water cues must come from the customer's own words (also simply the more truthful source). Pinned by `test_waterfront_detection_survives_templated_objective`.
+- **Risk:** low — widens detection input only. **Rollback:** revert commit.
+
+### 22. `backend-py/app/engine/results.py` + `backend-py/app/services/jobs.py` — screening/refined transparency
+- **What:** `build_location()` gains `screening01`; every candidate carries `screeningScore` (Pass-A composite, same basis as the map choropleth) and `rankingBasis` (`refined`|`screening`); jobs.py passes `composite[ci]` and appends a methodology note explaining refined re-ranking + the near-duplicate hex-ring skip rule.
+- **Why:** live-reported confusion — "recommended cells were not the highest-scoring cells on the map." Not a bug; an undisclosed two-stage process, now disclosed.
+- **Risk:** low — additive payload fields + one note. **Rollback:** revert commit.
+
+### 23. Frontend — `src/types/index.ts`, `src/services/resultNormalizer.ts`, `src/components/ResultsDrawer.tsx`
+- **What:** `screeningScore`/`rankingBasis` typed + normalized (optional; old payloads unaffected); candidate card shows "map/screening X → refined Y" chip with tooltip only when basis is refined and the two differ by ≥0.3.
+- **Risk:** low. **Rollback:** revert commit.
+
+### 24. `backend-py/tests/test_v152_reliability.py` — expanded 7 → 13 tests
+- Adds: small-grocery→retail_store, discount-supermarket→large_format (regression), res-10 granularity, res-9 without block wording, byte-identical objective across divergent LLM wordings, waterfront survives templated objective.
+
+### 25. Version bump + docs (release commit)
+- `config.py`: APP_VERSION → **1.5.2**, ENGINE_VERSION → `stratageo-engine-00058`, RELEASE_NAME → "Reliability & Consistency"; docstring entries for v1.5.1/v1.5.2. Version-assertion tests updated. `package.json`/lock → 1.5.2 (drives the TopBar `v…` badge). README: current-version line, v1.5.1 + v1.5.2 highlights, version-history rows, stale `/health` example fixed. CHANGELOG: 1.5.1 + 1.5.2 entries.
+
+### Validation (this release)
+| Check | Result |
+|---|---|
+| Backend | **556 passed** (543 + 13 new) |
+| Frontend typecheck / tests / build | clean / **53 passed** / success |
+| API/cost impact | zero new external calls |
+
+### Rollback plan
+Tag `rollback-pre-v1.5.2` points at the previously-live commit (`c13ed6a`, backend revision `stratageo-engine-00057-sp4`).

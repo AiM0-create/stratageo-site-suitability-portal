@@ -57,6 +57,9 @@ function normalizeLocation(raw: unknown, index: number, warnings: string[]): Loc
     out._incomplete = true;
   }
   out.mcda_score = asNum(raw.mcda_score, 0);
+  // v1.5.2 — score-basis transparency (both optional; older payloads omit them)
+  out.screeningScore = asNumOrNull(raw.screeningScore);
+  out.rankingBasis = raw.rankingBasis === 'refined' ? 'refined' : (raw.rankingBasis === 'screening' ? 'screening' : undefined);
   out.excluded = raw.excluded === true;
   out.reasoning = asStr(raw.reasoning);
   out.searchRadiusM = asNum(raw.searchRadiusM, 0);

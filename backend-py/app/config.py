@@ -22,6 +22,22 @@ v1.5.0: Analysis Intelligence Lite — deterministic prompt/spec classification
   ranking stability over the final shortlist, granular dataSufficiencyV2,
   and the honest investigation-zone label taxonomy — all surfaced in the UI.
   Zero new provider calls; purely local derivations over existing run state.
+v1.5.1: Hard Constraint Verification Visibility — one structured
+  hardConstraintVerification payload object (per-requested-constraint status:
+  verified / proxy_verified / not_verifiable / requested_not_enforced /
+  failed / not_required) + per-candidate hardConstraintWarnings, surfaced in
+  the ResultsDrawer. Pure mapping of existing run state; shipped without an
+  APP_VERSION bump — folded into this bump.
+v1.5.2: Reliability & Consistency — (1) buildability stage budget + bounded
+  concurrent Overpass fetches (fixes the live 240s job timeouts); (2)
+  deterministic PlannerLite water relevance (an LLM-attached water exclusion
+  can no longer flip the stage plan for the identical prompt); (3)
+  small-format grocery archetype correction (neighbourhood retail, not
+  hypermarket); (4) block-granularity res-10 grid rule from the user's own
+  words; (5) deterministic templated objective (identical prompt →
+  byte-identical objective) with waterfront detection reading the raw prompt;
+  (6) screening-vs-refined score transparency (screeningScore/rankingBasis on
+  every candidate + a map→refined chip in the UI).
 """
 from functools import lru_cache
 from typing import Literal
@@ -29,16 +45,16 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.5.0"
+APP_VERSION     = "1.5.2"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00055"
-# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.0 — the
-# SpecV2 wire schema and the EvidenceTrail schema are structurally unchanged;
-# analysisIntelligence/dataSufficiencyV2/analysisRecommendation are additive
-# result-payload keys outside these versioned contracts.
+ENGINE_VERSION  = "stratageo-engine-00058"
+# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2 —
+# the SpecV2 wire schema and the EvidenceTrail schema are structurally
+# unchanged; hardConstraintVerification / screeningScore / rankingBasis are
+# additive result-payload keys outside these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Analysis Intelligence Lite"
+RELEASE_NAME    = "Reliability & Consistency"
 
 
 class Settings(BaseSettings):

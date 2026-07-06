@@ -79,11 +79,22 @@ def build_location(
     layer_pois: dict[str, list[dict]],
     name: str,
     rank: int,
+    screening01: float | None = None,
 ) -> dict:
     cell = hexes[hex_index]
     total01, detail = composite_for_hex(spec, scores, hex_index)
     # None when NO layer has data — withhold rather than print a fabricated score.
     mcda = round(total01 * 10, 1) if total01 is not None else None
+    # v1.5.2 — score-basis transparency. The map choropleth colors every hex by
+    # the PASS-A screening composite; final candidate ranking uses the PASS-B
+    # composite after per-candidate refinement (true isochrones, Google
+    # Places counts, traffic-aware routing). Both are legitimate, but showing
+    # only one made picks look "lower than the map" to users. Each candidate
+    # now carries both, plus which basis ranked it.
+    screening = round(float(screening01) * 10, 2) if screening01 is not None else None
+    refined_here = any(
+        ls.refined and hex_index in ls.refined for ls in scores.values()
+    )
 
     criteria = []
     osm_signals: dict[str, int] = {}
@@ -165,6 +176,8 @@ def build_location(
         "lng": cell.lng,
         "mcda_score": mcda if mcda is not None else 0.0,  # 0.0 keeps the type numeric
         "scoreWithheld": mcda is None,                    # true → composite not computable
+        "screeningScore": screening,                      # Pass-A composite (matches map colors)
+        "rankingBasis": "refined" if refined_here else "screening",
         "criteria_breakdown": criteria,
         "exclusions": [],
         "excluded": False,

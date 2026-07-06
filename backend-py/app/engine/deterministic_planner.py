@@ -58,6 +58,13 @@ _RUBY    = re.compile(r"\bruby\s*crossing\b", re.I)
 _EM_BYP  = re.compile(r"\b(?:e\.?\s*m\.?\s*bypass|eastern\s+metropolitan\s+bypass)\b", re.I)
 
 
+# v1.5.2 — user asked for block/intersection-level output → res-10 grid.
+_BLOCK_GRANULARITY_RE = re.compile(
+    r"\b(intersections?|blocks?|street\s+corners?|street[- ]level|corner\s+plots?)\b",
+    re.I,
+)
+
+
 def normalize_prompt(prompt: str) -> str:
     """Return a canonicalised version of a prompt for fingerprinting.
 
@@ -242,6 +249,30 @@ def apply_deterministic_plan(
     # 3. Set grid resolution from canonical schema
     spec.setdefault("grid", {})
     spec["grid"]["resolution"] = canonical.grid_resolution
+    # v1.5.2 — granularity override, driven by the USER'S OWN WORDS only. A
+    # brief asking for "specific intersections or blocks" needs block-scale
+    # cells (res 10, ~66 m edge), not neighbourhood-scale ones (res 9,
+    # ~174 m edge; res 8, ~460 m edge). Deterministic: the same prompt always
+    # gets the same resolution. polyfill() still auto-degrades (with a
+    # recorded note) if the study area would explode the hex budget.
+    if _BLOCK_GRANULARITY_RE.search(intent.rawPrompt or "") and spec["grid"]["resolution"] < 10:
+        spec["grid"]["resolution"] = 10
+
+    # 3b. v1.5.2 — canonical objective. The LLM re-phrased the objective
+    # differently for the IDENTICAL prompt across runs ("3 candidate
+    # intersections or blocks" vs "candidate micro-market zones"), which reads
+    # as inconsistency to a paying customer. The objective shown on the plan
+    # card and in the report is now template-generated from deterministic
+    # inputs: resolved topN (regex-parsed), the business type, and the study
+    # area. Water/riverside cues are NOT lost by this rewrite: waterfront
+    # detection also reads rawIntent.rawPrompt (see models/spec.py).
+    _biz = (llm_spec.get("businessType") or canonical.display_name or "business").strip()
+    _places = [p for p in ((llm_spec.get("studyArea") or {}).get("places") or []) if p]
+    _where = f" in {_places[0]}" if _places else ""
+    spec["objective"] = (
+        f"Identify top {resolved_top_n} candidate micro-market zones "
+        f"for a {_biz}{_where}"
+    )
 
     # 4. Set v1.2 determinism metadata
     schema_fp = canonical.schema_fingerprint()
