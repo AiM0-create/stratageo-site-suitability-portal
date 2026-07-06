@@ -69,23 +69,38 @@ stay at 1.6.1. Backend-only fix, backend-only redeploy.
      deterministic coastal/port-metro check (Mumbai, Chennai, Kolkata, Kochi,
      Visakhapatnam, and other major Indian coastal cities) that triggers the
      water mask from the resolved study area alone.
-- **No buildability-timeout regression.** Both fixes make the buildability
-  stage run more often (it was previously wrongly skipped for most
-  commercial prompts), but the v1.5.2 stage budget + bounded concurrency +
-  per-fetch graceful degradation already bound worst-case wall clock
-  independent of trigger frequency — broader (correct) triggering doesn't
-  reintroduce the 240s job timeouts that fix addressed. Pinned by a new
-  regression test asserting the plan's runtime target stays within the job
-  ceiling for the exact Mumbai-gym scenario.
+- **Water and buildability fetches now run CONCURRENTLY, not sequentially —
+  closing the actual timeout risk this release would otherwise have
+  introduced.** Both fixes above make water_geometry AND buildability fire
+  TOGETHER far more often (a coastal metro's commercial brief needs both,
+  every time — previously a rare combination, now the common case). Under
+  the old code, the water-body fetch (up to `optional_provider_timeout`=45s)
+  fully completed before buildability's own bounded 90s-budget fetch group
+  even started — a worst case of up to ~135s for these two stages alone,
+  stacking on top of the rest of the 240s job budget. Fixed: the water fetch
+  and the buildability fetch group are now launched as concurrent asyncio
+  tasks at the same point in the pipeline (`jobs.py`'s buildability flag
+  computation and fetch-task launching moved earlier, right alongside the
+  water-fetch launch) and only awaited where their results are actually
+  needed — bounding the combined worst case to `max(water, buildability)`
+  instead of their sum. Neither stage depends on the other's fetched data
+  (only the corridor riverbank-boundary fallback needs water_ways, and that's
+  awaited separately once both are already in flight), so this is a pure
+  latency win with no behavior change to mask application, ordering, or
+  reported notes/mask_stats.
 
 ### Tests
-- New `test_v162_smart_masks.py` (5 tests): the exact Mumbai-gym regression,
+- New `test_v162_smart_masks.py` (6 tests): the exact Mumbai-gym regression,
   an isolation test proving the water trigger works from city alone (a
   business type matching neither the commercial nor land-development regex),
   a landlocked-city counterfactual (proves the fix is geography-aware, not
   an across-the-board always-on change), an invariant that buildability
-  relevance can never diverge from `_buildability_flags()` again, and the
-  timeout-safety check.
+  relevance can never diverge from `_buildability_flags()` again, the
+  timeout-safety check, and a real-wall-clock concurrency test (delays every
+  mocked Overpass fetch and asserts the measured elapsed time sits below the
+  midpoint between the old sequential bound and the new concurrent bound —
+  a genuine regression guard against re-introducing sequential fetching,
+  not just a mask-correctness check).
 - Updated 9 existing tests across `test_v149_planner_lite.py`,
   `test_v15_intelligence.py`, `test_hard_constraint_visibility.py`, and
   `test_v152_reliability.py` whose fixtures/assertions had encoded the old
@@ -94,7 +109,7 @@ stay at 1.6.1. Backend-only fix, backend-only redeploy.
   the shared live-prompt fixtures moved their default study area from
   "Kolkata" (itself a real port/river city, now correctly water-relevant) to
   "Pune" (landlocked) to keep testing genuine irrelevance-skip coverage.
-- **584 passed** (579 + 5 new).
+- **585 passed** (579 + 6 new).
 
 ### Rollback plan
 Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`,

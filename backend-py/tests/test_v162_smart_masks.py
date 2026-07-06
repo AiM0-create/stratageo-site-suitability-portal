@@ -25,6 +25,12 @@ clock regardless of how often the stage fires.
 """
 from __future__ import annotations
 
+import asyncio
+import time
+from unittest.mock import patch
+
+from shapely.geometry import Polygon as ShapelyPolygon
+
 from app.engine.planner_lite import (
     _buildability_flags,
     _buildability_relevant,
@@ -33,6 +39,7 @@ from app.engine.planner_lite import (
     create_analysis_plan,
 )
 from app.config import get_settings
+from app.services import jobs as jobs_mod
 
 from test_v149_planner_lite import _base_spec
 
@@ -123,3 +130,137 @@ def test_gym_in_mumbai_plan_stays_within_the_existing_stage_budget():
     # per-job ceiling — broader triggering doesn't quietly raise it further.
     assert plan.max_runtime_target_seconds <= s.job_max_runtime_seconds
     assert s.buildability_stage_budget_seconds < s.job_max_runtime_seconds
+
+
+# ── Real wall-clock proof: water + buildability now run CONCURRENTLY ────────
+#
+# The Mumbai-gym fix means water_geometry AND buildability now BOTH fire for
+# the same job (previously a rare combination — now the common case for any
+# coastal-metro commercial brief). If they still ran sequentially, that
+# combination alone would cost water_fetch + buildability_stage instead of
+# max(water_fetch, buildability_stage). This test proves the actual _run_
+# analysis code path launches them concurrently, with a real asyncio clock —
+# not just that the masks end up applied correctly (the other tests here and
+# in test_v149_planner_lite.py already cover that with instant mocks).
+
+def _study_polygon() -> ShapelyPolygon:
+    return ShapelyPolygon([
+        (72.82, 18.92), (72.85, 18.92), (72.85, 18.95), (72.82, 18.95),
+    ])
+
+
+def _run_pipeline_with_fetch_delay(spec, delay_s: float):
+    """Mirrors test_v149_planner_lite._run_pipeline's mock harness, but every
+    Overpass area/line/named fetch sleeps `delay_s` — turning fetch COUNT and
+    concurrency into a directly measurable wall-clock duration."""
+    from app.engine import results as results_mod
+
+    job = jobs_mod.Job(id="60006000-6000-6000-8000-600060006000")
+    calls = {"area": 0, "line": 0, "named": 0}
+
+    async def fake_resolve_study_area(area):
+        return _study_polygon(), []
+
+    async def fake_fetch_all_layers(tag_sets, bbox):
+        return {lid: [{"lat": 18.935 + i * 0.001, "lng": 72.83, "tags": {"name": f"o{i}"}}
+                      for i in range(10)] for lid in tag_sets}
+
+    async def fake_pois_with_fallback(types, keyword, bbox, *, legacy_fetch, ctx=None):
+        return ([{"lat": 18.936 + i * 0.001, "lng": 72.832,
+                  "tags": {"name": f"g{i}", "google_type": "gym"}}
+                 for i in range(8)], "google_places_new_nearby", [])
+
+    async def fake_aggregate(center, radius_m, included_types, *, ctx=None):
+        from app.providers.base import ProviderResult
+        return ProviderResult(provider="gaggregate", feature="insight_count",
+                              status="disabled", data={},
+                              degradation_reason="api_not_available_http_403")
+
+    async def fake_area(tags, bbox):
+        calls["area"] += 1
+        await asyncio.sleep(delay_s)
+        return []
+
+    async def fake_line(tags, bbox):
+        calls["line"] += 1
+        await asyncio.sleep(delay_s)
+        return []
+
+    async def fake_named(regex, bbox):
+        calls["named"] += 1
+        await asyncio.sleep(delay_s)
+        return []
+
+    async def fake_iso(cells, mode, minutes):
+        return {}
+
+    async def fake_geocode(q):
+        return (18.935, 72.835)
+
+    async def fake_route_eval(rc, cells, targets, railway):
+        return {}
+
+    async def fake_rail(bbox):
+        return []
+
+    async def fake_rgeo(lat, lng):
+        return "Test Zone"
+
+    async def fake_critique(*a, **k):
+        return None
+
+    async def fake_explain(spec_, locations, ds=None):
+        return "s", ["r"] * len(locations)
+
+    with patch.object(jobs_mod, "resolve_study_area", fake_resolve_study_area), \
+         patch.object(jobs_mod, "fetch_all_layers", fake_fetch_all_layers), \
+         patch.object(jobs_mod.gp_new, "fetch_pois_with_fallback", fake_pois_with_fallback), \
+         patch.object(jobs_mod.gp_agg, "compute_count", fake_aggregate), \
+         patch.object(jobs_mod, "fetch_area_geometries", fake_area), \
+         patch.object(jobs_mod, "fetch_line_geometries", fake_line), \
+         patch.object(jobs_mod, "fetch_named_features", fake_named), \
+         patch.object(jobs_mod, "fetch_isochrones", fake_iso), \
+         patch.object(jobs_mod, "geocode", fake_geocode), \
+         patch.object(jobs_mod, "evaluate_route_constraint", fake_route_eval), \
+         patch.object(jobs_mod, "fetch_railway_lines", fake_rail), \
+         patch.object(jobs_mod, "reverse_geocode_name", fake_rgeo), \
+         patch.object(jobs_mod, "critique_analysis", fake_critique), \
+         patch.object(results_mod, "write_explanations", fake_explain):
+        t0 = time.monotonic()
+        asyncio.run(jobs_mod._run_analysis(job, spec))
+        elapsed = time.monotonic() - t0
+    return job, calls, elapsed
+
+
+def test_water_and_buildability_fetches_run_concurrently_not_sequentially():
+    """The exact regression this change is meant to prevent: water_geometry
+    and buildability both fire for "high-end gym in Mumbai" (confirmed by the
+    plan-level test above). With every Overpass call delayed by `delay_s`:
+
+    - buildability alone makes 6 calls (railway area+line, ghat, protected,
+      maidan, road_frontage) bounded by concurrency=2 -> ceil(6/2)=3 batches.
+    - water makes 1 separate call.
+
+    If sequential (the bug this test guards against): total >= water + 3
+    buildability batches = 4 * delay_s. If concurrent (the fix): total is
+    bounded by max(water, buildability) = 3 * delay_s. The threshold below
+    sits strictly between the two, so a regression to sequential fetching
+    fails this test.
+    """
+    delay_s = 0.2
+    spec = _spec_for("high-end gym", "Mumbai")
+    job, calls, elapsed = _run_pipeline_with_fetch_delay(spec, delay_s)
+    assert job.status == "done", f"job failed: {job.error}"
+    # Sanity: this really did exercise both water (>=1 area call beyond
+    # buildability's own 2 area calls) and buildability (line + named calls).
+    assert calls["area"] >= 3   # water + railway_area + protected_area
+    assert calls["line"] >= 2   # railway_lines + road_frontage
+    assert calls["named"] >= 2  # ghat + maidan
+    sequential_bound = 4 * delay_s
+    concurrent_bound = 3 * delay_s
+    threshold = (sequential_bound + concurrent_bound) / 2
+    assert elapsed < threshold, (
+        f"elapsed={elapsed:.2f}s is not below the concurrent/sequential "
+        f"midpoint ({threshold:.2f}s) — water and buildability fetches may "
+        "have regressed to running sequentially again."
+    )

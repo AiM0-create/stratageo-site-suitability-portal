@@ -77,11 +77,16 @@ v1.6.2: Smart water/buildability relevance — fixes a live-observed failure
   no-build-land protection silently zeroed by the gate; (2) water relevance
   was pure prompt-text matching with zero geography awareness — a resolved
   coastal/port metro (Mumbai, Chennai, Kolkata, Kochi, …) now triggers the
-  water mask even with no water wording in the prompt at all. Neither change
-  reintroduces the v1.5.2 buildability-timeout problem: broader triggering
-  still runs inside the same bounded stage budget + concurrency + per-fetch
-  degradation, which bounds worst-case wall clock independent of trigger
-  frequency (pinned by a new regression test).
+  water mask even with no water wording in the prompt at all. Both fixes mean
+  water AND buildability now fire TOGETHER far more often (every coastal-
+  metro commercial brief, not a rare combination) — so this release also
+  launches the water-body fetch and the buildability fetch group
+  CONCURRENTLY instead of sequentially (they were previously two separate
+  blocking awaits, worst case ~135s combined; now launched together as
+  asyncio tasks, worst case bounded to max(water, buildability) ~90s),
+  closing the actual timeout risk broader triggering would otherwise have
+  introduced. Pinned by a real-wall-clock regression test, not just a
+  mask-correctness check.
 """
 from functools import lru_cache
 from typing import Literal

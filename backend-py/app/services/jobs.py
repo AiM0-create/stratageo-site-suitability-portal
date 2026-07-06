@@ -1073,6 +1073,20 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     cen = polygon.centroid
     lat0, lng0 = cen.y, cen.x
 
+    # v1.6.2 — launch the water-body fetch and the buildability fetch group
+    # CONCURRENTLY (not sequentially). The v1.6.2 relevance fixes make each of
+    # these stages trigger far more often (correctly) than before — a coastal
+    # Indian metro now ALWAYS needs both — so letting them stack sequentially
+    # (water up to optional_provider_timeout=45s + buildability up to its own
+    # 90s stage budget = up to 135s) would eat deep into the shared 240s job
+    # ceiling on what is now the common case, not a rare edge case. Neither
+    # stage depends on the OTHER's fetched data (buildability's railway/ghat/
+    # protected/road queries are independent OSM tag sets from water's; only
+    # the corridor riverbank-boundary FALLBACK below needs water_ways, and
+    # that's awaited separately, once both are already in flight). Launching
+    # both now bounds the combined worst case to max(water_timeout,
+    # buildability_stage_budget) instead of their sum.
+
     # Fetch water-body GEOMETRY once (ways + relation members → big rivers as
     # multipolygons). Reused by BOTH the riverbank-corridor fallback (4c) and the
     # water mask (4d). Includes waterway=river so the river line is available even
@@ -1080,13 +1094,20 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # v1.4.9 — planner-gated: skipped entirely for non-waterfront briefs (no
     # river/lake/coastal signal in the prompt or spec). The skip is recorded in
     # notes/analysisCompleteness; it is NOT a degradation.
-    water_ways = []
-    if _plan.should_run("water_geometry"):
+    async def _fetch_water_ways() -> list[dict]:
+        if not _plan.should_run("water_geometry"):
+            _qt.record_internal(
+                purpose="water_geometry_skipped_by_planner",
+                query_type="relevance_gate",
+                feature_count=0,
+                params={"reason": _plan.skip_reason("water_geometry") or "not relevant"},
+            )
+            return []
         try:
             # v1.4.6 — per-call ceiling; on timeout the water mask degrades and is
             # reported (for riverside briefs the corridor-failure path below still
             # withholds the recommendation rather than silently keeping water cells).
-            water_ways = await asyncio.wait_for(
+            ways = await asyncio.wait_for(
                 fetch_area_geometries(
                     ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
                 ),
@@ -1096,10 +1117,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 purpose="water_body_geometry",
                 tags=["natural=water", "waterway=riverbank", "waterway=river"],
                 bbox=overpass_bbox,
-                feature_count=len(water_ways),
+                feature_count=len(ways),
             )
+            return ways
         except Exception as e:
-            water_ways = []
             _provider_degraded.append("water_body_geometry")
             _err_txt = str(e)[:200] or f"timed out after {_opt_timeout}s"
             _qt.record_osm(
@@ -1110,13 +1131,125 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 warning=_err_txt,
             )
             fallbacks.append(f"Water-body geometry fetch failed: {_err_txt}.")
-    else:
-        _qt.record_internal(
-            purpose="water_geometry_skipped_by_planner",
-            query_type="relevance_gate",
-            feature_count=0,
-            params={"reason": _plan.skip_reason("water_geometry") or "not relevant"},
-        )
+            return []
+
+    _water_task = asyncio.ensure_future(_fetch_water_ways())
+
+    # ── 4e (LAUNCH phase) — buildability fetch tasks. Launched here so they run
+    # concurrently with the water fetch above; awaited + the resulting masks
+    # applied at this stage's original position further down (see the '4e
+    # (apply phase)' comment there).
+    bflags = _buildability_flags(spec)
+    # v1.4.9 — planner-gated. The legacy _COMMERCIAL_RE trigger fires for nearly
+    # every business type (audit §8); the planner narrows it to briefs with a
+    # genuine waterfront / land-development / railway-avoidance signal. A skip
+    # is a recorded resource decision, not a degradation.
+    _frontage_skipped_by_planner = bool(bflags.get("commercial_proxy")) and not _plan.should_run("frontage_proxy")
+    if not _plan.should_run("buildability"):
+        for _k in ("railway", "ghat", "protected"):
+            bflags[_k] = False
+    if not _plan.should_run("frontage_proxy"):
+        bflags["commercial_proxy"] = False
+    road_lines: list[dict] = []
+    _buildability_degraded: list[str] = []   # checks skipped due to provider timeout
+    _fp: dict[str, asyncio.Task] = {}
+    _protected_tags: list[str] = []
+    if any(bflags.values()):
+        _bov_timeout = s.buildability_overpass_timeout
+        # v1.5.2 — STAGE deadline + bounded concurrency. The v1.4.1/v1.4.2 fixes
+        # capped each call and surfaced per-sub-step progress, but the calls were
+        # still SEQUENTIAL: 6 x 30s worst case = 180s, which (stacked on the main
+        # fetch) blew the 240s job ceiling on 2 of 4 canonical live prompts. All
+        # needed fetches now launch together under a semaphore (2 = Overpass
+        # mirror connection-slot etiquette) and share one wall-clock deadline;
+        # a fetch that can't start or finish inside the remaining stage budget
+        # degrades to an empty mask instead of dragging the whole job past its
+        # watchdog. Mask APPLICATION stays sequential below (order-dependent
+        # `&= ~excluded` reporting semantics are unchanged). v1.6.2: this
+        # deadline now starts BEFORE the water fetch above, not after — the
+        # two stages' wall clocks overlap instead of stacking.
+        _stage_deadline = time.monotonic() + s.buildability_stage_budget_seconds
+        _fetch_sem = asyncio.Semaphore(max(1, s.buildability_fetch_concurrency))
+
+        def _stage_remaining() -> float:
+            return _stage_deadline - time.monotonic()
+
+        async def _safe_fetch(kind: str, arg, label: str = "unknown"):
+            """Deadline-aware, semaphore-bounded Overpass fetch.
+
+            kind: 'area' | 'line' | 'named'. Degrades to [] (never raises) on
+            timeout, error, or stage-budget exhaustion — recorded in
+            `fallbacks` + `_buildability_degraded` exactly like the previous
+            per-kind helpers, so downstream reporting is unchanged.
+            """
+            async with _fetch_sem:
+                remaining = _stage_remaining()
+                if remaining <= 1.0:
+                    logger.warning(
+                        "job %s: buildability '%s' skipped — stage budget (%ss) exhausted",
+                        job.id[:8], label, s.buildability_stage_budget_seconds,
+                    )
+                    fallbacks.append(
+                        f"Buildability '{label}': stage time budget "
+                        f"({s.buildability_stage_budget_seconds}s) exhausted before this "
+                        "check could run — exclusion mask skipped (graceful degradation)."
+                    )
+                    _buildability_degraded.append(label)
+                    return []
+                call_timeout = min(_bov_timeout, remaining)
+                try:
+                    if kind == "area":
+                        coro = fetch_area_geometries(arg, overpass_bbox)
+                    elif kind == "line":
+                        coro = fetch_line_geometries(arg, overpass_bbox)
+                    else:
+                        coro = fetch_named_features(arg, overpass_bbox)
+                    return await asyncio.wait_for(coro, timeout=call_timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "job %s: buildability '%s' %s timed out after %.0fs — skipped",
+                        job.id[:8], label, kind, call_timeout,
+                    )
+                    fallbacks.append(
+                        f"Buildability '{label}': Overpass {kind} fetch timed out after "
+                        f"{int(call_timeout)}s — exclusion mask skipped (graceful degradation)."
+                    )
+                    _buildability_degraded.append(label)
+                    return []
+                except Exception as ex:
+                    fallbacks.append(f"Buildability '{label}' {kind} fetch failed: {ex}")
+                    _buildability_degraded.append(label)
+                    return []
+
+        if bflags.get("railway"):
+            _fp["railway_area"] = asyncio.ensure_future(
+                _safe_fetch("area", buildability.RAILWAY_AREA_TAGS, "railway_area"))
+            _fp["railway_lines"] = asyncio.ensure_future(
+                _safe_fetch("line", buildability.RAILWAY_LINE_TAGS, "railway_lines"))
+        if bflags.get("ghat"):
+            _fp["ghat"] = asyncio.ensure_future(
+                _safe_fetch("named", "[Gg]hat", "ghat"))
+        if bflags.get("protected"):
+            _protected_tags = list(buildability.PROTECTED_AREA_TAGS)
+            if bflags.get("park_exception"):
+                _protected_tags = [
+                    t for t in _protected_tags
+                    if not t.startswith(("leisure=park", "landuse=grass", "landuse=recreation"))
+                ]
+            _fp["protected_area"] = asyncio.ensure_future(
+                _safe_fetch("area", _protected_tags, "protected_area"))
+            if not bflags.get("park_exception"):
+                _fp["maidan"] = asyncio.ensure_future(
+                    _safe_fetch("named", buildability.OPEN_GROUND_NAME_RE, "maidan"))
+        if bflags.get("commercial_proxy"):
+            _fp["road_frontage"] = asyncio.ensure_future(
+                _safe_fetch("line", buildability.ROAD_LINE_TAGS, "road_frontage"))
+
+    # Both fetch groups are now in flight concurrently. Await the water task
+    # here — the corridor gate below (4c) needs its result for the riverbank
+    # fallback; the buildability tasks (_fp) are awaited later, at 4e.
+    water_ways = await _water_task
+
     # PATCH 1 (v1.0.3.1): track whether a WATERFRONT gate was actually enforced, so a
     # failed riverfront corridor never silently becomes "all candidates kept".
     waterfront_corridor_enforced = False
@@ -1242,126 +1375,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 f"Water overlap mask removed {n_overlap} hex(es) with >30% water area."
             )
 
-    # ── 4e. Buildability / no-construction masks (v1.0.3) ─────────────
+    # ── 4e (apply phase). Buildability / no-construction masks (v1.0.3) ──
     # Hard-exclude obvious no-build land for waterfront + commercial briefs:
     # railway land, ghats, heritage/protected/sacred, open space. OSM is incomplete
     # in India, so absence of a mask means "unknown" not "buildable" — we only mask
     # where OSM positively says no-build, and we report every removal.
-    bflags = _buildability_flags(spec)
-    # v1.4.9 — planner-gated. The legacy _COMMERCIAL_RE trigger fires for nearly
-    # every business type (audit §8); the planner narrows it to briefs with a
-    # genuine waterfront / land-development / railway-avoidance signal. A skip
-    # is a recorded resource decision, not a degradation.
-    _frontage_skipped_by_planner = bool(bflags.get("commercial_proxy")) and not _plan.should_run("frontage_proxy")
-    if not _plan.should_run("buildability"):
-        for _k in ("railway", "ghat", "protected"):
-            bflags[_k] = False
-    if not _plan.should_run("frontage_proxy"):
-        bflags["commercial_proxy"] = False
-    road_lines: list[dict] = []
-    _buildability_degraded: list[str] = []   # checks skipped due to provider timeout
+    # Fetch tasks (_fp) and flags (bflags) were already launched concurrently
+    # with the water fetch, above (see the '4e (LAUNCH phase)' comment) — this
+    # just awaits them and applies the resulting masks in the original,
+    # order-dependent sequence.
     if any(bflags.values()):
         _update(job, 64, "buildability", "Applying buildability / no-construction masks...")
-        _bov_timeout = s.buildability_overpass_timeout
-        # v1.5.2 — STAGE deadline + bounded concurrency. The v1.4.1/v1.4.2 fixes
-        # capped each call and surfaced per-sub-step progress, but the calls were
-        # still SEQUENTIAL: 6 x 30s worst case = 180s, which (stacked on the main
-        # fetch) blew the 240s job ceiling on 2 of 4 canonical live prompts. All
-        # needed fetches now launch together under a semaphore (2 = Overpass
-        # mirror connection-slot etiquette) and share one wall-clock deadline;
-        # a fetch that can't start or finish inside the remaining stage budget
-        # degrades to an empty mask instead of dragging the whole job past its
-        # watchdog. Mask APPLICATION stays sequential below (order-dependent
-        # `&= ~excluded` reporting semantics are unchanged).
-        _stage_deadline = time.monotonic() + s.buildability_stage_budget_seconds
-        _fetch_sem = asyncio.Semaphore(max(1, s.buildability_fetch_concurrency))
-
-        def _stage_remaining() -> float:
-            return _stage_deadline - time.monotonic()
-
-        async def _safe_fetch(kind: str, arg, label: str = "unknown"):
-            """Deadline-aware, semaphore-bounded Overpass fetch.
-
-            kind: 'area' | 'line' | 'named'. Degrades to [] (never raises) on
-            timeout, error, or stage-budget exhaustion — recorded in
-            `fallbacks` + `_buildability_degraded` exactly like the previous
-            per-kind helpers, so downstream reporting is unchanged.
-            """
-            async with _fetch_sem:
-                remaining = _stage_remaining()
-                if remaining <= 1.0:
-                    logger.warning(
-                        "job %s: buildability '%s' skipped — stage budget (%ss) exhausted",
-                        job.id[:8], label, s.buildability_stage_budget_seconds,
-                    )
-                    fallbacks.append(
-                        f"Buildability '{label}': stage time budget "
-                        f"({s.buildability_stage_budget_seconds}s) exhausted before this "
-                        "check could run — exclusion mask skipped (graceful degradation)."
-                    )
-                    _buildability_degraded.append(label)
-                    return []
-                call_timeout = min(_bov_timeout, remaining)
-                try:
-                    if kind == "area":
-                        coro = fetch_area_geometries(arg, overpass_bbox)
-                    elif kind == "line":
-                        coro = fetch_line_geometries(arg, overpass_bbox)
-                    else:
-                        coro = fetch_named_features(arg, overpass_bbox)
-                    return await asyncio.wait_for(coro, timeout=call_timeout)
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "job %s: buildability '%s' %s timed out after %.0fs — skipped",
-                        job.id[:8], label, kind, call_timeout,
-                    )
-                    fallbacks.append(
-                        f"Buildability '{label}': Overpass {kind} fetch timed out after "
-                        f"{int(call_timeout)}s — exclusion mask skipped (graceful degradation)."
-                    )
-                    _buildability_degraded.append(label)
-                    return []
-                except Exception as ex:
-                    fallbacks.append(f"Buildability '{label}' {kind} fetch failed: {ex}")
-                    _buildability_degraded.append(label)
-                    return []
-
-        # v1.4.1 — this block previously made up to 6 sequential Overpass calls
-        # (railway×2, ghat, protected, maidan, road) between a single 64% update
-        # and the next stage's update, with no visible progress and no
-        # cancellation checkpoint in between. A single call can legitimately take
-        # 30s+ and worst-case ~150s (3 mirror failovers); stacked sequentially
-        # this looked like a permanent freeze at 64%. Each sub-step now reports
-        # its own message (so polling shows real movement) and passes through
-        # _update(), which is also the cancellation checkpoint — a user-requested
-        # cancel now takes effect within one sub-step instead of the whole block.
-        # ── Launch every needed fetch CONCURRENTLY (results awaited below) ──
-        _fp: dict[str, asyncio.Task] = {}
-        _protected_tags: list[str] = []
-        if bflags.get("railway"):
-            _fp["railway_area"] = asyncio.ensure_future(
-                _safe_fetch("area", buildability.RAILWAY_AREA_TAGS, "railway_area"))
-            _fp["railway_lines"] = asyncio.ensure_future(
-                _safe_fetch("line", buildability.RAILWAY_LINE_TAGS, "railway_lines"))
-        if bflags.get("ghat"):
-            _fp["ghat"] = asyncio.ensure_future(
-                _safe_fetch("named", "[Gg]hat", "ghat"))
-        if bflags.get("protected"):
-            _protected_tags = list(buildability.PROTECTED_AREA_TAGS)
-            if bflags.get("park_exception"):
-                _protected_tags = [
-                    t for t in _protected_tags
-                    if not t.startswith(("leisure=park", "landuse=grass", "landuse=recreation"))
-                ]
-            _fp["protected_area"] = asyncio.ensure_future(
-                _safe_fetch("area", _protected_tags, "protected_area"))
-            if not bflags.get("park_exception"):
-                _fp["maidan"] = asyncio.ensure_future(
-                    _safe_fetch("named", buildability.OPEN_GROUND_NAME_RE, "maidan"))
-        if bflags.get("commercial_proxy"):
-            _fp["road_frontage"] = asyncio.ensure_future(
-                _safe_fetch("line", buildability.ROAD_LINE_TAGS, "road_frontage"))
-
         if _fp:
             _update(job, 64, "buildability",
                     f"Fetching {len(_fp)} land-exclusion layer(s) in parallel "
