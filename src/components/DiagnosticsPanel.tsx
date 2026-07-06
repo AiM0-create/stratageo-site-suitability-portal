@@ -12,6 +12,33 @@ import { config } from '../config';
 import { getLastDiagnostics, checkBackendHealth } from '../services/llmIntentExtractor';
 import type { IntentDiagnostics } from '../services/llmIntentExtractor';
 
+// v1.6.2 — health check for the engine that's ACTUALLY serving analyses in
+// production (the Python/FastAPI conversational v2 engine on Cloud Run),
+// distinct from checkBackendHealth() (the legacy single-shot Node/Vercel
+// path). Reports the real appVersion/engineVersion, not just ok/not-ok.
+async function checkPyBackendHealth(): Promise<{ ok: boolean; detail: string }> {
+  if (!config.pyBackendUrl) {
+    return { ok: false, detail: 'No backend URL configured (VITE_PY_BACKEND_URL is empty)' };
+  }
+  try {
+    const response = await fetch(`${config.pyBackendUrl}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) {
+      return { ok: false, detail: `Backend returned HTTP ${response.status}` };
+    }
+    const data = await response.json();
+    if (!data.ok) {
+      return { ok: false, detail: 'Backend reachable but reported not healthy' };
+    }
+    return { ok: true, detail: `Backend healthy (v${data.appVersion}, ${data.engineVersion})` };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, detail: `Backend unreachable: ${msg}` };
+  }
+}
+
 export const DiagnosticsPanel: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [diagnostics, setDiagnostics] = useState<IntentDiagnostics>(getLastDiagnostics());
@@ -34,10 +61,18 @@ export const DiagnosticsPanel: React.FC = () => {
     return () => clearInterval(interval);
   }, [open]);
 
+  // v1.6.2 — check whichever backend is ACTUALLY serving this session. The
+  // panel previously always checked the legacy single-shot aiBackendUrl (a
+  // Vercel-hosted Node function no longer part of this deployment), even
+  // though production exclusively runs the conversational v2 engine on
+  // pyBackendUrl — reporting the real, healthy engine as "unreachable"
+  // whenever that old Vercel deployment was down or removed.
   const runHealthCheck = async () => {
     setHealthChecking(true);
     setHealthStatus('Checking...');
-    const result = await checkBackendHealth();
+    const result = config.isConversationalMode
+      ? await checkPyBackendHealth()
+      : await checkBackendHealth();
     setHealthStatus(result.ok ? `✅ ${result.detail}` : `❌ ${result.detail}`);
     setHealthChecking(false);
   };
@@ -110,10 +145,22 @@ export const DiagnosticsPanel: React.FC = () => {
             AI Diagnostics
           </div>
 
-          {/* Config */}
-          <Row label="Mode" value={config.isDemoMode ? 'Demo' : 'Live'} color={config.isDemoMode ? '#d97706' : '#059669'} />
-          <Row label="AI Backend" value={config.aiBackendUrl || '(not configured)'} />
-          <Row label="Intent Source" value={sourceLabel(diagnostics.source)} color={sourceColor(diagnostics.source)} />
+          {/* Config — v1.6.2: show whichever backend is actually in use.
+              Conversational mode (production) runs the Python v2 engine on
+              pyBackendUrl; the legacy aiBackendUrl path only ever activates
+              when conversational mode is off (local dev / historical demo). */}
+          <Row
+            label="Mode"
+            value={config.isConversationalMode ? 'Live (Conversational v2)' : config.isDemoMode ? 'Demo' : 'Live (Legacy)'}
+            color={config.isConversationalMode || !config.isDemoMode ? '#059669' : '#d97706'}
+          />
+          <Row
+            label={config.isConversationalMode ? 'Engine Backend' : 'AI Backend'}
+            value={(config.isConversationalMode ? config.pyBackendUrl : config.aiBackendUrl) || '(not configured)'}
+          />
+          {!config.isConversationalMode && (
+            <Row label="Intent Source" value={sourceLabel(diagnostics.source)} color={sourceColor(diagnostics.source)} />
+          )}
 
           {/* Last attempt */}
           {diagnostics.timestamp && (
