@@ -240,6 +240,13 @@ def apply_deterministic_plan(
         merged_layers.append(layer)
 
     spec["layers"] = merged_layers
+    # v1.6.0 (Phase 2) — record the archetype's DEFAULT weights before any
+    # user adjustment, keyed by display name (the same key the UI sliders and
+    # candidate criteria use). This is the "default" side of the report's
+    # default-vs-adjusted weight audit.
+    spec["canonicalWeights"] = {
+        l["name"]: round(float(l.get("weight", 0.0)), 4) for l in merged_layers
+    }
 
     # 2. Lock output.topN to RawIntent value
     resolved_top_n = intent.topN.get("topNResolved", canonical.top_n_default)
@@ -371,3 +378,49 @@ def build_relaxation_options(
     })
 
     return opts
+
+
+def preserve_user_weights(new_spec: dict, incoming_spec: dict | None) -> dict:
+    """v1.6.0 (Phase 2) — keep customer-adjusted weights across chat turns.
+
+    The deterministic planner re-applies archetype default weights on EVERY
+    chat turn. Without this guard, a customer who adjusted the sliders on the
+    plan card and then typed "run" would have their adjustments silently wiped
+    by that final turn — the executed analysis would not match the plan they
+    approved. If the incoming (client) spec is flagged weightsAdjustedByUser,
+    copy its per-layer weights onto the freshly planned spec by layer id
+    (falling back to display-name match), keep the flag, and keep the
+    canonical defaults for the audit trail. Weights are renormalized by the
+    SpecV2 validator as usual, so partial matches stay safe.
+    """
+    if not isinstance(new_spec, dict) or not isinstance(incoming_spec, dict):
+        return new_spec
+    if not incoming_spec.get("weightsAdjustedByUser"):
+        return new_spec
+    incoming_by_id = {}
+    incoming_by_name = {}
+    for il in incoming_spec.get("layers") or []:
+        if not isinstance(il, dict):
+            continue
+        w = il.get("weight")
+        if not isinstance(w, (int, float)) or w < 0:
+            continue
+        if il.get("id"):
+            incoming_by_id[il["id"]] = float(w)
+        if il.get("name"):
+            incoming_by_name[str(il["name"]).lower()] = float(w)
+    matched = 0
+    for nl in new_spec.get("layers") or []:
+        if not isinstance(nl, dict):
+            continue
+        w = incoming_by_id.get(nl.get("id"))
+        if w is None:
+            w = incoming_by_name.get(str(nl.get("name", "")).lower())
+        if w is not None:
+            nl["weight"] = w
+            matched += 1
+    if matched:
+        new_spec["weightsAdjustedByUser"] = True
+        new_spec["weightsSource"] = "user_adjusted"
+        # canonical defaults stay untouched on new_spec for the audit trail
+    return new_spec

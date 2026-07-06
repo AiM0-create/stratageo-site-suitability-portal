@@ -31,6 +31,60 @@ change — only the frontend usage log and Admin Dashboard changed.
   side-by-side review of whether the engine is behaving deterministically for
   repeated prompts.
 
+### Fixed
+- **Admin panel crashed on open (React error #310)** — `AdminDashboard.tsx`
+  had an `if (!open) return null;` early return sitting between two hooks
+  (`useMemo` for mismatch detection, `useCallback` for the export report)
+  added by this feature. Since `open` is `false` on first mount and only
+  becomes `true` when an admin opens the panel, React saw a different hook
+  count between renders. Fixed by moving the early return after all hooks.
+
+---
+
+## [1.6.0] — 2026-07-06 — Factor Weight Sliders
+
+### Added
+- **Plan-card weight adjustments now survive chat turns** — a customer who
+  moves a weight slider on the plan card before running, then types "run",
+  previously had their adjustment silently wiped because every chat turn
+  re-applies archetype default weights. Fixed: adjustments are flagged
+  (`weightsAdjustedByUser` on the spec) and the new `preserve_user_weights()`
+  (`backend-py/app/engine/deterministic_planner.py`) copies them back onto the
+  freshly planned spec by layer id/name before execution.
+- **Post-run weight sliders, fully wired** — the "⚖ Factor weights" panel
+  above the candidate list re-ranks candidates **and recolors the hex-grid
+  map** instantly on every slider move, entirely client-side (`reweightHexGrid`
+  in `mcdaEngine.ts`) — no re-fetch, no analysis credit used. A **Reset to
+  defaults** button restores the original analysis.
+- **Honesty banner + stale-decoration suppression** — moving any slider away
+  from defaults shows an amber "Custom weights active" banner explaining that
+  confidence/stability labels and the shortlist itself were computed under
+  default weights; score-band, "statistically similar", and map→refined chips
+  are hidden rather than shown against numbers they no longer describe.
+- **Weight audit trail** — every analysis result now carries a `weightAudit`
+  object (`defaultWeights`, `executedWeights`, `adjustedByUser`), built in
+  `jobs.py` from the spec's `canonicalWeights` (recorded by the deterministic
+  planner before any adjustment) and the layers it actually executed with.
+
+### Fixed
+- **Fabricated-zero bug in `recalculateWithWeights`** (`mcdaEngine.ts`) — the
+  pre-existing (half-finished) weight-slider recompute counted a factor with
+  no data (`score === null`) as a hard `0` in the weighted mean while still
+  counting its weight in the denominator, unfairly dragging down candidates in
+  data-sparse areas. Fixed with present-weight renormalization matching the
+  backend's honesty rules — a no-data factor is now excluded from both
+  numerator and denominator entirely.
+
+### Tests
+- Backend: 4 new tests in `test_v152_reliability.py` covering
+  `canonicalWeights` recording, weight preservation across a simulated chat
+  turn, that an unflagged incoming spec does NOT preserve, and that `SpecV2`
+  accepts the new audit fields. **560 passed.**
+- Frontend: new `src/__tests__/reweighting.test.ts` (13 tests) covering the
+  canonical "reverse the weights flips the ranking" test prompt, the
+  no-data-factor exclusion fix, hex-grid recoloring, and `weightsDiffer`
+  scale-invariance. **66 passed.**
+
 ---
 
 ## [1.5.2] — 2026-07-06 — Reliability & Consistency

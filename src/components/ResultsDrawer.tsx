@@ -12,6 +12,12 @@ interface ResultsDrawerProps {
   selectedLocations: LocationData[];
   onSelectLocation: (location: LocationData) => void;
   customWeights: Record<string, number>;
+  /** v1.6.0 (Phase 2) — the analysis's default weights, for diffing + reset. */
+  defaultWeights?: Record<string, number>;
+  /** v1.6.0 (Phase 2) — true when any slider differs from defaults. */
+  weightsAdjusted?: boolean;
+  /** v1.6.0 (Phase 2) — restore all weights to defaults. */
+  onWeightsReset?: () => void;
   onWeightChange: (name: string, weight: number) => void;
   heatmapType: HeatmapType;
   onHeatmapChange: (type: HeatmapType) => void;
@@ -194,6 +200,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   selectedLocations,
   onSelectLocation,
   customWeights,
+  defaultWeights = {},
+  weightsAdjusted = false,
+  onWeightsReset,
   onWeightChange,
   heatmapType,
   onHeatmapChange,
@@ -203,6 +212,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   onWidenCorridor,
 }) => {
   const [expandedLoc, setExpandedLoc] = useState<string | null>(locations[0]?.name ?? null);
+  const [showWeights, setShowWeights] = useState<boolean>(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
@@ -898,6 +908,78 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             ⚠ These are diagnostic <b>raw candidates, not site recommendations</b>. Scores and order are shown for inspection only.
           </div>
         )}
+        {/* v1.6.0 (Phase 2) — global factor-weight panel. Moving a slider
+            re-ranks candidates and recolors the map instantly, client-side —
+            no re-run, no quota use. Weights are shown normalized (they always
+            sum to 100% in the composite, matching the backend's math). */}
+        {!withheld && Object.keys(customWeights).length > 0 && (
+          <div className="drawer-assumptions" style={{ margin: '8px 0' }}>
+            <button
+              className="assumptions-toggle"
+              onClick={() => setShowWeights(!showWeights)}
+              style={{ background: weightsAdjusted ? '#fffbeb' : undefined }}
+            >
+              <span>⚖ Factor weights{weightsAdjusted ? ' — custom (adjusted by you)' : ' — defaults'}</span>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showWeights ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+            {showWeights && (() => {
+              const names = Object.keys(customWeights);
+              const total = names.reduce((s, n) => s + Math.max(0, customWeights[n] || 0), 0) || 1;
+              return (
+                <div className="assumptions-body" style={{ padding: '8px 4px' }}>
+                  {names.map(n => (
+                    <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: '12px' }}>
+                      <span style={{ flex: '0 0 44%', color: '#334155' }}>{n}</span>
+                      <input
+                        type="range" min="0" max="1" step="0.05"
+                        value={Math.max(0, Math.min(1, customWeights[n] ?? 0))}
+                        onChange={e => onWeightChange(n, parseFloat(e.target.value))}
+                        style={{ flex: 1 }}
+                        aria-label={`Weight for ${n}`}
+                      />
+                      <span style={{ flex: '0 0 52px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#0f172a', fontWeight: 600 }}>
+                        {Math.round((Math.max(0, customWeights[n] || 0) / total) * 100)}%
+                      </span>
+                      {defaultWeights[n] !== undefined && weightsAdjusted && (
+                        <span style={{ flex: '0 0 62px', textAlign: 'right', fontSize: '10px', color: '#94a3b8' }}
+                              title="Default weight from the analysis playbook">
+                          default {Math.round(defaultWeights[n] * 100)}%
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                    <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                      Re-ranking is instant and does not use an analysis credit.
+                    </span>
+                    {weightsAdjusted && onWeightsReset && (
+                      <button
+                        onClick={onWeightsReset}
+                        style={{ fontSize: '11px', padding: '3px 10px', borderRadius: 5, border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer', color: '#334155' }}
+                      >
+                        Reset to defaults
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+        {/* v1.6.0 (Phase 2) — honesty banner: an adjusted ranking must never
+            masquerade as the default analysis. */}
+        {!withheld && weightsAdjusted && (
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 6, padding: '8px 10px', fontSize: '12px', margin: '4px 0 8px', lineHeight: 1.45 }}>
+            <b>Custom weights active.</b> Scores and ranking below are recomputed
+            from your weights using this analysis's verified factor data.
+            Confidence, stability and verification labels were computed under the
+            default weights. Candidate zones were shortlisted under default
+            weights — to discover and verify <i>different</i> zones under your
+            weights, re-run the analysis.
+          </div>
+        )}
         {/* Comparison chart */}
         {selectedLocations.length >= 1
           ? <ComparisonChart locations={selectedLocations} />
@@ -945,7 +1027,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             v1.4.2: null-safe — a malformed/partial location must render "—"
                             rather than throw and blank the whole results panel. */}
                         <span className="score-number" style={raw ? { color: '#64748b' } : undefined}>
-                          {typeof (loc as any).displayScore === 'number'
+                          {/* v1.6.0: under custom weights the recomputed
+                              mcda_score is authoritative; the backend's rounded
+                              displayScore reflects DEFAULT weights and is stale. */}
+                          {!weightsAdjusted && typeof (loc as any).displayScore === 'number'
                             ? (loc as any).displayScore.toFixed(1)
                             : typeof loc.mcda_score === 'number'
                               ? loc.mcda_score.toFixed(1)
@@ -981,7 +1066,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                           </span>
                         )}
                         {/* v1.4.0: score band */}
-                        {!raw && !loc.excluded && (loc as any).scoreBand && (
+                        {!raw && !loc.excluded && !weightsAdjusted && (loc as any).scoreBand && (
                           <span style={{ fontSize: '0.68em', color: '#94a3b8' }}
                                 title="Proxy-based screening score — band reflects data uncertainty">
                             ~{(loc as any).scoreBand}
@@ -992,7 +1077,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             real routing/isochrone/traffic verification. Shown only when
                             the two meaningfully differ, so users aren't left wondering
                             why a pick doesn't match the darkest map cell. */}
-                        {!raw && !loc.excluded && loc.rankingBasis === 'refined'
+                        {!raw && !loc.excluded && !weightsAdjusted && loc.rankingBasis === 'refined'
                           && typeof loc.screeningScore === 'number'
                           && Math.abs(loc.screeningScore - loc.mcda_score) >= 0.3 && (
                           <span
@@ -1003,7 +1088,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                           </span>
                         )}
                         {/* v1.4.0: close-band warning */}
-                        {!raw && !loc.excluded && (loc as any).closeBandWarning && (
+                        {!raw && !loc.excluded && !weightsAdjusted && (loc as any).closeBandWarning && (
                           <span style={{ fontSize: '0.68em', color: '#d97706' }}>
                             statistically similar
                           </span>

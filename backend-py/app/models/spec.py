@@ -458,6 +458,16 @@ class SpecV2(BaseModel):
     rawIntent: Optional[RawIntentMeta] = None
     outputCount: Optional[OutputCount] = None
 
+    # ── v1.6.0 (Phase 2) — weight-slider audit trail ──────────────────────────
+    # canonicalWeights: the archetype's default weights (name → weight) at plan
+    # time, recorded by the deterministic planner BEFORE any user adjustment.
+    # weightsAdjustedByUser: set true by the UI when the customer moves any
+    # weight slider pre-run; the deterministic planner then PRESERVES the
+    # user's weights instead of re-applying archetype defaults on later turns.
+    # Together these let the report show "default vs. adjusted" honestly.
+    canonicalWeights: Optional[dict[str, float]] = None
+    weightsAdjustedByUser: Optional[bool] = None
+
     # Analysis mode controls which engine path is taken.
     analysisMode: Optional[Literal[
         "micro_market_scoring",

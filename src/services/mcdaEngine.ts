@@ -9,7 +9,7 @@
  * - Evidence-tagged justifications
  */
 
-import type { MCDACriteria, ExclusionCheck, LocationData, AnalysisSpec, SpatialConstraint, UserPointConstraint, CriterionDirection } from '../types';
+import type { MCDACriteria, ExclusionCheck, LocationData, AnalysisSpec, SpatialConstraint, UserPointConstraint, CriterionDirection, HexGridCell } from '../types';
 import type { CriterionTemplate, SectorTemplate } from './sectorTemplates';
 import type { SiteProfile } from './intentSchema';
 import { getSectorById } from './sectorTemplates';
@@ -346,17 +346,75 @@ export function recalculateWithWeights(locations: LocationData[], customWeights:
   return locations.map(loc => {
     let totalWeighted = 0;
     let totalWeight = 0;
+    let anyData = false;
 
     const newCriteria = loc.criteria_breakdown.map(c => {
       const weight = Math.max(0, Math.min(1, customWeights[c.name] ?? c.weight));
-      totalWeighted += (c.score ?? 0) * weight;
-      totalWeight += weight;
+      // v1.6.0 (Phase 2) FIX — present-weight renormalization, mirroring the
+      // backend. A factor with NO data (score === null) must be EXCLUDED from
+      // both numerator and denominator. The previous `(c.score ?? 0) * weight`
+      // treated missing data as a hard 0 while keeping its weight in the
+      // denominator, unfairly dragging the composite down — exactly the
+      // "fabricated zero" the backend's honesty rules forbid.
+      if (c.score !== null && c.score !== undefined) {
+        totalWeighted += c.score * weight;
+        totalWeight += weight;
+        anyData = true;
+      }
       return { ...c, weight };
     });
 
-    const newScore = totalWeight > 0 ? Math.round((totalWeighted / totalWeight) * 10) / 10 : 0;
-    return { ...loc, mcda_score: newScore, criteria_breakdown: newCriteria };
+    const newScore = anyData && totalWeight > 0
+      ? Math.round((totalWeighted / totalWeight) * 10) / 10
+      : loc.mcda_score;
+    const out: LocationData = { ...loc, mcda_score: newScore, criteria_breakdown: newCriteria };
+    return out;
   });
+}
+
+/** v1.6.0 (Phase 2) — recolor the map surface under custom weights.
+ * Each hex cell carries per-factor 0-10 scores (direction already applied),
+ * so the composite is a client-side weighted mean — no re-fetch, no cost.
+ * Cells without layerScores (older payloads) keep their original score. */
+export function reweightHexGrid(
+  hexGrid: HexGridCell[] | undefined,
+  customWeights: Record<string, number>,
+): HexGridCell[] | undefined {
+  if (!hexGrid || hexGrid.length === 0 || Object.keys(customWeights).length === 0) return hexGrid;
+  return hexGrid.map(cell => {
+    const ls = cell.layerScores;
+    if (!ls) return cell;
+    let tw = 0, tws = 0;
+    for (const [name, s] of Object.entries(ls)) {
+      const w = customWeights[name];
+      if (w === undefined || w <= 0 || s === null || s === undefined) continue;
+      tws += s * w;
+      tw += w;
+    }
+    if (tw <= 0) return cell;
+    return { ...cell, score: Math.round((tws / tw) * 100) / 100 };
+  });
+}
+
+/** v1.6.0 (Phase 2) — are two weight sets meaningfully different?
+ * Compared after normalization so scale-equivalent sets (e.g. all doubled)
+ * count as equal — only the RATIOS drive the ranking. */
+export function weightsDiffer(
+  a: Record<string, number>,
+  b: Record<string, number>,
+  eps = 0.005,
+): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  if (keys.size === 0) return false;
+  const sum = (w: Record<string, number>) =>
+    Object.values(w).reduce((s, v) => s + Math.max(0, v || 0), 0) || 1;
+  const sa = sum(a), sb = sum(b);
+  for (const k of keys) {
+    const na = Math.max(0, a[k] || 0) / sa;
+    const nb = Math.max(0, b[k] || 0) / sb;
+    if (Math.abs(na - nb) > eps) return true;
+  }
+  return false;
 }
 
 // ─── Generate evidence-backed reasoning ───

@@ -38,6 +38,18 @@ v1.5.2: Reliability & Consistency — (1) buildability stage budget + bounded
   byte-identical objective) with waterfront detection reading the raw prompt;
   (6) screening-vs-refined score transparency (screeningScore/rankingBasis on
   every candidate + a map→refined chip in the UI).
+v1.6.0: Factor Weight Sliders (Phase 2) — the plan-card and results-drawer
+  weight sliders are now fully wired end to end. Adjusting a weight on the
+  plan card before running is flagged (weightsAdjustedByUser) and PRESERVED
+  by the deterministic planner across chat turns instead of being silently
+  reset to archetype defaults (a real bug: typing "run" after adjusting used
+  to wipe the adjustment). Post-run sliders in the ResultsDrawer re-rank
+  candidates AND recolor the hex-grid map instantly, client-side — no re-run,
+  no provider calls. Every analysis records a weightAudit (default vs.
+  executed weights, adjusted-by-user flag) so an adjusted ranking is never
+  presented as the untouched default methodology. Also fixes a pre-existing
+  frontend scoring bug: a factor with no data was counted as a fabricated
+  zero in the weighted mean instead of being excluded from it.
 """
 from functools import lru_cache
 from typing import Literal
@@ -45,16 +57,17 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.5.2"
+APP_VERSION     = "1.6.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00058"
-# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2 —
+ENGINE_VERSION  = "stratageo-engine-00059"
+# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/v1.6.0 —
 # the SpecV2 wire schema and the EvidenceTrail schema are structurally
-# unchanged; hardConstraintVerification / screeningScore / rankingBasis are
-# additive result-payload keys outside these versioned contracts.
+# unchanged; hardConstraintVerification / screeningScore / rankingBasis /
+# canonicalWeights / weightsAdjustedByUser are additive keys outside these
+# versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Reliability & Consistency"
+RELEASE_NAME    = "Factor Weight Sliders"
 
 
 class Settings(BaseSettings):

@@ -186,3 +186,59 @@ def test_waterfront_detection_survives_templated_objective():
         rawIntent={"rawPrompt": "premium riverside restaurant along the Hooghly River"},
     )
     assert spec.waterfront is not None and spec.waterfront.isWaterfront
+
+
+# ── v1.6.0 (Phase 2): weight sliders — backend audit & preservation ──────────
+
+from app.engine.deterministic_planner import preserve_user_weights
+
+
+def test_canonical_weights_recorded_on_spec():
+    s = _spec_for(_JP_NAGAR_PROMPT, "anything")
+    cw = s.get("canonicalWeights")
+    assert isinstance(cw, dict) and len(cw) >= 3
+    assert abs(sum(cw.values()) - 1.0) < 0.02  # archetype weights ≈ normalized
+
+
+def test_user_adjusted_weights_survive_a_new_chat_turn():
+    """The wipe-risk: customer adjusts sliders on the plan card, then types
+    'run' — the resulting chat turn re-applies archetype defaults. The
+    preservation helper must copy the customer's weights back on."""
+    fresh = _spec_for(_JP_NAGAR_PROMPT, "anything")           # archetype defaults
+    adjusted = _spec_for(_JP_NAGAR_PROMPT, "anything")
+    adjusted["weightsAdjustedByUser"] = True
+    # Customer cranked the first factor up and zeroed nothing else
+    adjusted["layers"][0]["weight"] = 0.9
+    kept = preserve_user_weights(dict(fresh), adjusted)
+    assert kept["layers"][0]["weight"] == 0.9
+    assert kept.get("weightsAdjustedByUser") is True
+    assert kept.get("weightsSource") == "user_adjusted"
+    # canonical defaults untouched for the audit trail
+    assert kept["canonicalWeights"] == fresh["canonicalWeights"]
+
+
+def test_unflagged_incoming_spec_does_not_preserve():
+    fresh = _spec_for(_JP_NAGAR_PROMPT, "anything")
+    incoming = _spec_for(_JP_NAGAR_PROMPT, "anything")
+    incoming["layers"][0]["weight"] = 0.9        # edited but NOT flagged
+    kept = preserve_user_weights(dict(fresh), incoming)
+    assert kept["layers"][0]["weight"] == fresh["layers"][0]["weight"]
+
+
+def test_specv2_accepts_weight_audit_fields():
+    from app.models.spec import SpecV2
+    spec = SpecV2(
+        objective="Identify top 3 candidate micro-market zones for a cafe in Pune",
+        businessType="cafe",
+        studyArea={"type": "places", "places": ["Pune"]},
+        layers=[{
+            "id": "demand", "name": "Footfall", "weight": 1.0,
+            "direction": "positive",
+            "source": {"provider": "osm", "tags": ["amenity=cafe"]},
+            "catchment": {"type": "euclidean", "meters": 500},
+        }],
+        canonicalWeights={"Footfall": 1.0},
+        weightsAdjustedByUser=True,
+    )
+    assert spec.weightsAdjustedByUser is True
+    assert spec.canonicalWeights == {"Footfall": 1.0}

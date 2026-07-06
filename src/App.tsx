@@ -9,7 +9,7 @@ import { isAnalysisSpecWithPoints, isConfirmationPhrase, isFollowUpQuestion } fr
 import { normalizeAnalysisResult } from './services/resultNormalizer';
 import type { SpecV2, AnalysisPhase } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
-import { recalculateWithWeights } from './services/mcdaEngine';
+import { recalculateWithWeights, reweightHexGrid, weightsDiffer } from './services/mcdaEngine';
 import { parseCSV } from './services/csvParser';
 import { resolveContext } from './services/contextResolver';
 import { compareToBenchmark } from './services/benchmarks';
@@ -49,6 +49,9 @@ const App: React.FC = () => {
   const [spec, setSpec] = useState<AnalysisSpec | null>(null);
   const [selectedLocations, setSelectedLocations] = useState<LocationData[]>([]);
   const [customWeights, setCustomWeights] = useState<Record<string, number>>({});
+  // v1.6.0 (Phase 2) — the analysis's default weights, remembered separately so
+  // slider adjustments can be detected, disclosed, and reset.
+  const [defaultWeights, setDefaultWeights] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>({ message: '', progress: 0 });
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +150,7 @@ const App: React.FC = () => {
               const weights: Record<string, number> = {};
               analysis.result.locations[0].criteria_breakdown.forEach(c => { weights[c.name] = c.weight; });
               setCustomWeights(weights);
+              setDefaultWeights(weights);
             }
           } else {
             setError('Shared analysis not found or has expired.');
@@ -214,6 +218,24 @@ const App: React.FC = () => {
     if (!result) return [];
     return recalculateWithWeights(result.locations, customWeights);
   }, [result, customWeights]);
+
+  // v1.6.0 (Phase 2) — has the customer moved any slider away from defaults?
+  const weightsAdjusted = useMemo(
+    () => weightsDiffer(customWeights, defaultWeights),
+    [customWeights, defaultWeights],
+  );
+
+  // v1.6.0 (Phase 2) — recolor the map surface live under custom weights so
+  // the choropleth never contradicts the re-ranked candidate list. Pure
+  // client-side arithmetic over per-cell factor scores; zero provider calls.
+  const displayHexGrid = useMemo(() => {
+    if (!result?.hexGrid) return result?.hexGrid;
+    return weightsAdjusted ? reweightHexGrid(result.hexGrid, customWeights) : result.hexGrid;
+  }, [result, customWeights, weightsAdjusted]);
+
+  const handleWeightsReset = useCallback(() => {
+    setCustomWeights(defaultWeights);
+  }, [defaultWeights]);
 
   const selectedRecalculated = useMemo(() => {
     return locations.filter(loc => selectedLocations.some(sl => sl.name === loc.name));
@@ -491,6 +513,7 @@ const App: React.FC = () => {
         const weights: Record<string, number> = {};
         analysisResultData.locations[0].criteria_breakdown.forEach(c => { weights[c.name] = c.weight; });
         setCustomWeights(weights);
+        setDefaultWeights(weights);
       }
       setDrawerOpen(true);
       setChatReady(false);
@@ -774,6 +797,7 @@ const App: React.FC = () => {
           weights[c.name] = c.weight;
         });
         setCustomWeights(weights);
+        setDefaultWeights(weights);
       }
 
       setDrawerOpen(true);
@@ -1543,7 +1567,7 @@ const App: React.FC = () => {
           userPoints={userPoints}
           showBuffers={showBuffers}
           bufferRadiusM={spec?.userPointConstraints?.[0]?.radiusM}
-          hexGrid={result?.hexGrid}
+          hexGrid={displayHexGrid}
           catchments={result?.catchments}
           recommendationWithheld={result?.recommendationWithheld}
           studyAreaBoundary={result?.studyAreaBoundary}
@@ -1648,6 +1672,9 @@ const App: React.FC = () => {
             onSelectLocation={handleSelectLocation}
             customWeights={customWeights}
             onWeightChange={handleWeightChange}
+            defaultWeights={defaultWeights}
+            weightsAdjusted={weightsAdjusted}
+            onWeightsReset={handleWeightsReset}
             heatmapType={heatmapType}
             onHeatmapChange={setHeatmapType}
             showBuffers={showBuffers}

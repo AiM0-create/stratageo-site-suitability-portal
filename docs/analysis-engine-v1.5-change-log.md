@@ -238,3 +238,41 @@ Single commit; `git revert` restores v1.5.1 behavior exactly. Tag `rollback-pre-
 
 ### Rollback plan
 Tag `rollback-pre-v1.5.2` points at the previously-live commit (`c13ed6a`, backend revision `stratageo-engine-00057-sp4`).
+
+---
+
+## v1.6.0 — Factor Weight Sliders (Phase 2)
+
+### 26. `backend-py/app/engine/deterministic_planner.py` — canonical weights + preservation
+- **What:** `apply_deterministic_plan()` now records `spec["canonicalWeights"]` (archetype default weights, keyed by display name) before any user adjustment. New `preserve_user_weights(new_spec, incoming_spec)`: when the incoming client spec has `weightsAdjustedByUser: true`, copies its per-layer weights onto the freshly planned spec by layer id (falling back to name match), and flags `weightsSource: "user_adjusted"`.
+- **Why:** the deterministic planner re-applies archetype defaults on EVERY chat turn — a customer who adjusted sliders on the plan card and then typed "run" had those adjustments silently wiped by the final turn's replan. Real bug, now fixed.
+- **Risk:** low — only activates when the client explicitly flags the adjustment. **Rollback:** revert commit.
+
+### 27. `backend-py/app/models/spec.py` + `backend-py/app/services/llm.py` — wiring
+- **What:** `SpecV2` gains `canonicalWeights: Optional[dict[str, float]]` and `weightsAdjustedByUser: Optional[bool]`. `llm.py`'s `chat_turn()` calls `preserve_user_weights(new_spec, spec)` immediately after `apply_deterministic_plan()`.
+- **Risk:** low — additive optional fields. **Rollback:** revert commit.
+
+### 28. `backend-py/app/services/jobs.py` — weight audit in result payload
+- **What:** every result now carries `"weightAudit": {"adjustedByUser", "defaultWeights", "executedWeights"}`, sourced from the spec's `canonicalWeights`/`weightsAdjustedByUser` and the layers actually executed with.
+- **Why:** so an adjusted ranking is never presented as the untouched default methodology — visible in the report.
+- **Risk:** low — additive payload key. **Rollback:** revert commit.
+
+### 29. Frontend — `mcdaEngine.ts`, `App.tsx`, `ResultsDrawer.tsx`, `SpecSummaryCard.tsx`, `types/*.ts`, `resultNormalizer.ts`
+- **What:** `reweightHexGrid()` (recolors the hex-grid map client-side from per-cell `layerScores`) and `weightsDiffer()` (scale-invariant weight-set comparison) added to `mcdaEngine.ts`. `App.tsx` tracks `defaultWeights` alongside `customWeights`, derives `weightsAdjusted`/`displayHexGrid`/`handleWeightsReset`, and passes them to `ResultsDrawer`. `ResultsDrawer` gained the "⚖ Factor weights" panel (sliders + reset button + default-weight comparison) and the amber "Custom weights active" honesty banner that suppresses stale default-weight decorations (score band, "statistically similar", map→refined chip) while adjusted. `SpecSummaryCard`'s plan-card weight editor now sets `weightsAdjustedByUser: true`. Types + normalizer extended for `weightAudit`/`canonicalWeights`/`weightsAdjustedByUser`.
+- **Fixed:** `recalculateWithWeights()` previously counted a no-data factor (`score === null`) as a fabricated `0` in the weighted mean while still counting its weight in the denominator — unfairly dragging down candidates in data-sparse areas. Now present-weight-renormalized (excludes no-data factors from both numerator and denominator), matching the backend's honesty rules.
+- **Risk:** low-medium (touches the core candidate-scoring recompute) — mitigated by the reweighting test suite (13 tests) including the canonical "reverse the weights flips the ranking" scenario and a direct regression test for the fabricated-zero fix. **Rollback:** revert commit.
+
+### 30. Tests + version bump (release commit)
+- Backend: 4 new tests appended to `test_v152_reliability.py` (canonical weights recorded, weights preserved across a simulated chat turn, unflagged incoming spec does not preserve, `SpecV2` accepts the new audit fields).
+- Frontend: new `src/__tests__/reweighting.test.ts` (13 tests) covering `recalculateWithWeights`, `reweightHexGrid`, and `weightsDiffer`.
+- `config.py`: APP_VERSION → **1.6.0**, ENGINE_VERSION → `stratageo-engine-00059`, RELEASE_NAME → "Factor Weight Sliders"; docstring entry added. Version-assertion tests updated. `package.json`/lock → 1.6.0. README: current-version line, v1.6.0 highlights, version-history row, `/health` example fixed. CHANGELOG: 1.6.0 entry.
+
+### Validation (this release)
+| Check | Result |
+|---|---|
+| Backend | **560 passed** |
+| Frontend typecheck / tests / build | clean / **66 passed** / success |
+| API/cost impact | zero new external calls — weight recompute is pure client-side arithmetic |
+
+### Rollback plan
+Tag `rollback-pre-v1.6.0` points at the previously-live commit, tagged immediately before this deploy.

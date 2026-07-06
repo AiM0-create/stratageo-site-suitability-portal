@@ -19,7 +19,7 @@ from .archetypes import ARCHETYPE_PLAYBOOK
 from .prompts import chat_system_prompt
 from ..engine.intent_parser import parse_raw_intent
 from ..engine.canonical_archetypes import resolve_canonical_archetype
-from ..engine.deterministic_planner import apply_deterministic_plan
+from ..engine.deterministic_planner import apply_deterministic_plan, preserve_user_weights
 from ..config import APP_VERSION, ENGINE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -345,6 +345,12 @@ async def chat_turn(
                 canonical=canonical,
                 engine_version=ENGINE_VERSION,
                 cost_mode=settings.cost_mode,
+            )
+            # v1.6.0 (Phase 2) — a customer who adjusted weight sliders on the
+            # plan card must not have them wiped when this turn re-applies
+            # archetype defaults; preserve them from the incoming client spec.
+            new_spec = preserve_user_weights(
+                new_spec, spec if isinstance(spec, dict) else None,
             )
             logger.info(
                 "Deterministic plan applied: archetype=%s planningFingerprint=%s",

@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.5.2 — Reliability & Consistency**
+**Current version: v1.6.0 — Factor Weight Sliders**
 
 ---
 
@@ -20,6 +20,16 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.6.0 Highlights
+
+- **Factor weight sliders, fully wired** — the plan-card and results-drawer weight sliders now go end to end. Adjust a weight on the plan card before running: the adjustment is flagged and **preserved** by the deterministic planner across chat turns (previously, typing "run" after adjusting silently reset the weights to archetype defaults — a real bug, now fixed with a regression test).
+- **Instant post-run re-ranking and map recoloring** — moving a slider in the "⚖ Factor weights" panel re-ranks the candidate list **and** recolors the hex-grid map immediately, client-side, with zero re-fetch and zero analysis-credit cost.
+- **Honesty banner on adjusted rankings** — an amber "Custom weights active" banner appears whenever sliders differ from defaults, explaining that confidence/stability labels and the shortlist itself were computed under default weights — re-run to discover different zones under the new weights.
+- **Weight audit trail** — every analysis now records a `weightAudit` (default archetype weights vs. executed weights, and whether the customer adjusted them), so an adjusted ranking is never presented as the untouched default methodology.
+- **Fixed a real scoring bug** — the existing (unfinished) slider recompute treated a factor with no data as a fabricated zero in the weighted mean instead of excluding it — unfairly dragging down candidates in data-sparse areas. Fixed to match the backend's honesty rules, with a regression test proving an 8/10-only-factor candidate now scores 8.0, not 5.6.
 
 ---
 
@@ -284,7 +294,7 @@ After deploy, verify:
 curl https://<your-cloud-run-url>/health
 ```
 
-Expected response includes `appVersion: "1.5.2"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
+Expected response includes `appVersion: "1.6.0"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
 
 **Rollback discipline:** before every backend deploy, tag the currently-live commit first — `git tag -a rollback-pre-vX.Y.Z <live-commit-sha> -m "..." && git push origin rollback-pre-vX.Y.Z` — so `git checkout` back to a known-good state is always one command away (see [Rollback](#rollback) below).
 
@@ -328,7 +338,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.5.2** *(current)* | Reliability & Consistency — buildability stage budget + concurrent fetches (fixes live 240s timeouts), deterministic stage planning & templated objective (identical prompt → identical plan), small-format grocery archetype fix, block-scale res-10 grids on request, screening→refined score transparency |
+| **v1.6.0** *(current)* | Factor Weight Sliders — plan-card weight adjustments preserved across chat turns (fixes a silent-wipe bug), post-run sliders re-rank + instantly recolor the map client-side, weight audit trail (default vs. executed), fixed a fabricated-zero scoring bug in the reweighting engine |
+| **v1.5.2** | Reliability & Consistency — buildability stage budget + concurrent fetches (fixes live 240s timeouts), deterministic stage planning & templated objective (identical prompt → identical plan), small-format grocery archetype fix, block-scale res-10 grids on request, screening→refined score transparency |
 | **v1.5.1** | Hard Constraint Verification Visibility — per-requested-constraint status panel (Verified / Proxy verified / Not verifiable / Requested but not enforced / Failed), per-candidate warning chips, strong-verdict safety cap |
 | **v1.5.0** | Analysis Intelligence Lite — deterministic archetype/intent/risk classification, scenario ranking stability, granular `dataSufficiencyV2`, investigation-zone label taxonomy, all surfaced in the UI; zero new provider calls |
 | **v1.4.9** | PlannerLite smart resource gating — skips irrelevant water/buildability/routing/Places-refinement stages per prompt; `analysisCompleteness` payload; unsupported constraints labeled up front |

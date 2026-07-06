@@ -383,6 +383,14 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
 
   // map layers — MapView guards per-cell, but the containers must be arrays
   if (src.hexGrid !== undefined) out.hexGrid = asArr(src.hexGrid).filter(isObj);
+  // v1.6.0 (Phase 2) — weight audit (default vs executed weights, user-adjusted flag)
+  if (isObj(src.weightAudit)) {
+    out.weightAudit = {
+      adjustedByUser: src.weightAudit.adjustedByUser === true,
+      defaultWeights: isObj(src.weightAudit.defaultWeights) ? src.weightAudit.defaultWeights : null,
+      executedWeights: isObj(src.weightAudit.executedWeights) ? src.weightAudit.executedWeights : {},
+    };
+  }
   if (src.catchments !== undefined) out.catchments = asArr(src.catchments).filter(isObj);
   if (src.studyAreaBoundary !== undefined && !Array.isArray(src.studyAreaBoundary)) {
     out.studyAreaBoundary = undefined;

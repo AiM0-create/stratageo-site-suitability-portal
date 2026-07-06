@@ -327,6 +327,12 @@ export interface AnalysisResult {
   hardConstraintVerification?: HardConstraintVerification;
   /** Present only for v2 conversational-engine analyses */
   hexGrid?: HexGridCell[];
+  /** v1.6.0 (Phase 2) — default vs executed weights and the user-adjusted flag. */
+  weightAudit?: {
+    adjustedByUser: boolean;
+    defaultWeights: Record<string, number> | null;
+    executedWeights: Record<string, number>;
+  };
   catchments?: CatchmentOutline[];
   /** Senior-consultant self-critique of the computed result (v2 only) */
   critique?: AnalysisCritique | null;

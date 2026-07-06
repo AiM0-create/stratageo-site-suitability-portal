@@ -2520,6 +2520,15 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "untracedConstraints": _untraced_constraints if '_untraced_constraints' in dir() else [],
         # v1.4.0 — constraint policy (Phase 3)
         "constraintPolicy": _policy.to_dict(),
+        # v1.6.0 (Phase 2) — weight audit: default archetype weights vs the
+        # weights this analysis actually executed with, and whether the
+        # customer adjusted them. Renders in the report so an adjusted ranking
+        # is never presented as the untouched default methodology.
+        "weightAudit": {
+            "adjustedByUser": bool(getattr(spec, "weightsAdjustedByUser", False)),
+            "defaultWeights": getattr(spec, "canonicalWeights", None),
+            "executedWeights": {l.name: round(float(l.weight), 4) for l in spec.layers},
+        },
         # v1.4.0 — metro resolution evidence (Phase 8)
         "metroValidation": _metro_result.to_evidence_dict(),
         # v1.4.0 — data coverage (Phase 6)

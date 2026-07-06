@@ -53,6 +53,13 @@ export interface ConsultantPlan {
 }
 
 export interface SpecV2 {
+  /** v1.6.0 (Phase 2) — set true when the customer adjusts weight sliders on the
+   *  plan card; the backend then preserves these weights across chat turns and
+   *  reports them as user-adjusted in the weight audit. */
+  weightsAdjustedByUser?: boolean;
+  /** v1.6.0 (Phase 2) — archetype default weights (name → weight), recorded by
+   *  the deterministic planner for the default-vs-adjusted audit. */
+  canonicalWeights?: Record<string, number>;
   version: '2.0';
   objective: string;
   businessType: string;

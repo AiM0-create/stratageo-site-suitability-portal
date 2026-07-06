@@ -64,6 +64,9 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
     const updated: SpecV2 = {
       ...spec,
       layers: spec.layers.map(l => (l.id === layerId ? { ...l, weight: pct } : l)),
+      // v1.6.0 (Phase 2) — flag the adjustment so the backend preserves these
+      // weights across chat turns and audits them as user-adjusted.
+      weightsAdjustedByUser: true,
     };
     onSpecEdit(updated);
   };
