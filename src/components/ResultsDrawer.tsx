@@ -109,6 +109,26 @@ const DS_STATUS_META: Record<string, { text: string; color: string }> = {
   not_required: { text: 'not required', color: '#94a3b8' },
 };
 
+// v1.5.1 — per-constraint verification status display (fixed vocabulary).
+// Language rule: never "site verified" / "buildable" — only what the data
+// actually supports.
+const HC_STATUS_META: Record<string, { text: string; color: string }> = {
+  verified: { text: 'Verified', color: '#059669' },
+  proxy_verified: { text: 'Proxy verified', color: '#d97706' },
+  not_verifiable: { text: 'Not verifiable from available data', color: '#92400e' },
+  requested_not_enforced: { text: 'Requested but not enforced', color: '#dc2626' },
+  failed: { text: 'Failed', color: '#dc2626' },
+  not_required: { text: 'Not required', color: '#94a3b8' },
+};
+
+const HC_SUMMARY_META: Record<string, { text: string; color: string }> = {
+  verified: { text: 'all verified', color: '#059669' },
+  partially_verified: { text: 'partially verified', color: '#d97706' },
+  degraded: { text: 'degraded — see warnings', color: '#dc2626' },
+  failed: { text: 'failed — see warnings', color: '#dc2626' },
+  unknown: { text: 'unknown', color: '#64748b' },
+};
+
 function getRecommendationLabel(
   loc: import('../types').LocationData,
   withheld: boolean,
@@ -235,6 +255,13 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const analysisRecoMeta = analysisReco ? ANALYSIS_RECO_META[analysisReco] : undefined;
   const ds2 = (result as any).dataSufficiencyV2 as
     import('../types').DataSufficiencyV2 | undefined;
+  // v1.5.1 — hard-constraint verification (optional; absent on older payloads).
+  const hcv = (result as any).hardConstraintVerification as
+    import('../types').HardConstraintVerification | undefined;
+  const hcvWarnEntries = (hcv?.constraints ?? []).filter(c =>
+    c.status === 'requested_not_enforced'
+    || c.status === 'failed'
+    || (c.status === 'not_verifiable' && c.affectsRecommendation));
   // v1.4.6 — gate the green "Recommended" badge: any unverified critical
   // constraint, non-verified enforcement level, or degraded provider check
   // demotes RECOMMENDED to "Candidate Zone" (see getRecommendationLabel).
@@ -464,6 +491,66 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
               {' · '}<b style={{ color: '#d97706' }}>{ds2.hard_constraints.unknown_count} unknown</b>
               {' · '}<b style={{ color: '#dc2626' }}>{ds2.hard_constraints.failed_count} failed</b>
             </div>
+          </div>
+        )}
+
+        {/* v1.5.1 — hard-constraint verification: which REQUESTED constraints
+            were Verified / Proxy verified / Not verifiable / Requested but not
+            enforced / Failed. Warning cards for anything unresolved. */}
+        {hcv && hcv.constraints.length > 0 && (
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#475569', marginBottom: 8 }}>
+            <b>Hard constraint verification</b>
+            {HC_SUMMARY_META[hcv.summaryStatus] && (
+              <span style={{ marginLeft: 6, fontWeight: 700, color: HC_SUMMARY_META[hcv.summaryStatus].color }}>
+                — {HC_SUMMARY_META[hcv.summaryStatus].text}
+              </span>
+            )}
+            <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
+              <span style={{ color: hcv.verifiedCount > 0 ? '#059669' : '#94a3b8' }}>
+                Verified: <b>{hcv.verifiedCount}</b>
+              </span>
+              <span style={{ color: hcv.proxyVerifiedCount > 0 ? '#d97706' : '#94a3b8' }}>
+                Proxy verified: <b>{hcv.proxyVerifiedCount}</b>
+              </span>
+              <span style={{ color: hcv.unknownCount > 0 ? '#92400e' : '#94a3b8' }}>
+                Not verifiable: <b>{hcv.unknownCount}</b>
+              </span>
+              <span style={{ color: hcv.unenforcedCount > 0 ? '#dc2626' : '#94a3b8' }}>
+                Requested but not enforced: <b>{hcv.unenforcedCount}</b>
+              </span>
+              <span style={{ color: hcv.failedCount > 0 ? '#dc2626' : '#94a3b8' }}>
+                Failed: <b>{hcv.failedCount}</b>
+              </span>
+            </div>
+            <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {hcv.constraints.filter(c => c.status !== 'not_required').map((c, i) => {
+                const meta = HC_STATUS_META[c.status] || HC_STATUS_META.not_verifiable;
+                return (
+                  <span key={i} title={c.reason}>
+                    {c.label}: <b style={{ color: meta.color }}>{meta.text}</b>
+                    {c.fieldValidationRequired && (
+                      <span style={{ color: '#94a3b8' }}> · field validation required</span>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+            {hcvWarnEntries.map((c, i) => (
+              <div key={i} style={{
+                marginTop: 6, borderRadius: 6, padding: '6px 10px', fontSize: '11px',
+                background: c.status === 'failed' || c.severity === 'critical' ? '#fef2f2' : '#fffbeb',
+                border: `1px solid ${c.status === 'failed' || c.severity === 'critical' ? '#fecaca' : '#fcd34d'}`,
+                color: c.status === 'failed' || c.severity === 'critical' ? '#991b1b' : '#92400e',
+              }}>
+                <b>
+                  {c.status === 'requested_not_enforced' ? 'Requested but not enforced'
+                    : c.status === 'failed' ? 'Could not be enforced'
+                    : 'Field validation required'}
+                  : {c.label}.
+                </b>{' '}
+                {c.reason}
+              </div>
+            ))}
           </div>
         )}
 
@@ -927,6 +1014,23 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     </svg>
                   </button>
                 </div>
+
+                {/* v1.5.1 — unresolved hard-constraint warnings for this
+                    candidate zone (warning styling; red only for failed/critical) */}
+                {!loc.excluded && (loc.hardConstraintWarnings ?? []).length > 0 && (
+                  <div style={{ margin: '4px 12px 0', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {(loc.hardConstraintWarnings ?? []).slice(0, 3).map((w, i) => (
+                      <div key={i} style={{
+                        borderRadius: 5, padding: '3px 8px', fontSize: '10.5px',
+                        background: w.severity === 'critical' || w.status === 'failed' ? '#fef2f2' : '#fffbeb',
+                        border: `1px solid ${w.severity === 'critical' || w.status === 'failed' ? '#fecaca' : '#fde68a'}`,
+                        color: w.severity === 'critical' || w.status === 'failed' ? '#991b1b' : '#92400e',
+                      }}>
+                        ⚠ {w.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <p className="drawer-loc-reasoning">{loc.reasoning}</p>
 

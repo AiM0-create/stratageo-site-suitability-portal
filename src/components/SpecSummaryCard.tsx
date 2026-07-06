@@ -74,6 +74,13 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
       : spec.studyArea.type === 'bbox'
         ? 'custom bounding box'
         : 'point + radius';
+  // v1.5.1 — pre-run honesty note: a metro/subway exclusion depends on station
+  // data resolving at run time; if it cannot, the result is marked degraded
+  // ("requested but not enforced"), never silently kept. Derived purely from
+  // the spec the backend already sent — no new backend behavior.
+  const hasMetroExclusion = (spec.exclusions ?? []).some(e =>
+    /metro|subway/i.test(e.name || '')
+    || (e.source?.tags ?? []).some(t => /subway|metro/i.test(t)));
   const unsupported = spec.meta?.unsupportedRequests || [];
   const weakProxies = spec.layers.filter(l => l.confidence === 'low' || l.proxyWarning);
   // Not-feasible plans show the conflict + options instead of factors/execute
@@ -269,7 +276,17 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
               <ul className="spec-list">
                 {spec.plannerPreview.cannotVerify!.map((c, i) => <li key={i}>⚠ {c}</li>)}
               </ul>
+              <p className="assumption-note" style={{ fontSize: '10.5px', color: '#92400e', margin: '2px 0 0' }}>
+                These will be flagged for field validation — never scored.
+              </p>
             </>
+          )}
+          {hasMetroExclusion && (
+            <p className="assumption-note" style={{ fontSize: '10.5px', color: '#64748b', margin: '4px 0 0' }}>
+              Metro exclusion will be attempted with resolved station data; if
+              station data is unavailable at run time, the result will be marked
+              “requested but not enforced” — never silently kept.
+            </p>
           )}
         </Collapsible>
       )}

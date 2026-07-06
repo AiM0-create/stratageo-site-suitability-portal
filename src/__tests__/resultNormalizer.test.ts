@@ -260,4 +260,119 @@ describe('normalizeAnalysisResult', () => {
     expect(r.locations[0].mcda_score).toBe(8.2);
     expect(r.locations[0].criteria_breakdown[0].score).toBe(8);
   });
+
+  // ── v1.5.1 hard-constraint verification visibility ──
+
+  it('renders an old payload without hardConstraintVerification unchanged', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's', locations: [{ name: 'Z', lat: 1, lng: 2, mcda_score: 5 }],
+    }) as any;
+    expect(r.hardConstraintVerification).toBeUndefined();
+    expect(r.locations[0].hardConstraintWarnings).toBeUndefined();
+    // absence must not manufacture a normalization warning
+    expect((r.normalizationWarnings ?? []).join(' ')).not.toContain('Hard-constraint');
+  });
+
+  it('passes through a well-formed hardConstraintVerification object', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's', locations: [],
+      hardConstraintVerification: {
+        summaryStatus: 'degraded',
+        requestedCount: 2, verifiedCount: 0, proxyVerifiedCount: 0,
+        unknownCount: 1, unenforcedCount: 1, failedCount: 0,
+        constraints: [
+          { id: 'rent_or_lease_price', label: 'Rent / lease price cap', requested: true,
+            category: 'rent', status: 'not_verifiable', severity: 'warning',
+            affectsRecommendation: true, candidateScope: 'all_candidates',
+            reason: 'no data source', fieldValidationRequired: true },
+          { id: 'exclusion:metro', label: 'Metro exclusion (metro)', requested: true,
+            category: 'metro_exclusion', status: 'requested_not_enforced', severity: 'critical',
+            affectsRecommendation: true, candidateScope: 'analysis',
+            reason: 'no station data', fieldValidationRequired: true },
+        ],
+      },
+    }) as any;
+    const hcv = r.hardConstraintVerification;
+    expect(hcv.summaryStatus).toBe('degraded');
+    expect(hcv.constraints).toHaveLength(2);
+    expect(hcv.constraints[1].status).toBe('requested_not_enforced');
+    expect(hcv.constraints[1].severity).toBe('critical');
+    expect(hcv.unenforcedCount).toBe(1);
+  });
+
+  it('drops malformed hardConstraintVerification with a warning, and filters bad entries', () => {
+    const bad = normalizeAnalysisResult({
+      summary: 's', locations: [],
+      hardConstraintVerification: 'not-an-object',
+    }) as any;
+    expect(bad.hardConstraintVerification).toBeUndefined();
+    expect(bad.normalizationWarnings.join(' ')).toContain('Hard-constraint');
+
+    const partial = normalizeAnalysisResult({
+      summary: 's', locations: [],
+      hardConstraintVerification: {
+        summaryStatus: 'verified',
+        constraints: [
+          { id: 'ok', label: 'OK', status: 'verified' },
+          { id: 'bad-status', label: 'Bad', status: 'exploded' },   // invalid → dropped
+          'not-an-object',
+        ],
+      },
+    }) as any;
+    const hcv = partial.hardConstraintVerification;
+    expect(hcv.constraints).toHaveLength(1);
+    expect(hcv.constraints[0].id).toBe('ok');
+    expect(hcv.constraints[0].severity).toBe('warning');       // defaulted
+    expect(hcv.constraints[0].affectsRecommendation).toBe(false);
+    expect(hcv.requestedCount).toBe(1);                          // derived fallback
+  });
+
+  it('normalizes candidate hardConstraintWarnings and drops message-less entries', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's',
+      locations: [{
+        name: 'Z', lat: 1, lng: 2, mcda_score: 5,
+        hardConstraintWarnings: [
+          { constraintId: 'rent', label: 'Rent cap', status: 'not_verifiable',
+            severity: 'warning', message: 'Rent cap cannot be verified from available data.' },
+          { constraintId: 'no-msg', label: 'X', status: 'failed', severity: 'critical' },  // no message → dropped
+          'garbage',
+        ],
+      }],
+    }) as any;
+    const warns = r.locations[0].hardConstraintWarnings;
+    expect(warns).toHaveLength(1);
+    expect(warns[0].message).toContain('Rent cap');
+    expect(warns[0].severity).toBe('warning');
+  });
+
+  it('metro requested-not-enforced case: candidate warning survives end to end', () => {
+    const r = normalizeAnalysisResult({
+      summary: 's',
+      hardConstraintVerification: {
+        summaryStatus: 'degraded', requestedCount: 1, verifiedCount: 0,
+        proxyVerifiedCount: 0, unknownCount: 0, unenforcedCount: 1, failedCount: 0,
+        constraints: [{
+          id: 'exclusion:metro_stations', label: 'Metro exclusion (metro_stations)',
+          requested: true, category: 'metro_exclusion',
+          status: 'requested_not_enforced', severity: 'critical',
+          affectsRecommendation: true, candidateScope: 'analysis',
+          reason: 'no station data', fieldValidationRequired: true,
+        }],
+      },
+      locations: [{
+        name: 'Z', lat: 1, lng: 2, mcda_score: 5,
+        hardConstraintWarnings: [{
+          constraintId: 'exclusion:metro_stations',
+          label: 'Metro exclusion (metro_stations)',
+          status: 'requested_not_enforced', severity: 'critical',
+          message: 'Requested but not enforced: Metro exclusion — no station data could be resolved.',
+        }],
+      }],
+    }) as any;
+    expect(r.hardConstraintVerification.constraints[0].status).toBe('requested_not_enforced');
+    const w = r.locations[0].hardConstraintWarnings[0];
+    expect(w.severity).toBe('critical');
+    expect(w.message.toLowerCase()).toContain('not enforced');
+  });
 });

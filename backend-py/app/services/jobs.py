@@ -59,6 +59,11 @@ from ..engine.metro import (
 from ..engine.route_policy import validate_strict_route_constraints
 from ..engine.planner_lite import create_analysis_plan, _factor_family
 from ..engine.stability import compute_ranking_stability
+from ..engine.hard_constraints import (
+    build_hard_constraint_verification,
+    candidate_warnings,
+    demotes_strong_recommendation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2313,6 +2318,43 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         else:
             _analysis_reco = "NO_RELIABLE_RECOMMENDATION"
 
+    # ── v1.5.1: hard-constraint verification visibility ─────────────────────
+    # One structured object consolidating what the run already knows about
+    # each REQUESTED hard constraint: verified / proxy_verified /
+    # not_verifiable / requested_not_enforced / failed / not_required. Pure
+    # mapping of existing state — no provider calls, never load-bearing.
+    _hcv: dict | None = None
+    try:
+        _hcv = build_hard_constraint_verification(
+            spec=spec,
+            plan=_plan,
+            route_unavailable=route_unavailable,
+            metro_excl=_metro_excl,
+            metro_unenforced=_metro_excl_unenforced,
+            metro_mode=getattr(_metro_result, "mode", None),
+            waterfront_unenforced=wf_corridor_unenforced,
+            buildability_degraded=list(_buildability_degraded),
+            provider_degraded=list(_provider_degraded),
+        )
+        _hc_warns = candidate_warnings(_hcv)
+        if _hc_warns:
+            for _loc in locations:
+                if not _loc.get("excluded"):
+                    _loc["hardConstraintWarnings"] = _hc_warns
+        # Safety cap (invariant re-assertion): an unresolved requested hard
+        # constraint must never coexist with a strong verdict. The existing
+        # provisional/withheld paths already demote every such case — this
+        # guarantees it even if a future change misses one.
+        if demotes_strong_recommendation(_hcv):
+            if _analysis_reco == "RECOMMENDED_INVESTIGATION_ZONE":
+                _analysis_reco = "PROVISIONAL_CANDIDATE"
+            for _loc in locations:
+                if _loc.get("investigationLabel") == "RECOMMENDED_INVESTIGATION_ZONE":
+                    _loc["investigationLabel"] = "PROVISIONAL_CANDIDATE"
+    except Exception as _hcv_ex:   # visibility layer — never breaks the run
+        logger.warning("hard-constraint verification build failed (non-fatal): %s", _hcv_ex)
+        _hcv = None
+
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
@@ -2459,6 +2501,9 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "dataSufficiencyV2": _ds2,
         # v1.5-Lite — analysis-level investigation verdict (Part 9 taxonomy).
         "analysisRecommendation": _analysis_reco,
+        # v1.5.1 — per-requested-hard-constraint verification status (additive;
+        # omitted, not defaulted, when the build failed).
+        **({"hardConstraintVerification": _hcv} if _hcv is not None else {}),
         # v1.3.0 — evidence trail (secret-safe serialisation)
         "evidenceTrail": _ev_trail.safe_dict(),
     }

@@ -101,3 +101,58 @@ Four-prompt classification pins, determinism, stability labels, payload contract
 ## Rollback plan
 
 All backend+UI changes ship in one release commit on `master`; `git revert <commit>` restores v1.4.9 behavior exactly. A `rollback-pre-v1.5.0` tag points at the commit live before this deploy. No schema migrations, no config changes, no deployed-state coupling — the payload keys are additive and the old frontend never depended on them (and the new frontend renders old payloads unchanged).
+
+---
+
+# Hard Constraint Verification Visibility v1 (post-v1.5.0 working tree)
+
+**Goal:** surface plainly, at result and candidate level, when a user-requested hard constraint was Verified / Proxy verified / Not verifiable from available data / Requested but not enforced / Failed — closing the correctness-visibility gap identified in `docs/portal-current-state-audit-v1.5.md` §16/§19 (e.g. a metro exclusion silently unenforced when station data cannot be resolved).
+
+**Design constraint honored:** pure mapping of state the run already computes (constraint policy, PlannerLite unsupported constraints, metro resolution mode, `route_unavailable`, waterfront enforcement flags, degraded-provider lists). Zero new external calls, zero scoring changes, additive-only payload.
+
+### 9. `backend-py/app/engine/hard_constraints.py` — NEW pure mapping module
+- **What:** `build_hard_constraint_verification()` → the additive `hardConstraintVerification` object (`summaryStatus` + five counts + per-constraint entries with id/label/category/status/severity/affectsRecommendation/candidateScope/reason/fieldValidationRequired); `candidate_warnings()` → compact per-candidate warning list for unresolved analysis-wide constraints; `demotes_strong_recommendation()` → the safety-cap predicate. Status vocabulary fixed: `verified | proxy_verified | not_verifiable | requested_not_enforced | failed | not_required`. Rules: rent/floor-area/zoning/parcel/ownership are always `not_verifiable` (critical when stated as a hard ConstraintItem); metro exclusion unresolved → `requested_not_enforced` (critical), generic-station fallback → `proxy_verified`; route constraint with routing unavailable → `requested_not_enforced`; waterfront corridor unenforced → `failed`; buildability skipped-as-irrelevant → `not_required` and NOT counted as requested; buildability degraded → `requested_not_enforced`; primary arterial road → `proxy_verified` at best (there is no road-class hard gate — honestly labeled).
+- **Why:** the state existed but was scattered across strings (`route_unavailable`, `fallbacks`, `mask_stats`) — invisible as a coherent per-constraint answer.
+- **Risk:** low — pure functions, no provider calls, no imports from jobs.py.
+- **Tested:** 17 new tests in `tests/test_hard_constraint_visibility.py` (15 unit + 2 mocked end-to-end).
+- **Rollback:** delete the module + revert the jobs.py wiring block; the payload key disappears, old frontends unaffected.
+
+### 10. `backend-py/app/services/jobs.py` — additive wiring block
+- **What:** one try/except-wrapped block after `analysisRecommendation` derivation: builds `_hcv`, attaches `hardConstraintWarnings` to every non-excluded candidate when any constraint is unresolved, applies the recommendation-demotion safety cap (an unresolved requested hard constraint can never coexist with `RECOMMENDED_INVESTIGATION_ZONE` — analysis-level and per-candidate; existing stricter labels are preserved, statuses/scores untouched), and adds the `hardConstraintVerification` payload key (omitted entirely if the build fails — never a partial/default object).
+- **Why:** Parts 1-3 of the brief. NOTE: the audit's metro case was found to already be strictly handled (metro-unenforced flows into `route_unavailable` → all candidates excluded + `NO_RELIABLE_RECOMMENDATION`) — the gap was purely visibility, so the safety cap is an invariant re-assertion, not a behavior change; no existing test moved.
+- **Risk:** low — additive, exception-isolated, no scoring path touched.
+- **Tested:** full backend suite 543 passed (541 prior + 2 new e2e); the two e2e tests specifically pin that the key lands in the payload (the try/except would otherwise hide a silent failure from every other test).
+- **Rollback:** revert the import + block + payload key (3 small hunks).
+
+### 11. `src/types/index.ts` — `HardConstraintVerification` / `HardConstraintEntry` / `HardConstraintWarning` interfaces; `AnalysisResult.hardConstraintVerification?`; `LocationData.hardConstraintWarnings?`. All optional.
+- **Risk:** none (types only). **Tested:** `tsc --noEmit` clean. **Rollback:** revert file.
+
+### 12. `src/services/resultNormalizer.ts` — defensive normalization
+- **What:** `normalizeHardConstraintVerification()` — entries with an unknown status are dropped, severities/booleans defaulted, counts coerced (requestedCount derived from entries when missing); a non-object value is hidden with a normalization warning; per-candidate `hardConstraintWarnings` keep only well-formed entries with a non-empty message. Old payloads without the key are untouched (no warning).
+- **Risk:** low. **Tested:** 5 new vitest cases (old payload, well-formed, malformed + bad-entry filtering, candidate warnings, metro requested-not-enforced end-to-end shape). **Rollback:** revert the two hunks.
+
+### 13. `src/components/ResultsDrawer.tsx` — "Hard constraint verification" panel + candidate chips
+- **What:** (a) new compact panel after the Data sufficiency card: summary status, the five counts (Verified / Proxy verified / Not verifiable / Requested but not enforced / Failed), a per-constraint status line (reason as tooltip, "field validation required" suffix), and warning cards for any `requested_not_enforced` / `failed` / affecting `not_verifiable` entry (red styling only for failed/critical, amber otherwise); `not_required` entries are listed nowhere in warnings (no noise for the cafe prompt). (b) candidate cards: up to 3 compact warning chips under the header when `hardConstraintWarnings` present — warning styling, never fatal; existing score/factor detail untouched.
+- **Risk:** low-medium (UI diff) — panel renders only when the normalizer-guaranteed object is present and non-empty; old payloads render exactly as before.
+- **Tested:** tsc clean, build success, 53 vitest passed. No component-test harness exists (long-standing); manual validation scenarios documented in the task report.
+- **Rollback:** revert the drawer hunks.
+
+### 14. `src/components/SpecSummaryCard.tsx` — pre-run plan clarity
+- **What:** in the "Analysis scope" section: a note under "Cannot be verified from data" ("These will be flagged for field validation — never scored.") and, when the spec contains a metro/subway exclusion (client-side detection from `spec.exclusions` names/tags — no new backend behavior), an honesty note that the exclusion depends on station data resolving and will be marked "requested but not enforced" if it cannot.
+- **Risk:** none — presentational only. **Tested:** tsc + build. **Rollback:** revert the two hunks.
+
+### Validation runs (this pass)
+
+| Check | Command | Result |
+|---|---|---|
+| New tests | `pytest tests/test_hard_constraint_visibility.py -q` | **17 passed** |
+| Full backend | `pytest tests -q` | **543 passed** (526 at v1.5.0 + 17 new) |
+| Frontend typecheck | `npx tsc --noEmit` | clean |
+| Frontend tests | `npx vitest run` | **53 passed** (48 + 5 new) |
+| Frontend build | `npm run build` | success |
+
+### API/cost impact (this pass)
+**Zero new external calls.** The verification object is assembled from already-computed run state; candidate warnings are local list broadcasts; the SpecSummaryCard note is derived client-side from the existing spec.
+
+### Rollback plan (this pass)
+Uncommitted working-tree change set; `git checkout -- <files>` (or revert the single commit once made) restores v1.5.0 exactly. Payload key is additive and omitted-on-failure — an old frontend ignores it, the new frontend renders old payloads unchanged.

@@ -149,6 +149,44 @@ export interface LocationData {
   // v1.4.0 constraint policy
   provisionalBadge?: string;
   provisionalReasons?: string[];
+  /** v1.5.1 — analysis-wide unresolved hard constraints broadcast onto each
+   * non-excluded candidate (normalizer-guaranteed shape when present). */
+  hardConstraintWarnings?: HardConstraintWarning[];
+}
+
+/** v1.5.1 — compact per-candidate hard-constraint warning. */
+export interface HardConstraintWarning {
+  constraintId: string;
+  label: string;
+  status: 'not_verifiable' | 'requested_not_enforced' | 'failed' | string;
+  severity: 'warning' | 'critical' | string;
+  message: string;
+}
+
+/** v1.5.1 — one requested hard constraint and how (whether) it was verified. */
+export interface HardConstraintEntry {
+  id: string;
+  label: string;
+  requested: boolean;
+  category: string;   // geography | routing | metro_exclusion | road_access | waterfront | rent | floor_area | buildability | zoning | parcel | other
+  status: 'verified' | 'proxy_verified' | 'not_verifiable' | 'requested_not_enforced' | 'failed' | 'not_required' | string;
+  severity: 'info' | 'warning' | 'critical' | string;
+  affectsRecommendation: boolean;
+  candidateScope: 'analysis' | 'some_candidates' | 'all_candidates' | string;
+  reason: string;
+  fieldValidationRequired: boolean;
+}
+
+/** v1.5.1 — result-level hard-constraint verification summary. */
+export interface HardConstraintVerification {
+  summaryStatus: 'verified' | 'partially_verified' | 'degraded' | 'failed' | 'unknown' | string;
+  requestedCount: number;
+  verifiedCount: number;
+  proxyVerifiedCount: number;
+  unknownCount: number;
+  unenforcedCount: number;
+  failedCount: number;
+  constraints: HardConstraintEntry[];
 }
 
 export interface RouteMetric {
@@ -280,6 +318,9 @@ export interface AnalysisResult {
   dataSufficiencyV2?: DataSufficiencyV2;
   /** Deterministic prompt/spec classification (archetype, intent, risk triggers). */
   analysisIntelligence?: Record<string, unknown>;
+  /** v1.5.1 — per-requested-hard-constraint verification status
+   * (normalizer-guaranteed shape when present; absent on older payloads). */
+  hardConstraintVerification?: HardConstraintVerification;
   /** Present only for v2 conversational-engine analyses */
   hexGrid?: HexGridCell[];
   catchments?: CatchmentOutline[];

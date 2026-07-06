@@ -108,7 +108,64 @@ function normalizeLocation(raw: unknown, index: number, warnings: string[]): Loc
         }
       : undefined;
   }
+  // v1.5.1 — per-candidate hard-constraint warnings: well-formed entries kept,
+  // anything else silently dropped (the analysis-level panel still shows the
+  // full verification object).
+  if (raw.hardConstraintWarnings !== undefined) {
+    const warns = asArr(raw.hardConstraintWarnings)
+      .filter(isObj)
+      .filter((w: any) => typeof w.message === 'string' && w.message)
+      .map((w: any) => ({
+        constraintId: asStr(w.constraintId, 'constraint'),
+        label: asStr(w.label, 'Hard constraint'),
+        status: asStr(w.status, 'not_verifiable'),
+        severity: w.severity === 'critical' ? 'critical' : 'warning',
+        message: w.message as string,
+      }));
+    out.hardConstraintWarnings = warns.length > 0 ? warns : undefined;
+  }
   return out as LocationData;
+}
+
+/** v1.5.1 — statuses the backend contract allows per constraint entry. */
+const HC_STATUSES = [
+  'verified', 'proxy_verified', 'not_verifiable',
+  'requested_not_enforced', 'failed', 'not_required',
+];
+
+/** v1.5.1 — repair hardConstraintVerification, or return undefined when the
+ * object is irreparable (the drawer simply omits the panel). */
+function normalizeHardConstraintVerification(raw: unknown, warnings: string[]): any {
+  if (raw === null || raw === undefined) return undefined;
+  if (!isObj(raw)) {
+    warnings.push('Hard-constraint verification data was malformed — hidden.');
+    return undefined;
+  }
+  const constraints = asArr(raw.constraints)
+    .filter(isObj)
+    .filter((c: any) => HC_STATUSES.includes(c.status))
+    .map((c: any) => ({
+      id: asStr(c.id, 'constraint'),
+      label: asStr(c.label, asStr(c.id, 'Hard constraint')),
+      requested: c.requested !== false,
+      category: asStr(c.category, 'other'),
+      status: c.status as string,
+      severity: c.severity === 'critical' ? 'critical' : c.severity === 'info' ? 'info' : 'warning',
+      affectsRecommendation: c.affectsRecommendation === true,
+      candidateScope: asStr(c.candidateScope, 'analysis'),
+      reason: asStr(c.reason),
+      fieldValidationRequired: c.fieldValidationRequired === true,
+    }));
+  return {
+    summaryStatus: asStr(raw.summaryStatus, 'unknown'),
+    requestedCount: asNum(raw.requestedCount, constraints.filter(c => c.requested).length),
+    verifiedCount: asNum(raw.verifiedCount, 0),
+    proxyVerifiedCount: asNum(raw.proxyVerifiedCount, 0),
+    unknownCount: asNum(raw.unknownCount, 0),
+    unenforcedCount: asNum(raw.unenforcedCount, 0),
+    failedCount: asNum(raw.failedCount, 0),
+    constraints,
+  };
 }
 
 /** Repair the evidence trail in place, or return undefined when irreparable
@@ -271,6 +328,9 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
   if (src.analysisIntelligence !== undefined && !isObj(src.analysisIntelligence)) {
     out.analysisIntelligence = undefined;
   }
+  // v1.5.1 — hard-constraint verification (optional; absent on older payloads).
+  out.hardConstraintVerification =
+    normalizeHardConstraintVerification(src.hardConstraintVerification, warnings);
 
   out.summary = asStr(src.summary, 'Analysis completed, but the summary could not be read.');
   out.business_type = asStr(src.business_type, '—');
