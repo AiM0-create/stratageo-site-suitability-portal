@@ -145,6 +145,20 @@ class Settings(BaseSettings):
     # single buildability call; on timeout the check degrades gracefully
     # (empty mask, confidence note) rather than failing the whole analysis.
     buildability_overpass_timeout: int = 30
+    # v1.5.2 — TOTAL wall-clock budget for the entire buildability stage. The
+    # v1.4.2 per-call cap bounded each fetch but not their SUM: up to 6 fetches
+    # x 30s could still stack to ~180s and blow the 240s job ceiling (observed
+    # live on 2 of 4 canonical prompts). Fetches now run concurrently (bounded
+    # by buildability_fetch_concurrency) under this single stage deadline; any
+    # fetch that cannot start/finish inside the remaining stage budget degrades
+    # (empty mask + note) instead of failing the job. Worst case stage cost is
+    # now min(this budget, ceil(n_fetches/concurrency) x per-call timeout).
+    buildability_stage_budget_seconds: int = 90
+    # Max concurrent buildability Overpass fetches. Kept low deliberately:
+    # public Overpass mirrors allow ~2 connection slots per IP; more parallelism
+    # trades timeout risk for 429 risk. 2 halves-to-thirds the worst-case stage
+    # wall clock without exceeding mirror etiquette.
+    buildability_fetch_concurrency: int = 2
     # v1.4.6 — per-call ceiling for every OPTIONAL provider call OUTSIDE the
     # buildability stage (Google Places, water/corridor geometry, isochrones,
     # traffic catchments, route targets, railway barriers). The v1.4.2 fix only

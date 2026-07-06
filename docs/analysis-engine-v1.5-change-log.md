@@ -156,3 +156,39 @@ All backend+UI changes ship in one release commit on `master`; `git revert <comm
 
 ### Rollback plan (this pass)
 Uncommitted working-tree change set; `git checkout -- <files>` (or revert the single commit once made) restores v1.5.0 exactly. Payload key is additive and omitted-on-failure — an old frontend ignores it, the new frontend renders old payloads unchanged.
+
+---
+
+# Phase 1 Reliability Fixes v1.5.2 (externally reviewed patch)
+
+**Source:** reviewed patch package (`phase1-reliability-fixes.patch`) fixing the two P0 blockers from `LIVE_PORTAL_QA_FINDINGS.md` §7. Verified before application: applies cleanly to master `71e374c`, standalone reference files content-identical to patch output, full suite green on a dry-run.
+
+### 15. `backend-py/app/config.py` — buildability stage budget settings
+- **What:** two new settings: `buildability_stage_budget_seconds = 90` (total wall-clock budget for the whole buildability stage) and `buildability_fetch_concurrency = 2` (max concurrent Overpass fetches; 2 = public-mirror connection-slot etiquette).
+- **Why:** the v1.4.2 per-call cap (30s) bounded each fetch but not their SUM — up to 6 × 30s = 180s stacked sequentially, blowing the 240s job ceiling (observed live on 2 of 4 canonical prompts).
+- **Risk:** low — additive settings, defaults tuned so worst-case stage cost is ~90s. **Rollback:** revert commit.
+
+### 16. `backend-py/app/services/jobs.py` — concurrent deadline-aware buildability fetches
+- **What:** the three per-kind fetch helpers (`_safe_area`/`_safe_line`/`_safe_named`) replaced by one `_safe_fetch(kind, arg, label)` that is (a) semaphore-bounded to `buildability_fetch_concurrency`, (b) deadline-aware against a single stage-level `time.monotonic()` budget — a fetch that cannot start or finish inside the remaining budget degrades to an empty mask with an honest fallback note + `_buildability_degraded` entry, exactly like the previous timeout path. All needed fetches launch concurrently and are gathered before mask application; mask application itself stays sequential (order-dependent `&= ~excluded` reporting semantics unchanged).
+- **Why:** eliminates the raw 240s job timeout caused by sequential buildability fetch stacking; worst-case stage wall clock drops from ~180s to ≤90s.
+- **Risk:** medium (restructured fetch block) — mitigated: degradation paths byte-compatible with previous reporting (`fallbacks`, `_buildability_degraded`, `mask_stats.buildabilityDegraded`, hardConstraintVerification all unchanged downstream); 550/550 tests pass including the mocked end-to-end pipeline tests.
+- **Rollback:** revert commit.
+
+### 17. `backend-py/app/engine/planner_lite.py` — deterministic water relevance
+- **What:** `_water_relevant()` no longer treats a water-tagged EXCLUSION alone as a water signal. Order now: waterfront flag → water corridor → prompt/constraint text regex → (new) uncorroborated water exclusion returns False with an explicit "spec noise" reason. The exclusion's own buffer mask still applies via the main fetch; it just cannot trigger the expensive water_geometry + buildability cascade by itself.
+- **Why:** the LLM spec-builder was observed non-deterministically attaching a default "Avoid water bodies" exclusion to dry-land prompts, flipping the stage plan (and triggering the timeout-prone buildability stage) between runs of the IDENTICAL prompt — the second live P0.
+- **Risk:** low — genuine water briefs unaffected (waterfront flag / corridor / text all still trigger; pinned by 5 new tests). Known cosmetic nuance: a spurious water exclusion now enforced only via POI-buffer mask, yet still listed "Verified" in hardConstraintVerification — acceptable, flagged for later refinement.
+- **Rollback:** revert commit.
+
+### 18. `backend-py/tests/test_v152_reliability.py` — NEW, 7 regression tests
+- Stage-budget config sanity (budget < job ceiling, per-call ≤ budget, worst-case wall clock fits); uncorroborated water exclusion does not flip water/buildability; identical prompt → identical plan with or without the spurious exclusion; genuine water wording / water corridor / prompt-corroborated exclusion still trigger.
+
+### Validation (this pass)
+| Check | Result |
+|---|---|
+| Full backend suite | **550 passed** (543 + 7 new) |
+| Patch integrity | applies cleanly; reference files content-identical (CRLF-only diffs) |
+| API/cost impact | zero new external calls; buildability Overpass calls unchanged in number, now bounded in wall-clock |
+
+### Rollback plan
+Single commit; `git revert` restores v1.5.1 behavior exactly. Tag `rollback-pre-phase1-reliability` points at the previously-live commit.

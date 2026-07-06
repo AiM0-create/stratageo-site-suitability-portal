@@ -241,12 +241,26 @@ def _water_relevant(spec, text: str) -> tuple[bool, str]:
     for c in getattr(spec, "corridors", None) or []:
         if any(_is_water_tag(t) for t in c.source.tags):
             return True, f"water corridor '{c.name}'"
-    for e in getattr(spec, "exclusions", None) or []:
-        if any(_is_water_tag(t) for t in e.source.tags):
-            return True, f"water exclusion '{e.name}'"
     m = _WATER_RE.search(text)
     if m:
         return True, f"prompt mentions '{m.group(0)}'"
+    # v1.5.2 determinism fix: a water-tagged EXCLUSION alone no longer makes
+    # water (and, transitively, the whole buildability cascade) relevant. The
+    # LLM spec-builder was observed non-deterministically attaching a default
+    # water exclusion to prompts with zero water signal, flipping the stage
+    # plan between runs of the IDENTICAL prompt. Stage relevance must be a
+    # function of what the user actually asked (waterfront detection, an
+    # enforced water corridor, or water wording in the prompt/constraints) —
+    # not of unprompted LLM spec noise. An uncorroborated water exclusion
+    # still applies its own mask in the main fetch; it just cannot trigger
+    # the expensive water/buildability stages by itself.
+    for e in getattr(spec, "exclusions", None) or []:
+        if any(_is_water_tag(t) for t in e.source.tags):
+            return False, (
+                f"water exclusion '{e.name}' present in spec but no water signal "
+                "in the prompt — treated as spec noise for stage planning "
+                "(exclusion mask itself still applies)"
+            )
     return False, "no waterfront/river/lake/coastal signal in the prompt or spec"
 
 
