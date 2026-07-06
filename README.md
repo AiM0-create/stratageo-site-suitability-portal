@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.6.0 — Factor Weight Sliders**
+**Current version: v1.6.1 — Confidence, Report & Quotas**
 
 ---
 
@@ -20,6 +20,16 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.6.1 Highlights
+
+- **One confidence verdict, not three** — `unifiedConfidence` merges data sufficiency and the reliability critic into a single High/Medium/Low headline banner, conservative-by-design (the overall level is the worst of the components) with a reason sentence that explains any disagreement instead of hiding it.
+- **Customer-facing PDF upgrades** — the exported report now includes the Overall Confidence verdict and a Factor Weight Audit table (playbook default vs. applied weight per factor), headed "ADJUSTED BY USER" whenever the customer moved a slider.
+- **Payment-grade per-customer quotas** — each account can now have its own admin-granted allotment (`maxPrompts`) instead of one hardcoded cap, enforced in three independent places: the backend engine transactionally (where the cost is incurred), Firestore rules (a user can neither create nor raise their own allotment), and the UI ("N of 5 queries left"). Admin Dashboard gained **Set allotment** / **Reset usage** per user.
+- **Server-side identity + quota enforcement** (`backend-py/app/auth_quota.py`) — Firebase ID tokens verified on `/api/v2/chat` and `/api/v2/analyses`; fails **closed** if verification infrastructure is unavailable. Ships **OFF** by default (`STRATAGEO_REQUIRE_USER_AUTH=false`) for rollout safety — flipping it on is a deliberate go-live action, see [`docs/PHASE3-SECURITY-REVIEW.md`](docs/PHASE3-SECURITY-REVIEW.md).
+- **Chat rate limiting** — a per-user sliding-window cap (60 turns/hour default) on the free-to-use chat endpoint, closing a gap where a signed-in user could loop the LLM endpoint without ever starting a paid analysis.
 
 ---
 
@@ -294,7 +304,7 @@ After deploy, verify:
 curl https://<your-cloud-run-url>/health
 ```
 
-Expected response includes `appVersion: "1.6.0"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
+Expected response includes `appVersion: "1.6.1"`, `engineVersion` (the actual live Cloud Run revision, read from the `K_REVISION` env var Cloud Run injects automatically — not a hardcoded string), `releaseName`, `costMode`, `featureFlags`, `hasGooglePlacesKey`/`hasGoogleRoutesKey`/`hasOrsKey`/`hasOpenAiKey` (booleans only, never the key values), and active model names.
 
 **Rollback discipline:** before every backend deploy, tag the currently-live commit first — `git tag -a rollback-pre-vX.Y.Z <live-commit-sha> -m "..." && git push origin rollback-pre-vX.Y.Z` — so `git checkout` back to a known-good state is always one command away (see [Rollback](#rollback) below).
 
@@ -338,7 +348,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.6.0** *(current)* | Factor Weight Sliders — plan-card weight adjustments preserved across chat turns (fixes a silent-wipe bug), post-run sliders re-rank + instantly recolor the map client-side, weight audit trail (default vs. executed), fixed a fabricated-zero scoring bug in the reweighting engine |
+| **v1.6.1** *(current)* | Confidence, Report & Quotas — unified confidence verdict, PDF weight-audit table, per-customer admin-granted quota allotments, server-side auth/quota enforcement (off by default), chat rate limiting |
+| **v1.6.0** | Factor Weight Sliders — plan-card weight adjustments preserved across chat turns (fixes a silent-wipe bug), post-run sliders re-rank + instantly recolor the map client-side, weight audit trail (default vs. executed), fixed a fabricated-zero scoring bug in the reweighting engine |
 | **v1.5.2** | Reliability & Consistency — buildability stage budget + concurrent fetches (fixes live 240s timeouts), deterministic stage planning & templated objective (identical prompt → identical plan), small-format grocery archetype fix, block-scale res-10 grids on request, screening→refined score transparency |
 | **v1.5.1** | Hard Constraint Verification Visibility — per-requested-constraint status panel (Verified / Proxy verified / Not verifiable / Requested but not enforced / Failed), per-candidate warning chips, strong-verdict safety cap |
 | **v1.5.0** | Analysis Intelligence Lite — deterministic archetype/intent/risk classification, scenario ranking stability, granular `dataSufficiencyV2`, investigation-zone label taxonomy, all surfaced in the UI; zero new provider calls |

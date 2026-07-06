@@ -41,6 +41,60 @@ change — only the frontend usage log and Admin Dashboard changed.
 
 ---
 
+## [1.6.1] — 2026-07-07 — Confidence, Report & Quotas
+
+### Added
+- **Unified confidence verdict** (`backend-py/app/engine/unified_confidence.py`)
+  — merges `dataSufficiencyV2.final_confidence` and the reliability critic's
+  verdict into ONE headline `unifiedConfidence` (High/Medium/Low), using a
+  conservative rule (overall = worst of the components) with a reason
+  sentence explaining any disagreement. Shown as a banner at the top of
+  results and as a PDF section. Pure function, exception-isolated at the call
+  site — never blocks or defaults an analysis on failure.
+- **PDF report: Overall Confidence + Factor Weight Audit** — the exported
+  report now includes the unified confidence verdict and a table of each
+  factor's playbook default weight vs. the weight actually applied, headed
+  "ADJUSTED BY USER" whenever the customer moved a slider before running.
+- **Per-customer analysis allotments** — `users/{uid}.maxPrompts`, admin-
+  grant-only (Firestore rules reject a user creating or changing it
+  themselves), replacing the single hardcoded prompt cap. Enforced atomically
+  in the backend's quota transaction, surfaced in the UI ("N of 5 queries
+  left"), and manageable from the Admin Dashboard via new **Set allotment**
+  and **Reset usage** actions.
+- **Server-side identity + quota enforcement** (`backend-py/app/auth_quota.py`)
+  — `/api/v2/chat` and `/api/v2/analyses` verify the caller's Firebase ID
+  token (sent by the frontend as `Authorization: Bearer …`) and the analyses
+  endpoint transactionally consumes one credit only once the spec has
+  validated (a malformed spec never burns a customer's analysis). Fails
+  **closed** if verification infrastructure is unavailable. Gated behind
+  `STRATAGEO_REQUIRE_USER_AUTH`, **OFF by default** — deploying this code
+  changes nothing until the flag is explicitly flipped. See
+  [`docs/PHASE3-SECURITY-REVIEW.md`](docs/PHASE3-SECURITY-REVIEW.md) for the
+  full review and go-live sequence.
+- **Chat-turn rate limiting** — a per-user sliding one-hour window (default
+  60 turns, `CHAT_TURNS_PER_HOUR`) on the free-to-use chat/spec-refinement
+  endpoint, closing a gap where a signed-in user could loop the LLM endpoint
+  indefinitely without ever consuming a paid analysis credit.
+
+### Fixed
+- **Admin "users at limit" metric used a hardcoded threshold** — now computed
+  against each user's own allotment instead of a fixed number.
+
+### Tests
+- Backend: 2 new tests in `test_v152_reliability.py` (per-customer quota
+  decision, chat rate-limiter sliding window) + a new `test_v160_phase3.py`
+  (14 tests: unified-confidence merge logic, quota decision matrix, bearer-
+  token parsing, rollout-safety — enforcement off by default and a no-op when
+  the flag is off). **579 passed.**
+- Frontend: **66 passed** (unchanged from v1.6.0 — this release is additive
+  on top of the same reweighting-engine tests).
+
+### Rollback plan
+Tag `rollback-pre-v1.6.1` points at the previously-live commit (`d845fc9`,
+backend revision `stratageo-engine-00059-cgl`).
+
+---
+
 ## [1.6.0] — 2026-07-06 — Factor Weight Sliders
 
 ### Added

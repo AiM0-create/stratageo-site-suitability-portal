@@ -1434,6 +1434,34 @@ const App: React.FC = () => {
         { title: '5. Version, Model & Planning Metadata',
           body: `App v${__APP_VERSION__}  |  Engine v${__APP_VERSION__}  |  Spec v2.2  |  Analysis type: ${(result as any).uploadedCandidatesOnly ? 'Uploaded-candidates-only (candidate universe restricted to uploaded points)' : 'candidate zone screening (not parcel-level siting)'}  |  Recommendation mode: ${(result as any).recommendationMode || 'recommended_sites'}  |  Site claim level: ${(result as any).siteClaimLevel || 'micro_market_zone'}`,
           warn: false },
+        // ── v1.6.0 (Phase 3) — headline confidence + weight audit ─────────────
+        ...((result as any).unifiedConfidence ? [{
+          title: `Overall Confidence: ${(result as any).unifiedConfidence.level}`,
+          body: (result as any).unifiedConfidence.reason,
+          warn: (result as any).unifiedConfidence.level !== 'High',
+        }] : []),
+        ...(() => {
+          const wa = (result as any).weightAudit;
+          const adjusted = weightsAdjusted || wa?.adjustedByUser === true;
+          const executed = Object.fromEntries(
+            (locations[0]?.criteria_breakdown ?? []).map(c => [c.name, c.weight]),
+          );
+          const defaults: Record<string, number> =
+            wa?.defaultWeights || defaultWeights || {};
+          const rows = Object.keys({ ...defaults, ...executed }).map(n => {
+            const d = defaults[n] !== undefined ? `${Math.round(defaults[n] * 100)}%` : 'n/a';
+            const e = executed[n] !== undefined ? `${Math.round((executed[n] as number) * 100)}%` : 'n/a';
+            return `${n}: default ${d} -> applied ${e}`;
+          });
+          return [{
+            title: adjusted ? 'Factor Weight Audit — ADJUSTED BY USER' : 'Factor Weight Audit — defaults applied',
+            body: (adjusted
+              ? 'The ranking in this report uses factor weights adjusted by the user; the playbook defaults are shown alongside for full transparency. '
+              : 'The ranking in this report uses the analysis playbook default weights, unmodified. ')
+              + rows.join('  |  '),
+            warn: adjusted,
+          }];
+        })(),
         { title: '6. Deterministic Planning (v1.2.0)',
           body: `Planning mode: ${(result as any).planningMode || 'not set'}  |  Archetype: ${(result as any).archetypeKey || 'unknown'}  |  Weights source: ${(result as any).weightsSource || 'unknown'}  |  LLM role: ${(result as any).llmRole || 'unknown'}  |  Planning ID: ${(result as any).planningFingerprint || 'n/a'}  |  Note: factor keys and weights are locked by the canonical archetype registry and cannot be changed by the LLM between runs.`,
           warn: false },

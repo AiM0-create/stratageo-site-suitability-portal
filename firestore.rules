@@ -30,11 +30,20 @@ service cloud.firestore {
     // Create: only your own doc, and you may NOT set isAdmin:true yourself.
     // Update: you may only bump promptsUsed by exactly +1 and touch lastLogin —
     //   you cannot zero your quota or grant yourself admin. Admins: full write.
+    // v1.6.1 — per-customer allotment: users/{uid}.maxPrompts is ADMIN-GRANT-
+    //   ONLY (the ₹50k contract = admin sets maxPrompts:5). A user can neither
+    //   create nor change it, and their promptsUsed cap follows it.
     match /users/{uid} {
+      function allotment() {
+        return ('maxPrompts' in resource.data) ? resource.data.maxPrompts : 10;
+      }
+
       allow read: if isOwner(uid) || isAdmin();
 
       allow create: if isOwner(uid)
         && request.resource.data.promptsUsed == 0
+        // users cannot mint their own allotment — admin-grant-only
+        && !('maxPrompts' in request.resource.data)
         // a user may only mint a non-admin doc; an admin email may set isAdmin:true
         && (request.resource.data.isAdmin == false || isAdmin());
 
@@ -42,13 +51,19 @@ service cloud.firestore {
         || (isOwner(uid)
             && request.resource.data.isAdmin == resource.data.isAdmin
             && request.resource.data.email == resource.data.email
+            // allotment is read-only to its owner (absent stays absent,
+            // present stays byte-identical)
+            && (('maxPrompts' in resource.data)
+                  ? (('maxPrompts' in request.resource.data)
+                      && request.resource.data.maxPrompts == resource.data.maxPrompts)
+                  : !('maxPrompts' in request.resource.data))
             && (
                  // login-only touch (no quota change)
                  request.resource.data.promptsUsed == resource.data.promptsUsed
                  // or a single legitimate prompt consumption
                  || request.resource.data.promptsUsed == resource.data.promptsUsed + 1
                )
-            && request.resource.data.promptsUsed <= 10);
+            && request.resource.data.promptsUsed <= allotment());
 
       allow delete: if isAdmin();
     }

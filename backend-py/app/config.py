@@ -50,6 +50,23 @@ v1.6.0: Factor Weight Sliders (Phase 2) — the plan-card and results-drawer
   presented as the untouched default methodology. Also fixes a pre-existing
   frontend scoring bug: a factor with no data was counted as a fabricated
   zero in the weighted mean instead of being excluded from it.
+v1.6.1: Confidence, Report, Quotas, Security (Phase 3) — (1) unifiedConfidence:
+  ONE headline confidence verdict (conservative min of dataSufficiencyV2 and
+  the reliability critic, with the disagreement explained), replacing three
+  independently-visible signals that could disagree without explanation; (2)
+  the PDF report gains an Overall Confidence section and a Factor Weight Audit
+  table (default vs. applied weights, headed "ADJUSTED BY USER" when the
+  customer moved a slider); (3) payment-grade per-customer quotas — admin-
+  granted users/{uid}.maxPrompts (Firestore rules: admin-grant-only, enforced
+  atomically in a backend transaction, never client-writable), replacing the
+  single hardcoded 10-prompt cap; (4) server-side identity + quota enforcement
+  (app/auth_quota.py) on /api/v2/chat and /api/v2/analyses via Firebase ID
+  tokens — OFF by default (STRATAGEO_REQUIRE_USER_AUTH=false) for rollout
+  safety, fail-closed when turned on; (5) a per-user chat-turn rate limit
+  (60/hour default) closing an unmetered-LLM-spend gap. See
+  docs/PHASE3-SECURITY-REVIEW.md for the full review; flipping
+  STRATAGEO_REQUIRE_USER_AUTH to true is a deliberate go-live action, not
+  bundled with this deploy.
 """
 from functools import lru_cache
 from typing import Literal
@@ -57,17 +74,17 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.6.0"
+APP_VERSION     = "1.6.1"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00059"
-# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/v1.6.0 —
-# the SpecV2 wire schema and the EvidenceTrail schema are structurally
-# unchanged; hardConstraintVerification / screeningScore / rankingBasis /
-# canonicalWeights / weightsAdjustedByUser are additive keys outside these
-# versioned contracts.
+ENGINE_VERSION  = "stratageo-engine-00060"
+# SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
+# v1.6.0/v1.6.1 — the SpecV2 wire schema and the EvidenceTrail schema are
+# structurally unchanged; hardConstraintVerification / screeningScore /
+# rankingBasis / canonicalWeights / weightsAdjustedByUser / unifiedConfidence
+# are additive keys outside these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Factor Weight Sliders"
+RELEASE_NAME    = "Confidence, Report & Quotas"
 
 
 class Settings(BaseSettings):
@@ -188,6 +205,24 @@ class Settings(BaseSettings):
     # trades timeout risk for 429 risk. 2 halves-to-thirds the worst-case stage
     # wall clock without exceeding mirror etiquette.
     buildability_fetch_concurrency: int = 2
+
+    # ── v1.6.0 (Phase 3) — server-side identity + quota enforcement ─────────
+    # OFF by default (rollout-safe: deploy code first, flip the flag once the
+    # token-sending frontend is live). When ON, /api/v2/chat verifies identity
+    # and /api/v2/analyses verifies identity AND transactionally consumes one
+    # analysis credit from Firestore users/{uid}.promptsUsed. Fail-closed.
+    require_user_auth: bool = False
+    # Analyses included per account. Set to 5 for the paid ₹50,000 tier via
+    # env MAX_PROMPTS_PER_USER=5; keep in sync with the frontend
+    # MAX_PROMPTS_PER_USER and the firestore.rules cap.
+    max_prompts_per_user: int = 10
+    # Comma-separated admin emails that bypass the quota. MUST stay in sync
+    # with the isAdmin() allowlist in firestore.rules.
+    quota_admin_emails: str = "abhishek.rawat@stratageo.in,sagar.mysorekar@stratageo.in"
+    # v1.6.1 — max conversational (non-consuming) chat turns per user per
+    # rolling hour. Generous for real spec refinement; a hard stop for scripts
+    # looping the LLM endpoint on someone else's OpenAI bill.
+    chat_turns_per_hour: int = 60
     # v1.4.6 — per-call ceiling for every OPTIONAL provider call OUTSIDE the
     # buildability stage (Google Places, water/corridor geometry, isochrones,
     # traffic catchments, route targets, railway barriers). The v1.4.2 fix only

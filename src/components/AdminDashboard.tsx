@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { fetchAdminStats, type AdminStats, type PromptEntry } from '../services/usageTracker';
+import { fetchAdminStats, grantAllotment, resetUsage, type AdminStats, type PromptEntry } from '../services/usageTracker';
 import { MAX_PROMPTS_PER_USER } from '../config/firebase';
 
 interface AdminDashboardProps {
@@ -273,13 +273,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.users.map(u => (
-                      <tr key={u.uid} className={!u.isAdmin && u.promptsUsed >= MAX_PROMPTS_PER_USER ? 'sg-admin-row-limit' : ''}>
+                    {stats.users.map(u => {
+                      // v1.6.1 \u2014 per-customer allotment (contract tier)
+                      const cap = u.maxPrompts ?? MAX_PROMPTS_PER_USER;
+                      const atLimit = !u.isAdmin && u.promptsUsed >= cap;
+                      return (
+                      <tr key={u.uid} className={atLimit ? 'sg-admin-row-limit' : ''}>
                         <td>{u.email}</td>
                         <td>
-                          <span className={`sg-admin-prompt-badge ${!u.isAdmin && u.promptsUsed >= MAX_PROMPTS_PER_USER ? 'at-limit' : ''}`}>
-                            {u.isAdmin ? `${u.promptsUsed} / \u221E` : `${u.promptsUsed} / ${MAX_PROMPTS_PER_USER}`}
+                          <span className={`sg-admin-prompt-badge ${atLimit ? 'at-limit' : ''}`}>
+                            {u.isAdmin ? `${u.promptsUsed} / \u221E` : `${u.promptsUsed} / ${cap}`}
                           </span>
+                          {!u.isAdmin && u.maxPrompts !== undefined && (
+                            <span style={{ fontSize: '10px', color: '#64748b', marginLeft: 6 }} title="Admin-granted contract allotment">contract</span>
+                          )}
                         </td>
                         <td>{u.isAdmin ? <span className="sg-admin-badge-admin">Admin</span> : 'User'}</td>
                         <td>{u.lastLogin ? timeAgo(u.lastLogin) : 'Never'}</td>
@@ -290,9 +297,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
                           >
                             View prompts
                           </button>
+                          {!u.isAdmin && (
+                            <>
+                              <button
+                                className="sg-admin-btn-sm"
+                                title="Set this customer's analysis allotment (e.g. 5 for the paid engagement)"
+                                onClick={async () => {
+                                  const raw = window.prompt(`Analysis allotment for ${u.email}:`, String(cap));
+                                  if (raw === null) return;
+                                  const n = Number(raw);
+                                  if (!Number.isFinite(n) || n < 0) { window.alert('Enter a number \u2265 0.'); return; }
+                                  try { await grantAllotment(u.uid, n); await loadStats(); }
+                                  catch (e) { window.alert('Failed to set allotment: ' + (e as Error).message); }
+                                }}
+                              >
+                                Set allotment
+                              </button>
+                              <button
+                                className="sg-admin-btn-sm"
+                                title="Reset usage to 0 (renewed engagement)"
+                                onClick={async () => {
+                                  if (!window.confirm(`Reset ${u.email}'s usage from ${u.promptsUsed} to 0?`)) return;
+                                  try { await resetUsage(u.uid); await loadStats(); }
+                                  catch (e) { window.alert('Failed to reset: ' + (e as Error).message); }
+                                }}
+                              >
+                                Reset usage
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

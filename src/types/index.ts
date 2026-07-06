@@ -327,6 +327,9 @@ export interface AnalysisResult {
   hardConstraintVerification?: HardConstraintVerification;
   /** Present only for v2 conversational-engine analyses */
   hexGrid?: HexGridCell[];
+  /** v1.6.0 (Phase 3) — one headline confidence verdict (conservative merge of
+   *  data sufficiency and the reliability critic). */
+  unifiedConfidence?: { level: 'High' | 'Medium' | 'Low'; reason: string; components: Record<string, unknown> };
   /** v1.6.0 (Phase 2) — default vs executed weights and the user-adjusted flag. */
   weightAudit?: {
     adjustedByUser: boolean;

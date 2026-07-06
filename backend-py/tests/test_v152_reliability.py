@@ -242,3 +242,34 @@ def test_specv2_accepts_weight_audit_fields():
     )
     assert spec.weightsAdjustedByUser is True
     assert spec.canonicalWeights == {"Footfall": 1.0}
+
+
+# ── v1.6.1 (Phase 3): per-customer quota allotment + chat rate limit ─────────
+
+from app.auth_quota import quota_decision, chat_rate_decision
+
+
+def test_quota_decision_respects_per_customer_allotment():
+    # Paid contract: 5 analyses
+    assert quota_decision(prompts_used=4, max_prompts=5, is_admin=False) is True
+    assert quota_decision(prompts_used=5, max_prompts=5, is_admin=False) is False
+    # Free/default tier unaffected
+    assert quota_decision(prompts_used=9, max_prompts=10, is_admin=False) is True
+    assert quota_decision(prompts_used=10, max_prompts=10, is_admin=False) is False
+    # Admin always passes
+    assert quota_decision(prompts_used=999, max_prompts=5, is_admin=True) is True
+    # Zero allotment = suspended account
+    assert quota_decision(prompts_used=0, max_prompts=0, is_admin=False) is False
+
+
+def test_chat_rate_limiter_sliding_window():
+    h: dict[str, list[float]] = {}
+    # 3 turns allowed within the window
+    for i in range(3):
+        assert chat_rate_decision("u1", now=100.0 + i, limit=3, window_s=3600, history=h)
+    # 4th is blocked
+    assert chat_rate_decision("u1", now=104.0, limit=3, window_s=3600, history=h) is False
+    # After the window slides past the first turns, capacity returns
+    assert chat_rate_decision("u1", now=100.0 + 3601, limit=3, window_s=3600, history=h) is True
+    # Other users are independent
+    assert chat_rate_decision("u2", now=104.0, limit=3, window_s=3600, history=h) is True

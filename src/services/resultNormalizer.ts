@@ -383,6 +383,15 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
 
   // map layers — MapView guards per-cell, but the containers must be arrays
   if (src.hexGrid !== undefined) out.hexGrid = asArr(src.hexGrid).filter(isObj);
+  // v1.6.0 (Phase 3) — one headline confidence verdict (conservative merge)
+  if (isObj(src.unifiedConfidence) && typeof src.unifiedConfidence.level === 'string') {
+    const lv = src.unifiedConfidence.level;
+    out.unifiedConfidence = {
+      level: lv === 'High' || lv === 'Low' ? lv : 'Medium',
+      reason: asStr(src.unifiedConfidence.reason),
+      components: isObj(src.unifiedConfidence.components) ? src.unifiedConfidence.components : {},
+    };
+  }
   // v1.6.0 (Phase 2) — weight audit (default vs executed weights, user-adjusted flag)
   if (isObj(src.weightAudit)) {
     out.weightAudit = {

@@ -2,7 +2,7 @@
  * Usage Tracker — Logs every prompt to Firestore for admin analytics.
  */
 
-import { collection, addDoc, serverTimestamp, query, orderBy, getDocs, where, limit as fbLimit } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, orderBy, getDocs, where, limit as fbLimit, doc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 /** Compact per-candidate snapshot — enough to compare runs, not a full result dump. */
@@ -78,6 +78,8 @@ export interface UserSummary {
   email: string;
   displayName: string;
   promptsUsed: number;
+  /** v1.6.1 — admin-granted per-customer allotment (undefined = global default). */
+  maxPrompts?: number;
   isAdmin: boolean;
   lastLogin: Date | null;
   createdAt: Date | null;
@@ -143,12 +145,14 @@ export async function fetchAdminStats(): Promise<AdminStats> {
       email: data.email || '',
       displayName: data.displayName || '',
       promptsUsed: data.promptsUsed || 0,
+      maxPrompts: (typeof data.maxPrompts === 'number' && Number.isFinite(data.maxPrompts) && data.maxPrompts >= 0) ? data.maxPrompts : undefined,
       isAdmin: data.isAdmin || false,
       lastLogin: data.lastLogin?.toDate?.() || null,
       createdAt: data.createdAt?.toDate?.() || null,
     };
     users.push(u);
-    if (!u.isAdmin && u.promptsUsed >= 4) usersAtLimit++;
+    // v1.6.1 — at-limit is per the user's OWN allotment (was a hardcoded 4)
+    if (!u.isAdmin && u.promptsUsed >= (u.maxPrompts ?? 10)) usersAtLimit++;
   });
 
   // Fetch recent prompts (last 100)
@@ -267,4 +271,20 @@ export async function fetchAdminStats(): Promise<AdminStats> {
     users: users.sort((a, b) => (b.lastLogin?.getTime() || 0) - (a.lastLogin?.getTime() || 0)),
     recentPrompts,
   };
+}
+
+// ─── v1.6.1 (Phase 3) — admin quota controls ───
+// Both writes are admin-only in practice: firestore.rules reject them for
+// non-admin tokens, so these helpers fail safely if ever reached otherwise.
+
+/** Grant/replace a customer's analysis allotment (the contract tie-in:
+ *  ₹50,000 engagement → grantAllotment(uid, 5)). */
+export async function grantAllotment(uid: string, maxPrompts: number): Promise<void> {
+  if (!Number.isFinite(maxPrompts) || maxPrompts < 0) throw new Error('Invalid allotment');
+  await setDoc(doc(db, 'users', uid), { maxPrompts: Math.floor(maxPrompts) }, { merge: true });
+}
+
+/** Reset a customer's usage counter (e.g. a renewed engagement). */
+export async function resetUsage(uid: string): Promise<void> {
+  await setDoc(doc(db, 'users', uid), { promptsUsed: 0 }, { merge: true });
 }

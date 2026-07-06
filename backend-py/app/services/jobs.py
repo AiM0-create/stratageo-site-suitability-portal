@@ -45,6 +45,7 @@ from .critic import critique_analysis
 from ..engine.intent_parser import parse_raw_intent, validate_hard_constraints_in_spec
 from ..engine.archetypes import get_archetype
 from ..engine.multi_score import compute_multi_scores, compute_data_coverage
+from ..engine.unified_confidence import build_unified_confidence
 from ..engine.uploaded_candidates import (
     validate_uploaded_points, score_uploaded_points, build_no_points_result,
 )
@@ -2337,6 +2338,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "confidence_reason": "; ".join(_conf_bits).capitalize() + ".",
     }
 
+    # v1.6.0 (Phase 3) — headline confidence: conservative merge of data
+    # sufficiency and the reliability critic. Never load-bearing.
+    try:
+        _unified_conf = build_unified_confidence(_ds2, _det_critic.to_dict())
+    except Exception as _uc_err:                                  # noqa: BLE001
+        logger.warning("unified confidence build failed (non-fatal): %s", _uc_err)
+        _unified_conf = None
+
     # ── v1.5-Lite: investigation-zone labels (Part 9) ────────────────────────
     for _loc in locations:
         _loc["investigationLabel"] = _investigation_label(
@@ -2549,6 +2558,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "analysisIntelligence": _plan.intelligence,
         # v1.5-Lite — granular per-domain data sufficiency + final confidence.
         "dataSufficiencyV2": _ds2,
+        # v1.6.0 (Phase 3) — ONE headline confidence verdict, the conservative
+        # merge of dataSufficiencyV2 and the reliability critic. Additive and
+        # exception-isolated: omitted (never defaulted) if the build fails.
+        **({"unifiedConfidence": _unified_conf} if _unified_conf is not None else {}),
         # v1.5-Lite — analysis-level investigation verdict (Part 9 taxonomy).
         "analysisRecommendation": _analysis_reco,
         # v1.5.1 — per-requested-hard-constraint verification status (additive;

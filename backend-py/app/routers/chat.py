@@ -2,7 +2,9 @@ import logging
 import uuid
 
 import openai
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+
+from ..auth_quota import enforce_auth_and_quota
 
 from ..models.chat import ChatRequest, ChatResponse
 from ..services.llm import chat_turn
@@ -12,7 +14,11 @@ router = APIRouter()
 
 
 @router.post("/api/v2/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(req: ChatRequest, request: Request) -> ChatResponse:
+    # v1.6.0 (Phase 3) — verify the caller's identity (chat turns spend OpenAI
+    # money); the analysis quota itself is only consumed when a validated
+    # analysis starts. No-op while REQUIRE_USER_AUTH is off.
+    await enforce_auth_and_quota(request, consume=False)
     if not req.messages or req.messages[-1].role != "user":
         raise HTTPException(400, "messages must end with a user message")
     # v1.4.5 — every failure path below carries a short request_id so a user

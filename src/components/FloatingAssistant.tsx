@@ -104,7 +104,10 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   };
   useEffect(autoGrow, [input]);
 
-  const promptsLeft = user ? (user.isAdmin ? Infinity : Math.max(0, MAX_PROMPTS_PER_USER - user.promptsUsed)) : 0;
+  // v1.6.1 — per-customer allotment (falls back to the global default for
+  // accounts without an admin-granted maxPrompts)
+  const promptCap = user?.maxPrompts ?? MAX_PROMPTS_PER_USER;
+  const promptsLeft = user ? (user.isAdmin ? Infinity : Math.max(0, promptCap - user.promptsUsed)) : 0;
 
   useEffect(() => {
     if (expanded && scrollRef.current) {
@@ -191,7 +194,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 {user && !user.isAdmin && (
                   <div className="assistant-prompt-reminder">
                     <span className="assistant-prompt-reminder-icon">💡</span>
-                    <span>You have <strong>{promptsLeft} of {MAX_PROMPTS_PER_USER} queries</strong> remaining. Make each one count — <button className="assistant-guide-link" onClick={() => setShowPromptGuide(!showPromptGuide)}>see tips for better results</button>.</span>
+                    <span>You have <strong>{promptsLeft} of {promptCap} queries</strong> remaining. Make each one count — <button className="assistant-guide-link" onClick={() => setShowPromptGuide(!showPromptGuide)}>see tips for better results</button>.</span>
                   </div>
                 )}
 
@@ -447,7 +450,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
           {/* Remaining prompts badge (shown after first message for non-admins) */}
           {user && !user.isAdmin && messages.length > 0 && (
             <div className="assistant-prompts-remaining">
-              <span>{promptsLeft} of {MAX_PROMPTS_PER_USER} queries left</span>
+              <span>{promptsLeft} of {promptCap} queries left</span>
               {promptsLeft <= 1 && promptsLeft > 0 && <span className="assistant-prompts-warning"> — last one!</span>}
             </div>
           )}

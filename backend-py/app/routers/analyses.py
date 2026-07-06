@@ -2,7 +2,9 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Request
+
+from ..auth_quota import enforce_auth_and_quota
 from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
 
@@ -45,7 +47,12 @@ def _repair_spec_layers(spec_dict: dict) -> tuple[dict, list[str]]:
 
 
 @router.post("/api/v2/analyses")
-async def start_analysis(req: StartRequest):
+async def start_analysis(req: StartRequest, request: Request):
+    # v1.6.0 (Phase 3) — identity FIRST (cheap, catches expired sessions early);
+    # the paid credit is consumed further down, only once the spec has actually
+    # validated — a malformed spec must never burn one of the customer's
+    # analyses. No-op while REQUIRE_USER_AUTH is off (rollout-safe).
+    await enforce_auth_and_quota(request, consume=False)
     # Feasibility gate FIRST (raw check) — an infeasible plan often has no layers,
     # which would otherwise fail schema validation and mask the real reason (409 > 422).
     feas = (req.spec or {}).get("feasibility") or {}
@@ -65,6 +72,10 @@ async def start_analysis(req: StartRequest):
         spec = SpecV2.model_validate(spec_dict)
     except ValidationError as e:
         raise HTTPException(422, f"spec validation failed: {e.errors()[:5]}") from e
+    # v1.6.0 (Phase 3) — the spec is valid and a real (cost-bearing) analysis
+    # is about to start: consume exactly one analysis credit, transactionally,
+    # server-side. 402 QUOTA_EXCEEDED when the plan is exhausted.
+    await enforce_auth_and_quota(request, consume=True)
     job_id = jobs.start_job(spec)
     return {"ok": True, "jobId": job_id}
 

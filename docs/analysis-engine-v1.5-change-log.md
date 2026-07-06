@@ -276,3 +276,53 @@ Tag `rollback-pre-v1.5.2` points at the previously-live commit (`c13ed6a`, backe
 
 ### Rollback plan
 Tag `rollback-pre-v1.6.0` points at the previously-live commit, tagged immediately before this deploy.
+
+---
+
+## v1.6.1 — Confidence, Report, Quotas, Security (Phase 3)
+
+### 31. `backend-py/app/engine/unified_confidence.py` (new) — headline confidence verdict
+- **What:** `build_unified_confidence(data_sufficiency, critique)` merges `dataSufficiencyV2.final_confidence` and the reliability critic's `verdict` into one `{level, reason, components, method}` verdict. Conservative rule: `level` is the WORST of the two components; when they disagree, `reason` names both and states the conservative-merge rationale explicitly.
+- **Why:** live testing showed these two signals disagreeing on 3 of 4 canonical prompts (e.g. "high" data sufficiency next to a "weak" critic verdict) — technically both true, commercially indefensible to show unreconciled to a paying customer.
+- **Risk:** low — pure function, wrapped in try/except at the `jobs.py` call site; `unifiedConfidence` is omitted (never defaulted) on failure. **Rollback:** revert commit.
+
+### 32. `backend-py/app/services/jobs.py` — wiring + weight-audit note (recap) + confidence
+- **What:** imports `build_unified_confidence`; after the existing `dataSufficiencyV2` (`_ds2`) block, calls `build_unified_confidence(_ds2, _det_critic.to_dict())` and adds `unifiedConfidence` to the result dict only when the build succeeds.
+- **Risk:** low — additive, exception-isolated. **Rollback:** revert commit.
+
+### 33. Frontend — PDF report + `ResultsDrawer.tsx` confidence banner
+- **What:** `App.tsx`'s PDF section list gains "Overall Confidence: {level}" (body = the reason) and a "Factor Weight Audit" table (default vs. applied weight per factor, headed "ADJUSTED BY USER" when `weightsAdjusted || weightAudit.adjustedByUser`). `ResultsDrawer.tsx` gains a colored (green/amber/red by level) "Overall confidence: …" banner above the summary. `resultNormalizer.ts` + `types/index.ts` gain `unifiedConfidence` normalization/typing.
+- **Risk:** low — purely additive rendering over an optional field. **Rollback:** revert commit.
+
+### 34. Per-customer quota allotment — `firestore.rules`, `auth_quota.py`, `AuthContext.tsx`, `AdminDashboard.tsx`, `FloatingAssistant.tsx`, `usageTracker.ts`
+- **What:** `users/{uid}.maxPrompts` (admin-grant-only per Firestore rules — a user can neither create nor modify it) replaces the single hardcoded 10-prompt cap. The backend's quota transaction (`auth_quota.enforce_auth_and_quota`) reads it with `s.max_prompts_per_user` as fallback. Frontend: `AuthContext` tracks `maxPrompts` and derives `promptsRemaining` from it; `FloatingAssistant` shows "N of {cap} queries"; `AdminDashboard` gained **Set allotment** (`grantAllotment(uid, n)`) and **Reset usage** (`resetUsage(uid)`) buttons, plus a "contract" badge on accounts with a granted allotment; the "users at limit" overview metric now compares against each user's own cap instead of a hardcoded `4`.
+- **Why:** the ₹50,000/5-analysis sales-led contract model needs a per-customer number, not one global constant — this IS the payment tie-in (contract signed → admin grants 5 credits).
+- **Risk:** low-medium (Firestore rules change) — mitigated by backward compatibility: accounts without `maxPrompts` fall back to 10 (rules) / `max_prompts_per_user` (backend), identical to pre-existing behavior. **Rollback:** revert commit + `firebase deploy --only firestore:rules` from the previous commit if already deployed.
+
+### 35. `backend-py/app/auth_quota.py` (new) — server-side identity + quota enforcement
+- **What:** `enforce_auth_and_quota(request, consume)` verifies a Firebase ID token (via `firebase-admin`, Application Default Credentials) when `require_user_auth` is true; when `consume=True` it atomically transacts `users/{uid}.promptsUsed` (read-check-increment) against the account's allotment. Wired into `routers/analyses.py` (`consume=False` before spec validation, `consume=True` after — a malformed spec never burns a credit) and `routers/chat.py` (`consume=False`, plus the chat-turn rate limiter below). `main.py` CORS now allows the `Authorization` header. Frontend `chatService.ts` attaches `Authorization: Bearer <Firebase ID token>` to every engine call (`authJsonHeaders()`), lazily importing firebase so it stays out of the module's static dependency graph.
+- **Why:** the engine endpoints themselves accepted anonymous calls — the Firestore rules alone couldn't stop a direct `curl`/scraped-bundle caller from bypassing the quota while spending real OpenAI/Google money. For a paid product the quota must be enforced where the cost is incurred.
+- **Rollout safety:** `require_user_auth` (`STRATAGEO_REQUIRE_USER_AUTH`) defaults to **False** — this entire deploy is a no-op for live traffic until the flag is explicitly flipped (a separate, deliberate go-live action per `docs/PHASE3-SECURITY-REVIEW.md`). Fail-closed: if enforcement is on and token/Firestore verification cannot be performed, the request is rejected (401/503), never silently allowed.
+- **Risk:** low as shipped (flag off); the flag flip itself is the higher-risk action and is intentionally NOT bundled with this deploy. **Rollback:** revert commit (no rules/env change needed since the flag ships off).
+
+### 36. `backend-py/app/auth_quota.py` — chat-turn rate limiter
+- **What:** `chat_rate_decision(uid, now, limit, window_s, history)` — an in-memory per-user sliding-window counter (default 60/hour, `CHAT_TURNS_PER_HOUR`), applied to identity-verified (non-consuming) chat calls. Returns 429 `CHAT_RATE_LIMITED` with a message clarifying analysis credits are unaffected.
+- **Why:** chat turns correctly don't consume analysis credits, but that left an unmetered-spend gap — a signed-in user (or a script with a valid token) could loop the LLM endpoint indefinitely at the operator's cost.
+- **Risk:** low — in-memory state is correct for the current `--max-instances 1` deployment; documented as needing to move to Firestore/Redis if ever scaled out. **Rollback:** revert commit.
+
+### 37. Tests + version bump (release commit)
+- Backend: 2 new tests appended to `test_v152_reliability.py` (`test_quota_decision_respects_per_customer_allotment`, `test_chat_rate_limiter_sliding_window`) + new `test_v160_phase3.py` (14 tests: unified-confidence agreement/disagreement/defaults, quota-decision parametrized matrix, bearer-token parsing, `require_user_auth` off-by-default + no-op-when-off rollout-safety checks).
+- `config.py`: APP_VERSION → **1.6.1**, ENGINE_VERSION → `stratageo-engine-00060`, RELEASE_NAME → "Confidence, Report & Quotas"; docstring entry added. Version-assertion tests updated. `package.json`/lock → 1.6.1. README: current-version line, v1.6.1 highlights, version-history row, `/health` example fixed. CHANGELOG: 1.6.1 entry. `docs/PHASE3-SECURITY-REVIEW.md` added (full findings + go-live sequence).
+
+### Validation (this release)
+| Check | Result |
+|---|---|
+| Backend | **579 passed** |
+| Frontend typecheck / tests / build | clean / **66 passed** / success |
+| API/cost impact | zero new external calls (unified confidence is pure local merge; auth adds one token-verify + one Firestore transaction per analysis, only once the flag is on) |
+
+### Rollback plan
+Tag `rollback-pre-v1.6.1` points at the previously-live commit (`d845fc9`, backend revision `stratageo-engine-00059-cgl`), tagged immediately before this deploy.
+
+### Go-live note (not part of this deploy)
+`STRATAGEO_REQUIRE_USER_AUTH` ships OFF. Flipping it to `true` (plus setting `MAX_PROMPTS_PER_USER` per the paid tier) is a separate, deliberate action — see `docs/PHASE3-SECURITY-REVIEW.md` § "Suggested go-live sequence for the paid tier". Not performed automatically by this release.

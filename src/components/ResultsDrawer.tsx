@@ -353,6 +353,27 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           </div>
         )}
 
+        {/* v1.6.0 (Phase 3) — ONE headline confidence verdict. Replaces the
+            previous experience of three independent signals that could (and
+            did) disagree without explanation; the merge is conservative and
+            the reason explains any disagreement instead of hiding it. */}
+        {(result as any).unifiedConfidence && (() => {
+          const uc = (result as any).unifiedConfidence as { level: string; reason: string };
+          const meta = uc.level === 'High'
+            ? { bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' }
+            : uc.level === 'Low'
+              ? { bg: '#fef2f2', border: '#fecaca', color: '#991b1b' }
+              : { bg: '#fffbeb', border: '#fde68a', color: '#92400e' };
+          return (
+            <div style={{
+              background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color,
+              borderRadius: 6, padding: '7px 12px', fontSize: '12px', marginBottom: 8, lineHeight: 1.45,
+            }}>
+              <b>Overall confidence: {uc.level}.</b> {uc.reason}
+            </div>
+          );
+        })()}
+
         {/* Summary — suppressed when withheld (it may assert a winner the critic rejected) */}
         {!withheld && <p className="drawer-summary">{result.summary}</p>}
 

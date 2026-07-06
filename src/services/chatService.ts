@@ -15,6 +15,23 @@ const jsonHeaders = (): Record<string, string> => {
   return h;
 };
 
+/** v1.6.0 (Phase 3) — attach the caller's Firebase ID token so the backend
+ * can verify identity and enforce the analysis quota server-side (where the
+ * cost is incurred). Harmless while backend enforcement is off. Lazy import
+ * keeps firebase out of this module's static dependency graph. */
+const authJsonHeaders = async (): Promise<Record<string, string>> => {
+  const h = jsonHeaders();
+  try {
+    const { auth } = await import('../config/firebase');
+    const token = await auth.currentUser?.getIdToken();
+    if (token) h['Authorization'] = `Bearer ${token}`;
+  } catch {
+    // Signed-out or firebase unavailable — send without a token; the backend
+    // decides (401 when enforcement is on).
+  }
+  return h;
+};
+
 /** v1.4.5 — chat.py now returns a structured `detail` object
  * ({message, errorCode, requestId}) for the chat/planning endpoint instead of
  * a bare string, so a provider outage (rate limit/quota, auth, timeout) is
@@ -56,7 +73,7 @@ export async function sendChatTurn(
 ): Promise<ChatTurnResponse> {
   const r = await fetch(`${base()}/api/v2/chat`, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: await authJsonHeaders(),
     body: JSON.stringify({ messages, spec, context: context ?? null }),
   });
   if (!r.ok) {
@@ -69,12 +86,16 @@ export async function sendChatTurn(
 export async function startAnalysis(spec: SpecV2): Promise<string> {
   const r = await fetch(`${base()}/api/v2/analyses`, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: await authJsonHeaders(),
     body: JSON.stringify({ spec }),
   });
   if (!r.ok) {
     const detail = await r.json().catch(() => null);
-    throw new Error(detail?.detail || `Could not start analysis (HTTP ${r.status})`);
+    // v1.6.0 (Phase 3) — auth/quota rejections carry a structured detail
+    // ({errorCode, message}); show the human message, never "[object Object]".
+    const d = detail?.detail;
+    const msg = typeof d === 'string' ? d : (d?.message || d?.error);
+    throw new Error(msg || `Could not start analysis (HTTP ${r.status})`);
   }
   const j = await r.json();
   return j.jobId;
@@ -146,7 +167,7 @@ export class AnalysisFailedError extends Error {
 export async function cancelAnalysis(jobId: string): Promise<CancelAnalysisResponse> {
   const r = await fetch(`${base()}/api/v2/analyses/${jobId}/cancel`, {
     method: 'POST',
-    headers: jsonHeaders(),
+    headers: await authJsonHeaders(),
   });
   // The endpoint is designed to always return 200 with a safe payload, but
   // guard anyway — cancellation must never throw and block the UI cleanup.

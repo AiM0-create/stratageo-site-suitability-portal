@@ -10,6 +10,9 @@ interface AuthUser {
   photoURL: string | null;
   isAdmin: boolean;
   promptsUsed: number;
+  /** v1.6.1 (Phase 3) — this account's allotment (admin-granted per contract;
+   *  falls back to the global default when unset). */
+  maxPrompts: number;
   promptsRemaining: number;
 }
 
@@ -44,8 +47,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const userSnap = await getDoc(userRef);
 
     let promptsUsed = 0;
+    let maxPrompts = MAX_PROMPTS_PER_USER;
     if (userSnap.exists()) {
       promptsUsed = userSnap.data().promptsUsed || 0;
+      // v1.6.1 — per-customer allotment (admin-granted; Firestore rules stop
+      // a user from writing this field themselves)
+      const mp = userSnap.data().maxPrompts;
+      if (typeof mp === 'number' && Number.isFinite(mp) && mp >= 0) maxPrompts = mp;
       // Update last login
       await setDoc(userRef, { lastLogin: serverTimestamp() }, { merge: true });
     } else {
@@ -68,7 +76,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       photoURL: firebaseUser.photoURL || null,
       isAdmin,
       promptsUsed,
-      promptsRemaining: isAdmin ? Infinity : Math.max(0, MAX_PROMPTS_PER_USER - promptsUsed),
+      maxPrompts,
+      promptsRemaining: isAdmin ? Infinity : Math.max(0, maxPrompts - promptsUsed),
     };
   }, []);
 
@@ -130,7 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(prev => prev ? {
       ...prev,
       promptsUsed: newCount,
-      promptsRemaining: Math.max(0, MAX_PROMPTS_PER_USER - newCount),
+      promptsRemaining: Math.max(0, prev.maxPrompts - newCount),
     } : null);
 
     return true;
@@ -142,11 +151,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const userSnap = await getDoc(userRef);
     if (userSnap.exists()) {
       const promptsUsed = userSnap.data().promptsUsed || 0;
-      setUser(prev => prev ? {
-        ...prev,
-        promptsUsed,
-        promptsRemaining: prev.isAdmin ? Infinity : Math.max(0, MAX_PROMPTS_PER_USER - promptsUsed),
-      } : null);
+      // v1.6.1 — pick up a freshly granted allotment (e.g. admin just set
+      // maxPrompts:5 after a contract signature) without requiring re-login
+      const mp = userSnap.data().maxPrompts;
+      setUser(prev => {
+        if (!prev) return null;
+        const maxPrompts = (typeof mp === 'number' && Number.isFinite(mp) && mp >= 0) ? mp : prev.maxPrompts;
+        return {
+          ...prev,
+          promptsUsed,
+          maxPrompts,
+          promptsRemaining: prev.isAdmin ? Infinity : Math.max(0, maxPrompts - promptsUsed),
+        };
+      });
     }
   }, [user]);
 
