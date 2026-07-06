@@ -5,8 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:api": "node local-api-server.mjs",
-    "dev:full": "vercel dev",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run"

@@ -1,9 +1,14 @@
-# Stratageo Analysis Engine (v1.0.1)
+# Stratageo Analysis Engine
+
+See the root [`README.md`](../README.md) for the current version, architecture
+diagram, and full environment-variable reference — this file covers backend-
+specific local dev / deploy notes only.
 
 Conversational, spec-driven site-suitability backend. Replaces the single-shot
 "prompt → immediate execution" flow with:
 
-1. **`POST /api/v2/chat`** — multi-turn conversation with gpt-4o. The model acts
+1. **`POST /api/v2/chat`** — multi-turn conversation with the configured chat
+   model (`STRATAGEO_CHAT_MODEL`, default gpt-5.4-mini). The model acts
    as a methodology consultant: clarifies goals, builds a structured `SpecV2`
    (layers, weights, catchments, H3 grid, study area), honestly flags anything
    the engine can't do, and only sets `readyToExecute` on an explicit user go
@@ -81,9 +86,9 @@ first chat turn).
 
 | Var | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | chat (gpt-4o) + result explanations (gpt-4o-mini) |
+| `OPENAI_API_KEY` | chat + result explanations (see `STRATAGEO_*_MODEL` vars in the root README for which model does what) |
 | `GOOGLE_PLACES_API_KEY` | geocoding + google_places layers |
 | `ORS_API_KEY` | OpenRouteService isochrones (free signup: openrouteservice.org) |
 | `FRONTEND_ORIGINS` | comma-separated CORS allowlist |
 | `SANDBOX_ENABLED` | custom-layer snippets (default false) |
-| `CHAT_MODEL` | default `gpt-4o` |
+| `STRATAGEO_CHAT_MODEL` | default `gpt-5.4-mini` (legacy alias: `CHAT_MODEL`) |

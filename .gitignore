@@ -12,8 +12,6 @@ dist
 dist-ssr
 *.local
 .env
-api/.env
-api/node_modules
 
 # Python backend — never commit secrets or the venv
 backend-py/.env
@@ -34,6 +32,7 @@ backend-py/.pytest_cache/
 
 .vercel
 .claude
+vercel-dev.log
 test-prompts.js
 audit-results.json
 audit-test.js
@@ -41,6 +40,10 @@ test-suite.js
 
 # Local test artifacts — generated during local dev/testing, never commit
 local_test/
+
+# Working-session context notes — may contain partial credential fingerprints;
+# never commit, regenerated locally as needed.
+STRATAGEO_PORTAL_FULL_CONTEXT.md
 
 # Generated documentation exports (DOCX/PDF produced by gen_doc_*.py / gen_docx.js scripts)
 # These are on-demand artefacts; they live outside the repo or are regenerated as needed.

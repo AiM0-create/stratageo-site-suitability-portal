@@ -191,7 +191,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (513 backend tests) · Vitest (44 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (585 backend tests) · Vitest (66 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 

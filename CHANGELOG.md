@@ -4,6 +4,65 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [Unreleased — housekeeping] — 2026-07-07 — Repo Cleanup
+
+No `APP_VERSION` bump and no backend redeploy: nothing in `backend-py/app/`
+or `src/` changed — this is dead-file removal, doc-accuracy fixes, and
+metadata only. The production frontend bundle is byte-identical before and
+after (verified: same content hash from `vite build`).
+
+### Removed
+- **The entire legacy Node.js/Vercel serverless API layer** (`api/` —
+  `analyze.js`, `explain.js`, `health.js`, `intent.js`, `places.js`,
+  `test-openai.js`, `_lib/*`), `vercel.json`, and its local dev tooling
+  (`local-api-server.mjs`, `run-tests.mjs`, and the `dev:api`/`dev:full`
+  `package.json` scripts). This was a full duplicate analysis pipeline
+  (prompt → LLM intent → geocoding → OSM scoring → MCDA ranking) that called
+  OpenAI directly — superseded by `backend-py/` since the conversational v2
+  engine shipped. Confirmed unreachable from the live site: the deployed
+  frontend bundle always sets `isConversationalMode=true`, so the code path
+  that would call these functions never executes in production; one of the
+  functions was already marked "DEPRECATED" in its own code comment.
+  **Note:** this only removes the source from this repo — if a separate
+  Vercel deployment of this code is still live, deleting it from this repo
+  does not delete or pause that deployment; it should be checked/retired
+  directly in the Vercel dashboard if no longer wanted (it calls OpenAI with
+  a live key and may still be reachable/billing independently of this site).
+
+### Moved
+- `PORTAL_STATUS.md` (a stale v0.8.0 QA snapshot, Vercel-era) and
+  `SPATIAL_RELIABILITY_UPGRADE_REPORT.md` (superseded by this CHANGELOG and
+  `docs/analysis-engine-v1.5-change-log.md`) archived from the repo root into
+  `docs/`, matching the existing historical-docs convention there.
+
+### Fixed
+- `backend-py/README.md` referenced `v1.0.1` and `gpt-4o` — both long stale
+  (current: see root README for the live version and model config). Trimmed
+  to point at the root README for anything version/architecture-specific and
+  fixed the specific wrong model-name references.
+- `.env.example` only documented the legacy demo-mode / Vercel-proxy
+  variables (`VITE_APP_MODE`, `VITE_AI_BACKEND_URL`) and omitted the
+  variables the actual production build needs (`VITE_PY_BACKEND_URL`,
+  `VITE_CONVERSATIONAL_MODE`, `VITE_APP_TOKEN`). Rewritten to document the
+  current production path first, legacy fallback second.
+- README's CI test-count row was stale (513 backend / 44 frontend) — updated
+  to the current 585 / 66.
+- `.gitignore` had two dead rules (`api/.env`, `api/node_modules`) referring
+  to the now-removed folder; removed. Added `STRATAGEO_PORTAL_FULL_CONTEXT.md`
+  (a working-session context file that may contain partial credential
+  fingerprints — was already untracked by convention, now enforced) and
+  `vercel-dev.log` to prevent future accidental commits.
+- GitHub repo topics updated to reflect the actual current stack (added
+  `python`, `fastapi`, `google-cloud-run`, `firebase` — previously only
+  frontend-stack topics were listed).
+
+### Validation
+- Backend: **585 passed** (unchanged from the last release — no backend code touched).
+- Frontend: `tsc --noEmit` clean, Vitest **66 passed**, `vite build` output
+  **byte-identical bundle hash** to the pre-cleanup build.
+
+---
+
 ## [Unreleased — frontend-only] — 2026-07-06 — Admin Prompt/Output Comparison Log
 
 No `APP_VERSION` bump: the backend is untouched and not redeployed by this
@@ -537,7 +596,7 @@ The local `OPENAI_API_KEY` was expired and `ORS_API_KEY` / `GOOGLE_PLACES_API_KE
 
 ## [1.0.3] — 2026-06 — Spatial Reliability Upgrade
 
-See `SPATIAL_RELIABILITY_UPGRADE_REPORT.md`.
+See `docs/SPATIAL_RELIABILITY_UPGRADE_REPORT.md`.
 
 ---
 
