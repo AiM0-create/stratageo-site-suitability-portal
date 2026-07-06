@@ -44,8 +44,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
     if (open) loadStats();
   }, [open, loadStats]);
 
-  if (!open) return null;
-
   const filteredPrompts = selectedUser
     ? stats?.recentPrompts.filter(p => p.userId === selectedUser) || []
     : stats?.recentPrompts || [];
@@ -118,6 +116,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ open, onClose })
     a.click();
     URL.revokeObjectURL(url);
   }, [filteredPrompts, mismatchFingerprints]);
+
+  if (!open) return null;
 
   return (
     <div className="sg-admin-overlay" onClick={onClose}>
