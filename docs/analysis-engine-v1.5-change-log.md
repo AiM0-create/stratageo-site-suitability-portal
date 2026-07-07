@@ -380,3 +380,31 @@ Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`, backe
 - New `tests/test_v163_grid_choice.py` (9 tests): default is 8 in the `Grid` model, every archetype, and an end-to-end planned spec; the 7–10 clamp still holds; a user's level-7 choice survives a replan; the choice wins over the block-granularity override; the override still applies when no choice was made; flagged-but-unoffered resolutions (5/9/10/None/"8") are ignored; malformed incoming specs (None/{}/missing grid) are tolerated.
 - Updated: `test_v152_reliability.py` archetype-default assertion (9→8), version assertions in `test_config_v110.py` / `test_v14_reliability.py`.
 - **594 passed** (585 + 9 new); frontend `tsc` clean, Vitest 66 passed, build clean.
+
+---
+
+## v1.6.4 — Map Coherence & Coordinate Fidelity
+
+### 45. `backend-py/app/services/jobs.py` + `src/components/MapView.tsx` + `src/services/mcdaEngine.ts` — score/colour coherence
+- **What:** after `build_hex_grid()`, each chosen candidate's own cell has its `score` replaced with the candidate's FINAL (Pass-B refined) `mcda_score` and gains `refinedCandidate: true` (skipped for excluded cells and score-withheld candidates). MapView's overall-suitability tooltip appends "— FINAL refined score (chosen candidate)" for flagged cells. `reweightHexGrid()` drops the flag when the customer moves weight sliders (reweighted values are screening-based). The report's ranking-basis note was rewritten to describe exactly this rendering.
+- **Why (live-reported):** a pick's final refined score differed from its map colour — the map coloured every cell by Pass-A screening while the card showed the Pass-B refined number. The two-pass design is correct engineering (refining thousands of cells would cost minutes and real API money); the failure was presentation-only.
+- **Risk:** low — payload-shaping after scoring completes; alignment between `finals` and `locations` is positional and verified (`locations` is built by iterating `finals` in order). **Rollback:** tag `rollback-pre-v1.6.4`.
+
+### 46. `src/components/MapView.tsx` — honest unreliable-state surface
+- **What:** when `recommendationWithheld` is true, the hex surface renders neutral grey (`#94a3b8`) with faint relative shading (0.10–0.30 opacity vs the normal 0.30–0.75) and every cell tooltip reads "Screening value X/10 — context only: this result was flagged unreliable, no recommendation is made." `recommendationWithheld` added to the effect's dependency array (it previously didn't re-render on change).
+- **Why (live-reported):** a "No Reliable Recommendation" verdict greyed the pins but left the hex choropleth advertising confident green/red gradation — the surface simply never checked the flag.
+- **Risk:** low — display-only. **Rollback:** revert commit.
+
+### 47. `backend-py/app/engine/study_area.py` + `backend-py/app/engine/deterministic_planner.py` — coordinate fidelity + geocode coarseness guard
+- **What:** (1) `extract_embedded_coords()` parses "Name[lat, lng]" / "(lat, lng)" / "@ lat, lng" place strings; `resolve_study_area()` uses those coordinates verbatim (result note: "Used exact coordinates provided for …") and only geocodes the cleaned names that lack them. Implausible polar latitudes trigger a lat/lng swap correction (88° is never an Indian latitude). (2) `extract_prompt_place_coords()` in the deterministic planner re-extracts coordinate-tagged places from the customer's RAW prompt and deterministically overrides the spec's places-type study area — robust to the LLM stripping/garbling coordinates when writing the spec. (3) `geocode()` iterates results and REJECTS country/`administrative_area_level_1` (Google) and country/state (Nominatim) matches with a logged warning instead of accepting them.
+- **Why (live-reported root cause):** a four-locality Kolkata brief with exact coordinates was analyzed near the centroid of India — the coordinate-bearing strings went verbatim to the text geocoders, which fell back to a country-level "India" match. Layer (3) closes the whole failure class, not just the coordinate case.
+- **Risk:** low-medium — geocode() now skips previously-accepted (wrong) coarse matches, so briefs that only ever matched at country/state level now fail honestly ("Could not geocode …") instead of running in the wrong place; that is the intended behavior change. **Rollback:** tag `rollback-pre-v1.6.4`.
+
+### 48. `backend-py/app/services/jobs.py` — candidate-shortfall transparency
+- **What:** when `len(finals) < spec.output.topN`, a result note states how many distinct viable zones survived scoring, hard exclusions, and the near-duplicate separation rule, and suggests widening the study area or relaxing exclusions.
+- **Why:** long-standing gap (P0-3 in the live QA findings): the engine silently returned fewer candidates than requested with no explanation.
+- **Risk:** none — additive note.
+
+### 49. Tests
+- New `tests/test_v164_map_and_coords.py` (10 tests): bracketed/parens/@ coordinate extraction with clean names, plain names untouched, swapped-order auto-correction, out-of-range rejection, the customer's exact Kolkata prompt yielding four clean in-Kolkata places, coordinate-tagged places overriding an LLM-stripped study area end-to-end through `apply_deterministic_plan`, and the Google country-level-match rejection (mocked).
+- **604 passed** (594 + 10 new); frontend `tsc` clean, Vitest 66 passed, build clean.

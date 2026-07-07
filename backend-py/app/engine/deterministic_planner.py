@@ -58,6 +58,55 @@ _RUBY    = re.compile(r"\bruby\s*crossing\b", re.I)
 _EM_BYP  = re.compile(r"\b(?:e\.?\s*m\.?\s*bypass|eastern\s+metropolitan\s+bypass)\b", re.I)
 
 
+# v1.6.4 — "Name[lat, lng]" pairs in the user's raw prompt. Users who paste
+# exact coordinates mean them literally; they are attached to the study area
+# deterministically so it makes no difference whether the LLM keeps or strips
+# them when writing the spec (observed live: coordinates lost → the bare
+# geocoder mismatched → analysis ran near the centroid of India).
+_PROMPT_PLACE_COORD_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9 /&().'’-]{1,48}?)\s*\[\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*\]"
+)
+
+
+def extract_prompt_place_coords(raw_prompt: str) -> list[str]:
+    """Return ['Name[lat, lng]', ...] for every coordinate-tagged place in the
+    prompt (validated ranges; order preserved; duplicates dropped)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _PROMPT_PLACE_COORD_RE.finditer(raw_prompt or ""):
+        name = m.group(1).strip(" -–—,;:")
+        # The regex can capture a greedy prefix ("...localities - Chinar Park",
+        # "compare A", "and Newtown/Rajarhat"). Keep the final separator-
+        # delimited chunk, then keep only its trailing run of capitalized /
+        # place-like tokens — prose connectors are lowercase, place names
+        # aren't ("Sector V", "Newtown/Rajarhat", "JP Nagar 2nd Phase").
+        name = re.split(r"[,;:–—]|\s-\s", name)[-1].strip()
+        toks = name.split()
+        keep: list[str] = []
+        for tok in reversed(toks):
+            if re.match(r"^[A-Z0-9(]", tok) or "/" in tok or re.match(r"^\d+(st|nd|rd|th)$", tok, re.I):
+                keep.append(tok)
+            else:
+                break
+        if keep:
+            name = " ".join(reversed(keep))
+        try:
+            a, b = float(m.group(2)), float(m.group(3))
+        except ValueError:
+            continue
+        if not (-90.0 <= a <= 90.0 and -180.0 <= b <= 180.0):
+            if -90.0 <= b <= 90.0 and -180.0 <= a <= 180.0:
+                a, b = b, a
+            else:
+                continue
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        out.append(f"{name}[{a}, {b}]")
+    return out
+
+
 # v1.5.2 — user asked for block/intersection-level output → res-10 grid.
 _BLOCK_GRANULARITY_RE = re.compile(
     r"\b(intersections?|blocks?|street\s+corners?|street[- ]level|corner\s+plots?)\b",
@@ -280,6 +329,21 @@ def apply_deterministic_plan(
         f"Identify top {resolved_top_n} candidate micro-market zones "
         f"for a {_biz}{_where}"
     )
+
+    # 3c. v1.6.4 — coordinate fidelity. If the user tagged places with exact
+    # coordinates in the prompt, those coordinate-tagged strings BECOME the
+    # study area (deterministically), overriding whatever the LLM wrote —
+    # resolve_study_area() reads the embedded coordinates verbatim and never
+    # sends them to a text geocoder.
+    _coord_places = extract_prompt_place_coords(intent.rawPrompt or "")
+    if _coord_places:
+        sa = spec.get("studyArea")
+        if not isinstance(sa, dict) or sa.get("type") in (None, "places"):
+            spec["studyArea"] = {
+                **(sa if isinstance(sa, dict) else {}),
+                "type": "places",
+                "places": _coord_places,
+            }
 
     # 4. Set v1.2 determinism metadata
     schema_fp = canonical.schema_fingerprint()

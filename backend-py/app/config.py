@@ -96,6 +96,21 @@ v1.6.3: H3 grid-level choice — the default analysis grid coarsens from
   deterministic planner (mirroring the Phase-2 weight sliders), and an
   explicit UI choice wins over the prompt-wording res-10 block-granularity
   override. polyfill() auto-degrade and the 7–10 spec clamp are unchanged.
+v1.6.4: Map coherence & coordinate fidelity — three live-reported issues.
+  (1) A chosen candidate's map cell is now recoloured with its FINAL
+  (Pass-B refined) score and flagged refinedCandidate, so a pick's colour
+  always matches the number on its card; all other cells keep the Pass-A
+  screening surface (the only basis on which every cell is comparable).
+  (2) When the recommendation is withheld (unreliable analyst review / no
+  viable land), the frontend hex surface renders neutral grey with
+  context-only tooltips instead of confident green/red gradation.
+  (3) Coordinate fidelity: "Name[lat, lng]" place strings are parsed
+  deterministically from the user's raw prompt (deterministic_planner) and
+  read verbatim by resolve_study_area — never sent to a text geocoder
+  (observed live: geocoder fell back to a country-level "India" match and
+  the analysis ran near the centroid of India). Country/state-level geocode
+  matches are now rejected outright for every brief. Bonus: a candidate
+  shortfall (< topN survivors) is now explained in the result notes.
 """
 from functools import lru_cache
 from typing import Literal
@@ -103,9 +118,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.6.3"
+APP_VERSION     = "1.6.4"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00062"
+ENGINE_VERSION  = "stratageo-engine-00063"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -114,7 +129,7 @@ ENGINE_VERSION  = "stratageo-engine-00062"
 # these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "H3 Grid-Level Choice (7/8, default 8)"
+RELEASE_NAME    = "Map Coherence & Coordinate Fidelity"
 
 
 class Settings(BaseSettings):

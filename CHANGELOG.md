@@ -4,6 +4,65 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.6.4] — 2026-07-07 — Map Coherence & Coordinate Fidelity
+
+Backend + frontend release fixing three live-reported issues (customer
+screenshots/prompts), plus one long-standing transparency gap.
+
+### Fixed
+- **A pick's map colour now matches its card score.** The engine's two-pass
+  design (cheap screening for every cell, expensive isochrone/routing
+  refinement only for the shortlist) is unchanged — but each chosen
+  candidate's own hex cell is now recoloured with its FINAL refined score
+  and flagged (`refinedCandidate`); hovering it says "FINAL refined score
+  (chosen candidate)". All other cells keep the screening surface, the only
+  basis on which every cell is comparable. The report's ranking-basis note
+  was rewritten to say precisely this. Under custom weight sliders the flag
+  is dropped (`mcdaEngine.reweightHexGrid`), since reweighted values are
+  screening-based.
+- **The map can no longer contradict a withheld recommendation.** When the
+  analyst review flags a result unreliable (or no viable land remains), the
+  hex suitability surface previously kept its confident green/red gradation
+  while the pins were greyed. It now renders neutral grey with faint
+  relative shading, and every cell tooltip reads "Screening value X/10 —
+  context only: this result was flagged unreliable, no recommendation is
+  made."
+- **Coordinates in the prompt are now used verbatim.** "Chinar Park[22.62…,
+  88.43…]"-style place strings were being sent to the Google/Nominatim text
+  geocoders unparsed; both fell back to a country-level "India" match whose
+  centroid silently became the study area (observed live: a four-locality
+  Kolkata brief analyzed near the centroid of India). Three-layer fix:
+  (1) `extract_embedded_coords()` in `study_area.py` reads `[lat, lng]`,
+  `(lat, lng)` and `@ lat, lng` styles directly (with lat/lng swap
+  auto-correction) and never geocodes them; (2) `extract_prompt_place_coords()`
+  in the deterministic planner re-extracts coordinate-tagged places from the
+  customer's RAW prompt and makes them the study area even if the LLM
+  stripped them from the spec; (3) `geocode()` now rejects country/state-level
+  matches outright for every brief — a locality query resolving to "India"
+  is always wrong, and failing honestly beats analyzing the wrong place.
+- **Candidate shortfall is now explained** (long-standing gap, first flagged
+  in the live QA review): when fewer zones survive scoring/exclusions/
+  near-duplicate separation than requested, the result notes state how many
+  survived and why, instead of silently returning a shorter list.
+
+### Tests
+- New `tests/test_v164_map_and_coords.py` (10 tests), including the
+  customer's exact four-locality Kolkata coordinates prompt as a permanent
+  regression test (all four places must resolve inside Kolkata), the
+  LLM-stripped-coordinates worst case, swapped lat/lng auto-correction, and
+  the country-level geocode rejection.
+
+### Validation
+- Backend: **604 passed** (594 + 10 new).
+- Frontend: `tsc --noEmit` clean, Vitest **66 passed**, `vite build` clean.
+
+### Deploy
+- Backend: Cloud Run revision `stratageo-engine-00063-…` (see tag below).
+- Tag `rollback-pre-v1.6.4` points at the previously-live commit (`f9b17e0`,
+  backend revision `stratageo-engine-00062-4h2`).
+
+---
+
 ## [1.6.3] — 2026-07-07 — H3 Grid-Level Choice (7/8, default 8)
 
 Backend + frontend release: the engine default changes and the plan card

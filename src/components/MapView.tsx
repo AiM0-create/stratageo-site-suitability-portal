@@ -279,25 +279,38 @@ export const MapView: React.FC<MapViewProps> = ({
       const hasVal = typeof v === 'number';
       const t = hasVal ? Math.max(0, Math.min(1, (v! - lo) / span)) : 0;  // 0=worst .. 1=best in view
       try {
+        // v1.6.4 — when the analyst review withholds the recommendation, the
+        // suitability surface must not keep advertising confident green/red
+        // gradation (user-reported contradiction). Render it grey and label
+        // it as context-only; relative shading is kept faint for orientation.
         const poly = L.polygon(cell.boundary, {
           renderer,
           stroke: false,
-          fillColor: cell.excluded || !hasVal ? '#64748b' : rampColor(t),
-          fillOpacity: cell.excluded ? 0.22 : !hasVal ? 0.12 : 0.30 + t * 0.45,
+          fillColor: cell.excluded || !hasVal
+            ? '#64748b'
+            : recommendationWithheld ? '#94a3b8' : rampColor(t),
+          fillOpacity: cell.excluded
+            ? 0.22
+            : !hasVal
+              ? 0.12
+              : recommendationWithheld ? 0.10 + t * 0.20 : 0.30 + t * 0.45,
           interactive: true,
         });
+        const finalTag = (cell as any).refinedCandidate ? ' — FINAL refined score (chosen candidate)' : '';
         const label = cell.excluded
           ? 'Excluded zone'
           : !hasVal
             ? `${factor}: no data here`
-            : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10`;
+            : recommendationWithheld
+              ? `Screening value ${v!.toFixed(1)}/10 — context only: this result was flagged unreliable, no recommendation is made`
+              : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10${factor ? '' : finalTag}`;
         poly.bindTooltip(label, { sticky: true, direction: 'top', className: 'sg-tooltip-container' });
         group.addLayer(poly);
       } catch { /* skip malformed cell */ }
     }
     group.addTo(map);
     hexLayerRef.current = group;
-  }, [hexGrid, showHexGrid, heatmapType]);
+  }, [hexGrid, showHexGrid, heatmapType, recommendationWithheld]);
 
   // ── Catchment isochrone outlines (v2 engine, selected location) ──
   useEffect(() => {

@@ -219,6 +219,9 @@ export interface HexGridCell {
   boundary: [number, number][]; // [lat, lng] ring
   /** Per-factor 0-10, direction already applied (higher = more favorable for all). */
   layerScores?: Record<string, number>;
+  /** v1.6.4 — this cell is a chosen candidate and its score is the FINAL
+   *  (Pass-B refined) score, so its color matches the candidate card. */
+  refinedCandidate?: boolean;
 }
 
 export interface CatchmentOutline {

@@ -392,7 +392,10 @@ export function reweightHexGrid(
       tw += w;
     }
     if (tw <= 0) return cell;
-    return { ...cell, score: Math.round((tws / tw) * 100) / 100 };
+    // v1.6.4 — a recomputed value is screening-based, so a candidate cell's
+    // "final refined score" flag no longer applies under custom weights.
+    const { refinedCandidate: _drop, ...rest } = cell as HexGridCell & { refinedCandidate?: boolean };
+    return { ...rest, score: Math.round((tws / tw) * 100) / 100 };
   });
 }
 

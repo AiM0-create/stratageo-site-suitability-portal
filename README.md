@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.6.3 — H3 Grid-Level Choice (7/8, default 8)**
+**Current version: v1.6.4 — Map Coherence & Coordinate Fidelity**
 
 ---
 
@@ -20,6 +20,15 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.6.4 Highlights
+
+- **A pick's map colour now matches its card score** — each chosen candidate's hex cell is recoloured with its FINAL refined score (tooltip: "FINAL refined score (chosen candidate)"); all other cells keep the comparable screening surface, and the report's ranking-basis note explains the distinction.
+- **The map can no longer contradict a withheld recommendation** — when a result is flagged unreliable, the hex surface renders neutral grey with context-only tooltips instead of confident green/red gradation.
+- **Coordinates in prompts are honored verbatim** — "Chinar Park[22.62, 88.43]"-style places are parsed deterministically from the raw prompt (even if the AI strips them from the spec) and never sent to a text geocoder; country/state-level geocode matches are rejected outright, closing the failure class where a brief silently analyzed the centroid of India.
+- **Candidate shortfall is explained** — fewer surviving zones than requested now comes with a note saying how many survived and why.
 
 ---
 
@@ -199,7 +208,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (585 backend tests) · Vitest (66 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (604 backend tests) · Vitest (66 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -365,7 +374,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.6.3** *(current)* | H3 Grid-Level Choice — default grid coarsened from res 9 to res 8; plan-card picker for Level 7 (district-scale) vs Level 8 (neighbourhood-scale), preserved across chat turns like the weight sliders |
+| **v1.6.4** *(current)* | Map Coherence & Coordinate Fidelity — candidate cells recoloured with final refined scores, grey context-only surface when the recommendation is withheld, prompt coordinates used verbatim + country-level geocode matches rejected, candidate-shortfall notes |
+| **v1.6.3** | H3 Grid-Level Choice — default grid coarsened from res 9 to res 8; plan-card picker for Level 7 (district-scale) vs Level 8 (neighbourhood-scale), preserved across chat turns like the weight sliders |
 | **v1.6.2** *(backend-only)* | Smart Water/Buildability Relevance — fixed a live bug where commercial briefs could land on port/rail/water land; buildability relevance now shares one source of truth with mask selection, water relevance is geography-aware (coastal metros), no timeout regression |
 | **v1.6.1** | Confidence, Report & Quotas — unified confidence verdict, PDF weight-audit table, per-customer admin-granted quota allotments, server-side auth/quota enforcement (off by default), chat rate limiting |
 | **v1.6.0** | Factor Weight Sliders — plan-card weight adjustments preserved across chat turns (fixes a silent-wipe bug), post-run sliders re-rank + instantly recolor the map client-side, weight audit trail (default vs. executed), fixed a fabricated-zero scoring bug in the reweighting engine |

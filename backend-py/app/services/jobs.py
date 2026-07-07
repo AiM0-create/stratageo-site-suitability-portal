@@ -1481,10 +1481,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # cells were not the highest suitability scores"). Two legitimate mechanisms
     # cause a pick to differ from the darkest map cell; both are now disclosed.
     notes.append(
-        "Ranking basis: the map colors every cell by its screening score; the "
-        "shortlisted candidates are then re-verified with real isochrone / "
-        "routing / traffic data and FINAL ranking uses those refined scores — "
-        "so a pick's final score can differ from its map color. Additionally, "
+        "Ranking basis: candidate zones are shortlisted on a fast screening "
+        "score, then re-verified with real isochrone / routing / traffic data; "
+        "FINAL ranking uses those refined scores. On the map, each chosen "
+        "candidate's cell is colored by its FINAL refined score (marked as "
+        "such), while all other cells show the screening surface — the only "
+        "basis on which every cell is comparable. Additionally, "
         f"cells within {spec.output.minCandidateSeparationHexRings} hex ring(s) "
         "of an already-chosen candidate are skipped as near-duplicates, so a "
         "darker neighbouring cell may be intentionally unselected."
@@ -1895,6 +1897,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         key=lambda ci: (scoring.composite_for_hex(spec, scores, ci)[0] or -1.0),
         reverse=True,
     )[: spec.output.topN]
+    # v1.6.4 — candidate-shortfall transparency: when fewer zones survive than
+    # the user asked for, say so and say why, instead of silently returning a
+    # shorter list (a long-standing known gap).
+    if len(finals) < spec.output.topN:
+        notes.append(
+            f"Requested {spec.output.topN} candidate zones; {len(finals)} distinct "
+            "viable zone(s) survived scoring, hard exclusions and the "
+            f"{spec.output.minCandidateSeparationHexRings}-ring near-duplicate "
+            "separation rule within this study area. Widening the study area or "
+            "relaxing exclusions may yield more."
+        )
 
     # ── 8. Build result (names resolved in parallel) ────────────────
     _update(job, 90, "explain", "Naming locations and writing summary...")
@@ -2399,6 +2412,22 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # All Pass-A composite scores (the engine computed them anyway). Capped at
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
     hex_grid = results_mod.build_hex_grid(hexes, composite, excluded, scores)
+    # v1.6.4 — score/colour coherence (user-reported confusion: a pick's final
+    # refined score differed from its map colour). The chosen candidates' OWN
+    # cells are recoloured with their FINAL (Pass-B refined) scores and flagged,
+    # so a candidate's colour always matches the number on its card. All other
+    # cells remain the Pass-A screening surface — the only basis on which every
+    # cell is comparable (refinement only ever runs for the shortlist).
+    _final_by_h3 = {
+        hexes[ci].h3_id: loc
+        for ci, loc in zip(finals, locations)
+        if isinstance(loc.get("mcda_score"), (int, float)) and not loc.get("scoreWithheld")
+    }
+    for _cell in hex_grid:
+        _loc = _final_by_h3.get(_cell.get("h3"))
+        if _loc is not None and not _cell.get("excluded"):
+            _cell["score"] = round(float(_loc["mcda_score"]), 2)
+            _cell["refinedCandidate"] = True
 
     # ── Catchment outlines for the winners ───────────────────────────
     catchments = results_mod.build_catchments(spec, iso_polygons, finals, locations)
