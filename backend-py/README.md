@@ -22,7 +22,8 @@ Conversational, spec-driven site-suitability backend. Replaces the single-shot
 
 ## Engine design
 
-- **H3 hex grid** (res 7–10, default 9; auto-degrades above 8000 hexes).
+- **H3 hex grid** (res 7–10, default 8; the plan card offers the customer a
+  choice of level 7 or 8; auto-degrades above the hex budget).
 - **One Overpass union query** for all OSM layers + exclusions, classified
   client-side into layers.
 - **Two-pass scoring**: Pass A scores every hex with Euclidean proxy radii

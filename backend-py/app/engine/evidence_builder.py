@@ -452,7 +452,7 @@ def assemble_evidence_trail(
         sa_label = ", ".join(spec.studyArea.places[:3])
     study_area = build_study_area_evidence(
         polygon, h3_count_before, h3_count_after,
-        spec.grid.resolution if hasattr(spec, "grid") else 9,
+        spec.grid.resolution if hasattr(spec, "grid") else 8,
         sa_label,
     )
 

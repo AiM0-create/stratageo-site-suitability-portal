@@ -151,7 +151,8 @@ def test_block_granularity_prompt_gets_res_10():
 def test_neighbourhood_prompt_without_block_wording_keeps_archetype_res():
     p = "Analyze Indiranagar in Bengaluru for a small organic grocery store."
     s = _spec_for(p, "whatever")
-    assert s["grid"]["resolution"] == 9
+    # v1.6.3 — archetype default coarsened from 9 to 8
+    assert s["grid"]["resolution"] == 8
 
 
 def test_objective_identical_across_divergent_llm_wordings():

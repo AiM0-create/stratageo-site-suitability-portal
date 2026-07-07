@@ -133,7 +133,9 @@ class StudyArea(BaseModel):
 
 class Grid(BaseModel):
     type: Literal["h3"] = "h3"
-    resolution: int = 9
+    # v1.6.3 — default coarsened from 9 (~0.10 km² hexes) to 8 (~0.74 km²
+    # hexes); the plan card now offers the customer a choice of level 7 or 8.
+    resolution: int = 8
 
     @field_validator("resolution")
     @classmethod
@@ -467,6 +469,13 @@ class SpecV2(BaseModel):
     # Together these let the report show "default vs. adjusted" honestly.
     canonicalWeights: Optional[dict[str, float]] = None
     weightsAdjustedByUser: Optional[bool] = None
+
+    # ── v1.6.3 — grid-level choice ─────────────────────────────────────────────
+    # Set true by the UI when the customer picks an H3 level (7 or 8) on the
+    # plan card; the deterministic planner then PRESERVES that resolution
+    # instead of re-applying the archetype default on later chat turns
+    # (mirrors weightsAdjustedByUser).
+    gridResolutionAdjustedByUser: Optional[bool] = None
 
     # Analysis mode controls which engine path is taken.
     analysisMode: Optional[Literal[

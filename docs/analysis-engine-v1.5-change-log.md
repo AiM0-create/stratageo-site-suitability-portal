@@ -365,3 +365,18 @@ Tag `rollback-pre-v1.6.1` points at the previously-live commit (`d845fc9`, backe
 
 ### Rollback plan
 Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`, backend revision `stratageo-engine-00060-dxr`), tagged immediately before this deploy.
+
+---
+
+## v1.6.3 — H3 Grid-Level Choice (7/8, default 8)
+
+### 43. Default grid resolution 9 → 8, plan-card level picker, choice preserved across turns
+- **What (backend):** every canonical archetype's `grid_resolution` coarsened from 9 to 8 (`canonical_archetypes.py`; `LARGE_FORMAT_RETAIL` was already 8), along with the `Grid` model default (`models/spec.py`), the LLM consultant's stated default and example spec (`prompts.py`), and the evidence-trail fallbacks (`models/evidence.py`, `evidence_builder.py`, `llm.py`). New spec flag `gridResolutionAdjustedByUser` + `preserve_user_grid_resolution()` (`deterministic_planner.py`, wired in `llm.py` right after `preserve_user_weights()`): when the client spec carries the flag and one of the two offered levels (7/8), the planner keeps that resolution instead of re-applying the archetype default — including over the v1.5.2 res-10 block-granularity prompt override (an explicit UI choice beats prompt-wording inference). The guard ignores flagged-but-unoffered values; the SpecV2 7–10 clamp and `polyfill()` auto-degrade are unchanged.
+- **What (frontend):** the "Grid:" row on the Analysis Plan card (`SpecSummaryCard.tsx`) is now a two-option segmented control — Level 7 (~5.2 km² hexes, district-scale screening, fastest) / Level 8 (~0.74 km² hexes, neighbourhood-scale, default) — with tooltips explaining the tradeoff; picking a level sets `grid.resolution` + the flag through the same `onSpecEdit` path the weight sliders use. When the backend set a non-offered resolution (e.g. block-granularity res 10), that value is displayed beside the picker until the customer picks a level. New `gridResolutionAdjustedByUser` field on the frontend `SpecV2` type; `/api/v2/analyses` needed no change (it already validates the client spec as-is, and 7/8 pass the existing clamp).
+- **Why:** res 9 (~0.10 km² hexes) was street-scale granularity on every default run — slower, more cells to score, more provider load — when screening-level output is the product's stated claim. Res 8 keeps neighbourhood-scale differentiation at roughly 1/7th the cell count; res 7 gives a very fast district-scale first pass for large study areas. Making it a customer choice (rather than another inference) keeps the plan card honest about what will run.
+- **Risk:** medium-low. Coarser default changes score granularity of every new analysis (existing results unaffected); candidate hexes are bigger, so per-hex POI counts rise and candidate spacing widens — both inherent to the chosen scale and disclosed by the picker tooltips. The preservation guard is flag-gated and value-whitelisted, so a malformed client spec cannot inject an arbitrary resolution. **Rollback:** tag `rollback-pre-v1.6.3` (commit `5f46c50`, backend revision `stratageo-engine-00061-fzz`).
+
+### 44. Tests
+- New `tests/test_v163_grid_choice.py` (9 tests): default is 8 in the `Grid` model, every archetype, and an end-to-end planned spec; the 7–10 clamp still holds; a user's level-7 choice survives a replan; the choice wins over the block-granularity override; the override still applies when no choice was made; flagged-but-unoffered resolutions (5/9/10/None/"8") are ignored; malformed incoming specs (None/{}/missing grid) are tolerated.
+- Updated: `test_v152_reliability.py` archetype-default assertion (9→8), version assertions in `test_config_v110.py` / `test_v14_reliability.py`.
+- **594 passed** (585 + 9 new); frontend `tsc` clean, Vitest 66 passed, build clean.

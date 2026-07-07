@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.6.2 — Smart Water/Buildability Relevance** *(backend-only fix; no frontend code changed, so the UI's `v…` badge still reads v1.6.1)*
+**Current version: v1.6.3 — H3 Grid-Level Choice (7/8, default 8)**
 
 ---
 
@@ -20,6 +20,14 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.6.3 Highlights
+
+- **The analysis grid default coarsened from H3 resolution 9 (~0.10 km² hexes) to resolution 8 (~0.74 km² hexes)** — fewer cells per study area means faster runs with more provider-stage headroom, at neighbourhood (rather than street) granularity.
+- **The plan card now offers a grid-level choice**: Level 7 (~5.2 km² hexes — district-scale screening, fastest) or Level 8 (~0.74 km² — neighbourhood-scale, default). The choice is preserved across chat turns exactly like the v1.6.0 weight sliders, and an explicit choice wins over the prompt-wording block-granularity override.
+- Auto-degrade is unchanged: a study area that would exceed the hex budget still drops one level with a recorded note.
 
 ---
 
@@ -357,7 +365,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.6.2** *(current, backend-only)* | Smart Water/Buildability Relevance — fixed a live bug where commercial briefs could land on port/rail/water land; buildability relevance now shares one source of truth with mask selection, water relevance is geography-aware (coastal metros), no timeout regression |
+| **v1.6.3** *(current)* | H3 Grid-Level Choice — default grid coarsened from res 9 to res 8; plan-card picker for Level 7 (district-scale) vs Level 8 (neighbourhood-scale), preserved across chat turns like the weight sliders |
+| **v1.6.2** *(backend-only)* | Smart Water/Buildability Relevance — fixed a live bug where commercial briefs could land on port/rail/water land; buildability relevance now shares one source of truth with mask selection, water relevance is geography-aware (coastal metros), no timeout regression |
 | **v1.6.1** | Confidence, Report & Quotas — unified confidence verdict, PDF weight-audit table, per-customer admin-granted quota allotments, server-side auth/quota enforcement (off by default), chat rate limiting |
 | **v1.6.0** | Factor Weight Sliders — plan-card weight adjustments preserved across chat turns (fixes a silent-wipe bug), post-run sliders re-rank + instantly recolor the map client-side, weight audit trail (default vs. executed), fixed a fabricated-zero scoring bug in the reweighting engine |
 | **v1.5.2** | Reliability & Consistency — buildability stage budget + concurrent fetches (fixes live 240s timeouts), deterministic stage planning & templated objective (identical prompt → identical plan), small-format grocery archetype fix, block-scale res-10 grids on request, screening→refined score transparency |

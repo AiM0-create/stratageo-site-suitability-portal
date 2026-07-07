@@ -1501,6 +1501,26 @@ body {
   border-color: var(--gray-300, #cbd5e1); background: #fff; outline: none;
 }
 
+/* v1.6.3 — H3 grid-level picker (7/8) on the plan card */
+.spec-grid-picker { display: inline-flex; align-items: center; gap: 0; vertical-align: middle; }
+.spec-grid-choice {
+  padding: 1px 8px; font-size: 10.5px; font-weight: 600; cursor: pointer;
+  color: var(--gray-500, #64748b); background: #fff;
+  border: 1px solid var(--gray-300, #cbd5e1);
+}
+.spec-grid-choice:first-child { border-radius: 4px 0 0 4px; }
+.spec-grid-choice:nth-child(2) { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.spec-grid-choice:hover { background: #f1f5f9; }
+.spec-grid-choice-active {
+  color: #fff; background: var(--blue-600, #2563eb);
+  border-color: var(--blue-600, #2563eb); position: relative; z-index: 1;
+}
+.spec-grid-choice-active:hover { background: var(--blue-700, #1d4ed8); }
+.spec-grid-current {
+  margin-left: 6px; font-size: 10px; font-weight: 700;
+  color: var(--blue-700, #1d4ed8);
+}
+
 /* ─── Consultant plan card (v1.0.1.2) ─── */
 .spec-card-methodology {
   margin: 4px 0 6px; padding: 6px 8px; font-size: 11px; line-height: 1.45;

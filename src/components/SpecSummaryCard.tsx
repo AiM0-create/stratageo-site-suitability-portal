@@ -26,6 +26,15 @@ const SCALE_LABELS: Record<string, string> = {
   city_then_micro: 'City → micro-market',
 };
 
+// v1.6.3 — the two grid levels the customer can choose on the plan card.
+// Level 8 is the engine default; level 7 is a coarser, faster district-scale
+// screen. (The backend still honors a res-10 block-granularity prompt
+// override until the customer picks a level explicitly.)
+const GRID_LEVEL_CHOICES: Array<{ res: number; label: string; hint: string }> = [
+  { res: 7, label: 'Level 7', hint: '~5.2 km² hexes — district-scale screening, fastest' },
+  { res: 8, label: 'Level 8', hint: '~0.74 km² hexes — neighbourhood-scale (default)' },
+];
+
 const FEASIBILITY_META: Record<string, { icon: string; label: string; cls: string }> = {
   feasible: { icon: '✅', label: 'Feasible', cls: 'feasible' },
   tradeoffs: { icon: '⚠️', label: 'Feasible with tradeoffs', cls: 'tradeoffs' },
@@ -69,6 +78,17 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
       weightsAdjustedByUser: true,
     };
     onSpecEdit(updated);
+  };
+
+  // v1.6.3 — customer picks the H3 grid level (7 or 8). Flagged so the
+  // backend preserves the choice across chat turns (like the weight sliders).
+  const handleGridResChange = (res: number) => {
+    if (!onSpecEdit || (res !== 7 && res !== 8) || spec.grid.resolution === res) return;
+    onSpecEdit({
+      ...spec,
+      grid: { ...spec.grid, resolution: res },
+      gridResolutionAdjustedByUser: true,
+    });
   };
 
   const area =
@@ -154,7 +174,37 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
         </div>
       )}
       <div className="spec-card-row">Study area: {area}</div>
-      <div className="spec-card-row">Grid: H3 res {spec.grid.resolution} &middot; Top {spec.output?.topN ?? 3} results</div>
+      <div className="spec-card-row spec-grid-row">
+        Grid:{' '}
+        {onSpecEdit && !blocked ? (
+          <span className="spec-grid-picker" role="radiogroup" aria-label="H3 grid level">
+            {GRID_LEVEL_CHOICES.map(g => (
+              <button
+                key={g.res}
+                type="button"
+                role="radio"
+                aria-checked={spec.grid.resolution === g.res}
+                className={`spec-grid-choice${spec.grid.resolution === g.res ? ' spec-grid-choice-active' : ''}`}
+                title={g.hint}
+                onClick={() => handleGridResChange(g.res)}
+              >
+                {g.label}
+              </button>
+            ))}
+            {spec.grid.resolution !== 7 && spec.grid.resolution !== 8 && (
+              <span
+                className="spec-grid-current"
+                title="Set from your prompt wording — pick a level to override"
+              >
+                res {spec.grid.resolution}
+              </span>
+            )}
+          </span>
+        ) : (
+          <>H3 res {spec.grid.resolution}</>
+        )}
+        {' '}&middot; Top {spec.output?.topN ?? 3} results
+      </div>
 
       {/* ── Consultant assumptions (yellow) ── */}
       {(plan?.assumptions?.length ?? 0) > 0 && (

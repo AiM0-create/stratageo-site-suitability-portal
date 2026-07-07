@@ -60,6 +60,10 @@ export interface SpecV2 {
   /** v1.6.0 (Phase 2) — archetype default weights (name → weight), recorded by
    *  the deterministic planner for the default-vs-adjusted audit. */
   canonicalWeights?: Record<string, number>;
+  /** v1.6.3 — set true when the customer picks an H3 grid level (7 or 8) on
+   *  the plan card; the backend then preserves that resolution across chat
+   *  turns instead of re-applying the archetype default. */
+  gridResolutionAdjustedByUser?: boolean;
   version: '2.0';
   objective: string;
   businessType: string;

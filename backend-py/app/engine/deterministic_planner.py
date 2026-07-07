@@ -424,3 +424,30 @@ def preserve_user_weights(new_spec: dict, incoming_spec: dict | None) -> dict:
         new_spec["weightsSource"] = "user_adjusted"
         # canonical defaults stay untouched on new_spec for the audit trail
     return new_spec
+
+
+def preserve_user_grid_resolution(new_spec: dict, incoming_spec: dict | None) -> dict:
+    """v1.6.3 — keep the customer's H3 grid-level choice across chat turns.
+
+    Mirrors preserve_user_weights(): the deterministic planner re-applies the
+    archetype default resolution (8) — and the block-granularity override
+    (10) — on EVERY chat turn, so a customer who picked level 7 or 8 on the
+    plan card and then typed another message would have that choice silently
+    wiped. If the incoming (client) spec is flagged gridResolutionAdjustedByUser
+    and carries one of the two offered levels (7 or 8), copy it onto the
+    freshly planned spec and keep the flag. An explicit UI choice also wins
+    over the prompt-wording res-10 override — the customer saw the plan card
+    and picked a level on purpose. polyfill() still auto-degrades (with a
+    recorded note) if the study area would explode the hex budget.
+    """
+    if not isinstance(new_spec, dict) or not isinstance(incoming_spec, dict):
+        return new_spec
+    if not incoming_spec.get("gridResolutionAdjustedByUser"):
+        return new_spec
+    res = (incoming_spec.get("grid") or {}).get("resolution")
+    if res in (7, 8):
+        new_spec.setdefault("grid", {})
+        new_spec["grid"]["type"] = new_spec["grid"].get("type", "h3")
+        new_spec["grid"]["resolution"] = int(res)
+        new_spec["gridResolutionAdjustedByUser"] = True
+    return new_spec

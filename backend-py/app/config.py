@@ -87,6 +87,15 @@ v1.6.2: Smart water/buildability relevance — fixes a live-observed failure
   closing the actual timeout risk broader triggering would otherwise have
   introduced. Pinned by a real-wall-clock regression test, not just a
   mask-correctness check.
+v1.6.3: H3 grid-level choice — the default analysis grid coarsens from
+  resolution 9 (~0.10 km² hexes) to resolution 8 (~0.74 km² hexes), and the
+  plan card now lets the customer choose between level 7 (~5.2 km²,
+  district-scale, fastest) and level 8 (~0.74 km², neighbourhood-scale,
+  default) before running. The choice is flagged
+  (gridResolutionAdjustedByUser) and PRESERVED across chat turns by the
+  deterministic planner (mirroring the Phase-2 weight sliders), and an
+  explicit UI choice wins over the prompt-wording res-10 block-granularity
+  override. polyfill() auto-degrade and the 7–10 spec clamp are unchanged.
 """
 from functools import lru_cache
 from typing import Literal
@@ -94,17 +103,18 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.6.2"
+APP_VERSION     = "1.6.3"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00061"
+ENGINE_VERSION  = "stratageo-engine-00062"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
-# v1.6.0/v1.6.1/v1.6.2 — the SpecV2 wire schema and the EvidenceTrail schema
-# are structurally unchanged; hardConstraintVerification / screeningScore /
-# rankingBasis / canonicalWeights / weightsAdjustedByUser / unifiedConfidence
-# are additive keys outside these versioned contracts.
+# v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
+# schema are structurally unchanged; hardConstraintVerification /
+# screeningScore / rankingBasis / canonicalWeights / weightsAdjustedByUser /
+# unifiedConfidence / gridResolutionAdjustedByUser are additive keys outside
+# these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Smart Water/Buildability Relevance"
+RELEASE_NAME    = "H3 Grid-Level Choice (7/8, default 8)"
 
 
 class Settings(BaseSettings):

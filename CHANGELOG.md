@@ -4,6 +4,60 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.6.3] — 2026-07-07 — H3 Grid-Level Choice (7/8, default 8)
+
+Backend + frontend release: the engine default changes and the plan card
+gains a control, so both sides ship together (`package.json` and the UI's
+`v…` badge move to 1.6.3).
+
+### Changed
+- **Default analysis grid coarsened from H3 resolution 9 to resolution 8.**
+  Every canonical archetype (`canonical_archetypes.py`), the `Grid` model
+  default (`models/spec.py`), the LLM consultant's stated default
+  (`prompts.py`), and the evidence-trail fallbacks now use resolution 8
+  (~0.74 km² hexes, ~461 m edge) instead of 9 (~0.10 km² hexes, ~174 m edge).
+  Fewer cells per study area → faster runs and more headroom for the
+  provider stages. `LARGE_FORMAT_RETAIL` was already 8.
+
+### Added
+- **Plan-card grid-level picker (frontend)** — the "Grid:" row on the
+  Analysis Plan card is now a two-option segmented control: **Level 7**
+  (~5.2 km² hexes — district-scale screening, fastest) or **Level 8**
+  (~0.74 km² hexes — neighbourhood-scale, the default). Tooltips explain the
+  tradeoff. If the backend set a different resolution (e.g. the res-10
+  block-granularity prompt override), that value is shown beside the picker
+  until the customer picks a level.
+- **`gridResolutionAdjustedByUser` spec flag + preservation guard**
+  (`preserve_user_grid_resolution()` in `deterministic_planner.py`, wired in
+  `llm.py`) — mirrors the v1.6.0 weight-slider guarantee: the deterministic
+  planner re-applies the archetype default resolution on every chat turn, so
+  without this guard a customer who picked a level and then typed another
+  message would have the choice silently wiped. An explicit UI choice also
+  wins over the res-10 block-granularity override. The guard only trusts the
+  two offered levels (7/8); the SpecV2 7–10 clamp and `polyfill()`
+  auto-degrade (with recorded note) are unchanged.
+
+### Tests
+- New `tests/test_v163_grid_choice.py` (9 tests): default is 8 in the Grid
+  model / every archetype / an end-to-end planned spec; a user's level-7
+  choice survives a replan; the choice wins over the block-granularity
+  override; the override still applies when no choice was made; flagged but
+  unoffered resolutions (5/9/10/None/"8") are ignored; malformed incoming
+  specs are tolerated.
+- Updated: archetype-default assertion in `test_v152_reliability.py` (9→8),
+  version assertions.
+
+### Validation
+- Backend: **594 passed** (585 + 9 new).
+- Frontend: `tsc --noEmit` clean, Vitest **66 passed**, `vite build` clean.
+
+### Deploy
+- Backend: Cloud Run revision `stratageo-engine-00062-…` (see tag below).
+- Tag `rollback-pre-v1.6.3` points at the previously-live commit (`5f46c50`,
+  backend revision `stratageo-engine-00061-fzz`).
+
+---
+
 ## [Unreleased — housekeeping] — 2026-07-07 — Repo Cleanup
 
 No `APP_VERSION` bump and no backend redeploy: nothing in `backend-py/app/`

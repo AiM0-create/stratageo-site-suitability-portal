@@ -117,7 +117,7 @@ class StudyAreaEvidence(BaseModel):
     label: str = ""
     geometryType: str = "polygon"
     geometryHash: str = ""
-    h3Resolution: int = 9
+    h3Resolution: int = 8
     h3CellCountBeforeMasks: int = 0
     h3CellCountAfterMasks: int = 0
     bounds: dict[str, float] | None = None

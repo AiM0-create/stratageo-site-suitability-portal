@@ -19,7 +19,11 @@ from .archetypes import ARCHETYPE_PLAYBOOK
 from .prompts import chat_system_prompt
 from ..engine.intent_parser import parse_raw_intent
 from ..engine.canonical_archetypes import resolve_canonical_archetype
-from ..engine.deterministic_planner import apply_deterministic_plan, preserve_user_weights
+from ..engine.deterministic_planner import (
+    apply_deterministic_plan,
+    preserve_user_grid_resolution,
+    preserve_user_weights,
+)
 from ..config import APP_VERSION, ENGINE_VERSION
 
 logger = logging.getLogger(__name__)
@@ -108,7 +112,7 @@ def _backfill_plan(spec: dict) -> None:
                 "basis": "selected by the consultant from the request and domain knowledge",
             })
         if not any("default" in (a.get("assumption") or "").lower() for a in assumptions):
-            res = ((spec.get("grid") or {}).get("resolution")) or 9
+            res = ((spec.get("grid") or {}).get("resolution")) or 8
             top_n = ((spec.get("output") or {}).get("topN")) or 3
             assumptions.append({
                 "assumption": f"Engine defaults applied: H3 resolution {res}, top {top_n} results, isochrone refinement on",
@@ -350,6 +354,11 @@ async def chat_turn(
             # plan card must not have them wiped when this turn re-applies
             # archetype defaults; preserve them from the incoming client spec.
             new_spec = preserve_user_weights(
+                new_spec, spec if isinstance(spec, dict) else None,
+            )
+            # v1.6.3 — same guarantee for the plan card's H3 level picker
+            # (7/8): the customer's choice survives later chat turns.
+            new_spec = preserve_user_grid_resolution(
                 new_spec, spec if isinstance(spec, dict) else None,
             )
             logger.info(

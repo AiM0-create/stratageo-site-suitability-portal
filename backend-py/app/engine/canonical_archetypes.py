@@ -179,7 +179,7 @@ STUDENT_QSR_CAFE = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="student_catchment_proxy",
@@ -257,7 +257,7 @@ GENERIC_QSR_CAFE = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="pedestrian_footfall",
@@ -314,7 +314,7 @@ PREMIUM_RESTAURANT = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="affluent_residential_catchment",
@@ -383,7 +383,7 @@ DARK_KITCHEN = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="residential_delivery_demand",
@@ -442,7 +442,7 @@ CLINIC_HEALTHCARE = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="residential_population",
@@ -498,7 +498,7 @@ WAREHOUSE_LOGISTICS = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="highway_arterial_access",
@@ -556,7 +556,7 @@ EV_CHARGING = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="highway_arterial_proximity",
@@ -615,7 +615,7 @@ RETAIL_STORE = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="pedestrian_footfall",
@@ -671,7 +671,7 @@ PRESCHOOL_SCHOOL = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="young_family_residential",
@@ -791,7 +791,7 @@ GENERIC_FALLBACK = CanonicalArchetype(
     site_claim_level="micro_market_zone",
     recommendation_mode_default="candidate_zones",
     top_n_default=3,
-    grid_resolution=9,
+    grid_resolution=8,  # v1.6.3 — default coarsened from 9; plan card offers level 7 or 8
     factors=(
         CanonicalFactor(
             key="demand_density_proxy",

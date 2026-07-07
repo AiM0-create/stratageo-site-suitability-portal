@@ -1483,7 +1483,7 @@ const App: React.FC = () => {
           return [{
             title: '7. Evidence Appendix (v1.3.0) — AUDIT REPRODUCIBLE',
             body: [
-              `Evidence version: ${et.evidenceVersion}  |  Snapshot: ${et.dataSnapshot?.snapshotId || 'n/a'}  |  Provider mode: ${et.dataSnapshot?.providerMode || 'live'}  |  Study area geometry hash: ${et.studyArea?.geometryHash || 'n/a'}  |  H3 resolution: ${et.studyArea?.h3Resolution || 9}`,
+              `Evidence version: ${et.evidenceVersion}  |  Snapshot: ${et.dataSnapshot?.snapshotId || 'n/a'}  |  Provider mode: ${et.dataSnapshot?.providerMode || 'live'}  |  Study area geometry hash: ${et.studyArea?.geometryHash || 'n/a'}  |  H3 resolution: ${et.studyArea?.h3Resolution || 8}`,
               `H3 cells before masks: ${et.studyArea?.h3CellCountBeforeMasks || '?'}  |  Candidate exclusions: ${candExcl}  |  Valid recommendations: ${et.recommendationSummary?.validRecommendationCount ?? '?'}  |  Excluded candidates: ${et.recommendationSummary?.excludedCandidateCount ?? '?'}`,
               `PROVIDER QUERIES: ${providerSummary}`,
               `FACTOR SCHEMA: ${factorSummary}`,

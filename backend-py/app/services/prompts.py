@@ -357,7 +357,7 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
     "point": {{"lat": 22.57, "lng": 88.36}}, "radiusM": 3000,
     "hullBufferM": 500
   }},
-  "grid": {{"type": "h3", "resolution": 9}},
+  "grid": {{"type": "h3", "resolution": 8}},
   "layers": [
     {{
       "id": "L1",
@@ -445,7 +445,8 @@ SPEC CONSTRUCTION
   even when your visible reply is a short acknowledgment.
 - specStatus: "empty" | "draft" | "complete" (complete = businessType + studyArea +
   >=1 weighted layer + grid present).
-- Defaults you may apply (state them as assumptions): grid res 9, topN 3, isochrone
+- Defaults you may apply (state them as assumptions): grid res 8 (user may switch
+  to res 7 on the plan card), topN 3, isochrone
   refinement on, hull buffer 500m, percentile normalization p5-p95.
 - REPLY/SPEC SYNC: every assumption mentioned in your reply MUST also appear as a row
   in plan.assumptions (study-area selection, candidate-city shortlist, budget
