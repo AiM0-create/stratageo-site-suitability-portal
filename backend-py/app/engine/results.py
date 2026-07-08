@@ -15,6 +15,7 @@ from ..config import get_settings
 from ..models.spec import SpecV2
 from .grid import HexCell
 from .scoring import LayerScores, composite_for_hex, normalize
+from .scoring import tx as scoring_tx
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,14 @@ def _catchment_label(layer) -> str:
     c = layer.catchment
     if c.type == "euclidean":
         return f"{c.meters}m radius"
+    # v1.7.1 — a drive catchment WITHOUT traffic awareness is a free-flow
+    # estimate, which drastically overstates reach in congested Indian metros
+    # (a free-flow "10-min drive" can be 30 real minutes). Say so, every time.
+    if c.type == "drive":
+        return (f"{c.minutes}-min drive (typical traffic)"
+                if getattr(c, "trafficAware", False)
+                else f"{c.minutes}-min drive (FREE-FLOW estimate — congested-city "
+                     "reach is substantially smaller)")
     return f"{c.minutes}-min {c.type}"
 
 
@@ -252,7 +261,7 @@ def build_hex_grid(hexes: list[HexCell], composite, excluded, scores=None) -> li
         if layer_list:
             cell["layerScores"] = {
                 ls.layer.name: round(float(
-                    normalize(float(ls.raw[i]), ls.norm_low, ls.norm_high, ls.layer.direction)
+                    normalize(float(scoring_tx(ls.layer, ls.raw[i])), ls.norm_low, ls.norm_high, ls.layer.direction)
                 ) * 10, 1)
                 for ls in layer_list
             }
@@ -332,7 +341,15 @@ def build_methodology(spec: SpecV2, hex_count: int, res: int, refined: bool, fal
     parts += [
         f"H3 hexagonal grid at resolution {res} ({hex_count} cells) over the study area.",
         f"{len(spec.layers)} weighted layers scored per hex with "
-        f"{spec.layers[0].normalization.method} normalization; weighted-sum composite (weights preserved from spec).",
+        f"{spec.layers[0].normalization.method} normalization "
+        f"(linear stretch between the {spec.layers[0].normalization.pLow:.0f}th and "
+        f"{spec.layers[0].normalization.pHigh:.0f}th percentile of observed values"
+        + ("; values log-transformed first" if spec.layers[0].normalization.method == "log_percentile" else "")
+        + "); weighted-sum composite (weights preserved from spec). "
+        "Map display: continuous (unclassed) choropleth — colors are contrast-stretched "
+        "linearly across the observed score range; no class breaks "
+        "(Jenks / quantile / equal-interval) are applied, so equal score "
+        "differences always map to equal color differences.",
     ]
     if iso_layers:
         parts.append(

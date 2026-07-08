@@ -4,6 +4,71 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.7.1] — 2026-07-08 — Stress-Test Battery (traffic-aware, prompt weights, named exclusions)
+
+Backend-only. Applied from the boss's v171 patch — only the genuinely-new
+content was taken (the patch's v1.6.4–v1.7.0 half was already on master), so
+our v1.6.8 PDF basemap work was left untouched.
+
+### Changed
+- **Drive catchments are now traffic-aware by default** for every playbook
+  that uses them (large-format retail, dark kitchen, warehouse, clinic,
+  premium restaurant). The free-flow ORS isochrone massively overstates
+  reach in congested Indian metros — observed live: Sealdah (~30 real minutes
+  from Sector V) sat inside a "10-min" free-flow drive, and inflated a
+  "10,360 competing supermarkets within 10-min drive" count. Pass-B
+  refinement now routes drive catchments through Google Routes with
+  typical-traffic times for the shortlist (bounded cost). Pass-A screening
+  stays the labeled Euclidean proxy.
+
+### Added
+- **Free-flow honesty label** — any drive catchment that is NOT traffic-aware
+  (older specs, or the ORS fallback when Google Routes is down) now reads
+  "N-min drive (FREE-FLOW estimate — congested-city reach is substantially
+  smaller)" everywhere it appears; a traffic-aware one reads "N-min drive
+  (typical traffic)".
+- **Prompt-stated factor weights** — "Rank them on 'Student Population'
+  (Weight: 0.7) and 'Low Rent' (Weight: 0.3)" is parsed, fuzzy-matched to
+  the framework's factors, applied, and audited as `weightsSource=user_prompt`
+  (distinct from registry defaults). An unmatchable request ('Low Rent' — rent
+  has no spatial data source and is never scored) is disclosed in a note and
+  in `promptWeightUnmatched`, never silently eaten.
+- **Named-place exclusions** — "I already have branches in Colaba and Worli …
+  exclude my existing areas" is parsed deterministically (BOTH an
+  exclude-existing phrase AND an ownership-context branches-in-places phrase
+  must fire, so "a gym in South Mumbai" never matches), each place geocoded
+  and buffer-masked (1.5 km), disclosed in the notes with coordinates and
+  cell counts. A place that can't be geocoded is flagged NOT enforced, never
+  silently dropped. Sentence boundaries are respected ("I have stores in
+  Bandra. And I love pizza." captures only Bandra).
+- **Rent/floor-area feasibility note** — when a rent or parcel-size constraint
+  appears, the result notes state explicitly that the system holds no
+  rent-market/parcel-size data, so it cannot judge (nor rule out) whether the
+  requirement is achievable; the ranked zones satisfy the VERIFIABLE
+  constraints only and are a shortlist to test in the field. Honest posture —
+  never fabricated market knowledge.
+
+### Fixed (completes a v1.7.0 display detail)
+- The map's per-factor `layerScores` colors now use the same log transform as
+  the composite (they were still linear), and the methodology text spells out
+  the log-space percentile stretch ("values log-transformed first").
+
+### Tests
+- 8 new backend tests (prompt-weight parsing + spec application + unmatched
+  disclosure; named-exclusion extraction + own-location non-match + spec
+  reach; traffic-aware-by-default + free-flow label).
+
+### Validation
+- Backend: **629 passed** (621 + 8 new). Frontend: `tsc` clean, Vitest **75
+  passed**, unaffected (backend-only change).
+
+### Deploy
+- Backend: Cloud Run revision `stratageo-engine-00067-…` (see tag below).
+- Tag `rollback-pre-v1.7.1` points at the previously-live commit (`3031c5b`,
+  backend revision `stratageo-engine-00066-g9l`).
+
+---
+
 ## [1.7.0] — 2026-07-08 — Scoring Standard v1 (log-space normalization)
 
 Backend-only. A deliberate **pre-launch** scoring decision, applied from the

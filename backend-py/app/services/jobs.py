@@ -51,6 +51,7 @@ from ..engine.uploaded_candidates import (
 )
 from ..engine.evidence_builder import QueryTracker, assemble_evidence_trail
 from ..engine.constraint_policy import evaluate_constraint_policy, downgrade_status_for_unverified
+from ..engine.constraint_policy import _RENT_RE as _RENT_NOTE_RE, _FOOTPRINT_RE as _FLOOR_NOTE_RE
 from ..engine.reliability_critic import run_deterministic_critic, merge_with_llm_critic
 from ..engine.metro import (
     resolve_metro_stations,
@@ -1375,6 +1376,38 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 f"Water overlap mask removed {n_overlap} hex(es) with >30% water area."
             )
 
+    # ── v1.7.1: named-place exclusions (user's existing sites) ─────────
+    # "exclude my existing areas" with named branches: geocode each place
+    # (coarse country/state matches already rejected by the geocoder) and
+    # mask every cell within the buffer. A place that cannot be geocoded is
+    # disclosed as NOT enforced — never silently dropped.
+    for _ne in (getattr(spec, "namedExclusions", None) or []):
+        _ne_name = str(_ne.get("name", "")).strip()
+        _ne_buf = float(_ne.get("bufferM", 1500))
+        if not _ne_name:
+            continue
+        try:
+            _pt = await geocode(_ne_name)
+        except Exception:
+            _pt = None
+        if not _pt:
+            fallbacks.append(
+                f"Named exclusion '{_ne_name}' could not be geocoded — this "
+                "exclusion was NOT enforced (treat nearby candidates with care)."
+            )
+            continue
+        _ne_mask = np.array([
+            scoring.haversine_m(h.lat, h.lng, _pt[0], _pt[1]) <= _ne_buf for h in hexes
+        ], dtype=bool)
+        _n_ne = int(_ne_mask.sum())
+        excluded |= _ne_mask
+        mask_stats[f"namedExclusion:{_ne_name}"] = _n_ne
+        notes.append(
+            f"Excluded your existing site area '{_ne_name}' "
+            f"({_pt[0]:.4f}, {_pt[1]:.4f}) — {_n_ne} cell(s) within "
+            f"{int(_ne_buf)} m removed from consideration."
+        )
+
     # ── 4e (apply phase). Buildability / no-construction masks (v1.0.3) ──
     # Hard-exclude obvious no-build land for waterfront + commercial briefs:
     # railway land, ghats, heritage/protected/sacred, open space. OSM is incomplete
@@ -1914,6 +1947,36 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # v1.6.8 — when the user never asked for a count, say the default was
     # applied and point at the grid ranks (user-reported: "I didn't ask for
     # top X — why am I seeing ranked candidates?").
+    # v1.7.1 — feasibility honesty for numeric unvalidatable constraints
+    # (canonical stress test #3: "primary arterial + rent ≤ ₹20/sq ft" in
+    # Sector V). Declaring the filters "mutually exclusive" would require
+    # rent-market data the system does not hold — that would be fabrication.
+    # The honest posture: verify what is verifiable, and say EXPLICITLY that
+    # the system cannot judge the rent/size cap's feasibility, so the
+    # shortlist is zones to TEST against it, never zones known to meet it.
+    _raw_prompt_text = (
+        getattr(getattr(spec, "rawIntent", None), "rawPrompt", "") or ""
+    ) + " " + (spec.objective or "")
+    if _RENT_NOTE_RE.search(_raw_prompt_text) or _FLOOR_NOTE_RE.search(_raw_prompt_text):
+        notes.append(
+            "Feasibility note: this analysis holds no rent/lease-market or "
+            "parcel-size data, so it CANNOT judge whether your stated "
+            "rent/floor-area requirements are achievable in this area — nor "
+            "rule them out. The ranked zones satisfy the VERIFIABLE "
+            "constraints only; treat them as a shortlist to test against your "
+            "commercial requirements in the field."
+        )
+    if getattr(spec, "weightsAdjustedByUser", False):
+        notes.append(
+            "Factor weights were set from your prompt/adjustments (see the "
+            "Factor Weight Audit — defaults vs applied)."
+        )
+    for _uw in (getattr(spec, "promptWeightUnmatched", None) or []):
+        notes.append(
+            f"Weight request '{_uw}' could not be applied: it does not match "
+            "any scoreable factor in this framework (rent/price, for example, "
+            "has no spatial data source and is never scored — only disclosed)."
+        )
     if getattr(spec, "searchRadiusOverrideM", None):
         notes.append(
             f"Search radius set to {spec.searchRadiusOverrideM} m from your prompt "

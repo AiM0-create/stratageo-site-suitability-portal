@@ -130,6 +130,91 @@ def parse_radius_override_m(raw_prompt: str) -> int | None:
     return int(max(200, min(5000, meters)))
 
 
+# v1.7.1 — explicit factor weights stated in the prompt, e.g.
+#   "Rank them primarily on 'Student Population' (Weight: 0.7) and
+#    'Low Rent' (Weight: 0.3)"
+# The MCDA math must be driven by the customer's stated priorities, not
+# silently overridden by archetype defaults (canonical stress test #8).
+_PROMPT_WEIGHT_RE = re.compile(
+    r"['\u2018\u2019\"]?([A-Za-z][A-Za-z /&()-]{2,40}?)['\u2018\u2019\"]?\s*"
+    r"\(\s*weight(?:age)?\s*[:=]?\s*(\d*\.?\d+)\s*%?\s*\)",
+    re.I,
+)
+
+# v1.7.1 — named-place exclusions (canonical stress test #5):
+#   "I already have branches in Colaba and Worli ... exclude my existing areas"
+# Two deterministic signals must BOTH fire: an exclude-existing phrase, and a
+# branches/outlets/stores-in-<places> phrase naming the places.
+_EXCLUDE_EXISTING_RE = re.compile(
+    r"\bexclud\w+\s+(?:my\s+)?(?:the\s+)?existing\b"
+    r"|\bavoid\s+(?:my\s+)?existing\b|\bnot\s+near\s+(?:my\s+)?existing\b",
+    re.I,
+)
+_BRANCHES_IN_RE = re.compile(
+    # ownership context required ("have / my / our / existing ... branches in")
+    # so the business's own location ("a gym in South Mumbai") never matches.
+    r"\b(?:have|my|our|existing)\s+(?:\w+\s+){0,2}?"
+    r"(?:branch(?:es)?|outlet[s]?|store[s]?|location[s]?|gym[s]?|shop[s]?|site[s]?)\s+"
+    r"(?:in|at)\s+((?:[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*)?)(?:\s*(?:,|and)\s*"
+    r"(?:[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*)?)){0,6})",
+)
+
+
+def parse_named_exclusions(raw_prompt: str) -> list[str]:
+    """Return the place names the user wants excluded (their existing sites)."""
+    if not _EXCLUDE_EXISTING_RE.search(raw_prompt or ""):
+        return []
+    m = _BRANCHES_IN_RE.search(raw_prompt or "")
+    if not m:
+        return []
+    captured = re.split(r"[.;!?\n]", m.group(1))[0]   # never cross a sentence boundary
+    parts = re.split(r"\s*(?:,|\band\b)\s*", captured)
+    out, seen = [], set()
+    for name in parts:
+        name = name.strip(" .,-")
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
+_STOP_TOKENS = {"the", "a", "an", "of", "and", "or", "to", "in", "for", "low",
+                "high", "density", "proxy", "index", "score"}
+
+
+def parse_prompt_weights(raw_prompt: str) -> dict[str, float]:
+    """Return {stated factor name: weight} from '(Weight: 0.7)'-style prompts.
+    Percent values (70%) are normalized to fractions. Order preserved."""
+    out: dict[str, float] = {}
+    for m in _PROMPT_WEIGHT_RE.finditer(raw_prompt or ""):
+        name = m.group(1).strip(" '\"\u2018\u2019-")
+        try:
+            w = float(m.group(2))
+        except ValueError:
+            continue
+        if w > 1.0:          # "70" / "70%" style
+            w = w / 100.0
+        if not name or w <= 0 or w > 1.0:
+            continue
+        out[name] = w
+    return out
+
+
+def _match_layer_for_stated_name(name: str, layers: list[dict]) -> dict | None:
+    """Fuzzy match a stated factor name to a spec layer by significant-token
+    overlap (e.g. 'Student Population' → 'Student catchment proxy')."""
+    toks = {t for t in re.split(r"[^a-z]+", name.lower()) if len(t) >= 4 and t not in _STOP_TOKENS}
+    if not toks:
+        return None
+    best, best_n = None, 0
+    for l in layers:
+        ltoks = {t for t in re.split(r"[^a-z]+", str(l.get("name", "")).lower()) if len(t) >= 4}
+        n = len(toks & ltoks)
+        if n > best_n:
+            best, best_n = l, n
+    return best if best_n > 0 else None
+
+
 # v1.5.2 — user asked for block/intersection-level output → res-10 grid.
 _BLOCK_GRANULARITY_RE = re.compile(
     r"\b(intersections?|blocks?|street\s+corners?|street[- ]level|corner\s+plots?)\b",
@@ -320,6 +405,34 @@ def apply_deterministic_plan(
         l["name"]: round(float(l.get("weight", 0.0)), 4) for l in merged_layers
     }
 
+    # v1.7.1 — apply explicit prompt weights (deterministic; audited).
+    _stated = parse_prompt_weights(intent.rawPrompt or "")
+    if _stated:
+        matched_total = 0.0
+        matched_ids: set[str] = set()
+        unmatched: list[str] = []
+        for _name, _w in _stated.items():
+            _lay = _match_layer_for_stated_name(_name, merged_layers)
+            if _lay is None or _lay.get("id") in matched_ids:
+                unmatched.append(f"{_name} ({_w:g})")
+                continue
+            _lay["weight"] = _w
+            matched_ids.add(_lay.get("id"))
+            matched_total += _w
+        if matched_ids:
+            # Unmatched layers share the leftover mass proportionally, with a
+            # small positive floor (Layer.weight must be > 0). The SpecV2
+            # validator renormalizes, so ratios are what matters.
+            rest = [l for l in merged_layers if l.get("id") not in matched_ids]
+            leftover = max(0.0, 1.0 - matched_total)
+            rest_sum = sum(float(l.get("weight", 0.0)) for l in rest) or 1.0
+            for l in rest:
+                l["weight"] = max(0.01, float(l.get("weight", 0.0)) / rest_sum * leftover) if leftover > 0 else 0.01
+            spec["weightsAdjustedByUser"] = True
+            spec["weightsSource"] = "user_prompt"
+        if unmatched:
+            spec["promptWeightUnmatched"] = unmatched
+
     # 2. Lock output.topN to RawIntent value
     resolved_top_n = intent.topN.get("topNResolved", canonical.top_n_default)
     spec.setdefault("output", {})
@@ -348,6 +461,14 @@ def apply_deterministic_plan(
             if isinstance(_c, dict) and _c.get("type") == "euclidean":
                 _c["meters"] = _radius_m
         spec["searchRadiusOverrideM"] = _radius_m
+
+    # 3a-ter. v1.7.1 — named-place exclusions from the prompt (buffered and
+    # masked at run time; geocoded coordinates never guessed).
+    _excl_names = parse_named_exclusions(intent.rawPrompt or "")
+    if _excl_names:
+        spec["namedExclusions"] = [
+            {"name": n, "bufferM": 1500} for n in _excl_names
+        ]
 
     # 3b. v1.5.2 — canonical objective. The LLM re-phrased the objective
     # differently for the IDENTICAL prompt across runs ("3 candidate
@@ -388,7 +509,9 @@ def apply_deterministic_plan(
     spec.update({
         "planningMode": "deterministic",
         "archetypeSource": "deterministic_registry",
-        "weightsSource": "deterministic_registry",
+        # v1.7.1 — prompt-stated weights must not be relabeled as registry
+        # defaults; the audit trail depends on this distinction.
+        "weightsSource": spec.get("weightsSource", "deterministic_registry"),
         "constraintsSource": "raw_intent_parser_plus_validator",
         "llmRole": "explanation_only",
         "planningFingerprint": pf,

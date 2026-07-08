@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.7.0 — Scoring Standard v1 (log-space normalization)**
+**Current version: v1.7.1 — Stress-Test Battery (traffic-aware, prompt weights, named exclusions)**
 
 ---
 
@@ -20,6 +20,15 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.7.1 Highlights
+
+- **Drive catchments are traffic-aware by default** — the free-flow isochrone overstated reach in congested metros (a "10-min drive" reaching a real 30-min-away station); drive layers now refine through typical-traffic routing, and any remaining free-flow estimate is labeled as such honestly.
+- **State factor weights in the prompt** — "'Student Population' (Weight: 0.7)" is parsed, matched to the framework, applied, and audited as user-set; an unscoreable request (rent) is disclosed, not silently dropped.
+- **Exclude your existing sites by name** — "I have branches in Colaba and Worli, exclude my existing areas" geocodes and buffer-masks each (1.5 km), disclosed with coordinates; ownership context is required so the business's own location never matches.
+- **Honest rent/size posture** — a rent or floor-area constraint now attaches an explicit note that the system holds no rent-market/parcel data, so the shortlist tests those requirements in the field rather than claiming to meet them.
 
 ---
 
@@ -237,7 +246,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (621 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (629 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -403,7 +412,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.7.0** *(current)* | Scoring Standard v1 — log-space (log_percentile) normalization is now the default for count factors, spreading the mid-range and removing linear-scale exaggeration; ordering preserved, test-locked, disclosed automatically |
+| **v1.7.1** *(current)* | Stress-Test Battery — traffic-aware drive catchments by default (+ free-flow honesty label), prompt-stated factor weights, named-place exclusions of existing sites, explicit rent/floor-area feasibility note |
+| **v1.7.0** | Scoring Standard v1 — log-space (log_percentile) normalization is now the default for count factors, spreading the mid-range and removing linear-scale exaggeration; ordering preserved, test-locked, disclosed automatically |
 | **v1.6.8** | Pune Run Fixes & Professional Report — city-extent study areas, prompt radius override, Places-New 400 guards, n=1 screening-basis scoring, basemap+north-arrow+legend in the PDF map, Latin-1-safe report text, placeholder/stale sections removed |
 | **v1.6.7** | Report Map & Weight-Responsive Grid Ranks — self-rendered map figure in the PDF, Google Maps links per zone, live grid ranks on hover, weight-sliders re-select a screening-basis top-X (explicitly unverified), relative-score transparency + spread-aware refit, shortfall notes name the responsible filter |
 | **v1.6.4** | Map Coherence & Coordinate Fidelity — candidate cells recoloured with final refined scores, grey context-only surface when the recommendation is withheld, prompt coordinates used verbatim + country-level geocode matches rejected, candidate-shortfall notes |
