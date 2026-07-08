@@ -988,6 +988,38 @@ const App: React.FC = () => {
       // ─── ASCII-safe direction labels (no Unicode arrows) ─────────────────────
       const dirTag = (dir: string) => dir === 'negative' ? '[-]' : '[+]';
 
+      // v1.6.8 — jsPDF's built-in Helvetica is Latin-1 only. Any string that
+      // reaches pdf.text() with characters outside it (em-dashes, arrows,
+      // superscripts — all common in backend note text) rendered as garbage
+      // with exploded letter-spacing (observed live on the evidence appendix
+      // page). Every string is now routed through this sanitizer via a
+      // pdf.text wrapper below.
+      const asciiSafe = (t: string): string => String(t)
+        .replace(/[—–]/g, '-')      // em/en dash
+        .replace(/[‘’ʼ]/g, "'") // curly apostrophes
+        .replace(/[“”]/g, '"')      // curly quotes
+        .replace(/→/g, '->')              // right arrow
+        .replace(/←/g, '<-')
+        .replace(/▲/g, '[+]').replace(/▼/g, '[-]')
+        .replace(/²/g, '2').replace(/³/g, '3')
+        .replace(/[×✕]/g, 'x')
+        .replace(/≈/g, '~').replace(/≥/g, '>=').replace(/≤/g, '<=')
+        .replace(/[•·]/g, '-')       // bullets
+        .replace(/…/g, '...')
+        .replace(/[✓✔]/g, 'OK')
+        .replace(/[^\x00-\xFF]/g, '');         // anything else non-Latin-1: drop
+      const _origPdfText = pdf.text.bind(pdf);
+      (pdf as any).text = (txt: any, ...rest: any[]) => _origPdfText(
+        typeof txt === 'string' ? asciiSafe(txt)
+          : Array.isArray(txt) ? txt.map(v => typeof v === 'string' ? asciiSafe(v) : v)
+          : txt,
+        ...rest,
+      );
+      // Plain-English labels for internal enum values that were leaking into
+      // the report verbatim (micro_market_zone, recommended_sites, ...).
+      const humanize = (s?: string | null) =>
+        (s || '').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+
       // ─── Colours ──────────────────────────────────────────────────────────────
       const C = {
         navy:   [29,  78, 216] as [number,number,number],
@@ -1101,8 +1133,8 @@ const App: React.FC = () => {
       y += 5;
       // v1.1.0 — version + model/cost metadata disclosure line
       const appVer = `App v${__APP_VERSION__}  Engine v${__APP_VERSION__}`;
-      const recMode = (result as any).recommendationMode ? `Mode: ${(result as any).recommendationMode}` : '';
-      const siteClm = (result as any).siteClaimLevel ? `Claim: ${(result as any).siteClaimLevel}` : 'Claim: micro_market_zone';
+      const recMode = (result as any).recommendationMode ? `Mode: ${humanize((result as any).recommendationMode)}` : '';
+      const siteClm = `Claim level: ${humanize((result as any).siteClaimLevel || 'micro_market_zone')}`;
       pdf.setFontSize(6.5); T(C.s5);
       pdf.text([appVer, recMode, siteClm, 'Preliminary screening — not legal/parcel/field due diligence'].filter(Boolean).join('   |   '), ml, y);
       y += 5;
@@ -1130,13 +1162,33 @@ const App: React.FC = () => {
       // ── Executive summary ──
       sectionHead('Executive Summary');
       // Use cw-10 to account for card indent and right margin — prevents cutoff
-      const sumLines = pdf.splitTextToSize(result.summary, cw - 10);
+      const sumLines = pdf.splitTextToSize(asciiSafe(result.summary), cw - 10);
       const maxSumLines = Math.min(sumLines.length, 8);
       const sumH = maxSumLines * 4.5 + 6;
       cardBg(sumH, C.s1, C.navy);
       pdf.setFontSize(8); pdf.setFont('helvetica','normal'); T(C.s7);
       pdf.text(sumLines.slice(0, maxSumLines), ml + 5, y + 5);
       y += sumH + 5;
+
+      // ── Key analysis notes (v1.6.8) — the audit log's most decision-relevant
+      // lines (study-area extent, radius overrides, candidate shortfalls,
+      // scoring-basis disclosures) belong on page 1, not buried in an appendix.
+      const allNotes: string[] = ((spec as any)?.parsingNotes ?? []).filter((n: any) => typeof n === 'string');
+      if (allNotes.length > 0) {
+        const keyNotes = allNotes.slice(0, 4).map(n => {
+          const lines = pdf.splitTextToSize(`- ${asciiSafe(n)}`, cw - 10);
+          return lines.slice(0, 2); // max 2 lines per note
+        });
+        const noteLineCount = keyNotes.reduce((s, l) => s + l.length, 0);
+        const notesH = noteLineCount * 4 + 8;
+        need(notesH + 8);
+        sectionHead(`Key Analysis Notes${allNotes.length > 4 ? ` (first 4 of ${allNotes.length} - full trail in the portal)` : ''}`);
+        cardBg(notesH, C.s1, C.s5);
+        pdf.setFontSize(7.5); pdf.setFont('helvetica','normal'); T(C.s7);
+        let ny = y + 5;
+        keyNotes.forEach(lines => { pdf.text(lines, ml + 5, ny); ny += lines.length * 4; });
+        y += notesH + 5;
+      }
 
       // ── Ranked locations table ──
       sectionHead('Ranked Locations Overview');
@@ -1192,35 +1244,9 @@ const App: React.FC = () => {
       });
       gap(5);
 
-      // ── v1.6.7: Study area map — the core visual deliverable ──
-      // Self-rendered analytical figure (choropleth + boundary + ranked
-      // pins + legend + scale bar). No basemap tiles: keeps the report free
-      // of tile-licensing/CORS issues and every pixel derives from the
-      // analysis itself.
-      try {
-        const fig = renderMapFigure({
-          hexGrid: (result as any).hexGrid ?? [],
-          locations: ranked,
-          studyAreaBoundary: (result as any).studyAreaBoundary,
-          withheld: (result as any).recommendationWithheld === true,
-          weightsAdjusted,
-        });
-        if (fig) {
-          const imgW = cw;
-          const imgH = imgW / fig.aspect;
-          need(imgH + 16);
-          hline(); gap(4);
-          sectionHead('Study Area Map — Suitability Surface & Ranked Zones');
-          pdf.addImage(fig.dataUrl, 'PNG', ml, y, imgW, imgH);
-          y += imgH + 3;
-          pdf.setFontSize(6.5); pdf.setFont('helvetica','normal'); T(C.s5);
-          pdf.text('Zones are H3 micro-market cells (screening level), not parcels. Exact coordinates for each ranked zone are listed in the detail pages.', ml, y);
-          y += 5;
-          gap(3);
-        }
-      } catch { /* the map figure must never break the report */ }
-
-      // ── Criteria overview table ──
+      // ── Criteria overview table (before the map: keeps page 1 dense and the
+      // near-full-page map figure on its own page — kills the dead-space pages
+      // observed in the live Pune report) ──
       if (ranked[0]?.criteria_breakdown.length > 0) {
         need(6 + ranked[0].criteria_breakdown.length * 6.5 + 10);
         hline(); gap(4);
@@ -1254,6 +1280,35 @@ const App: React.FC = () => {
         });
         gap(5);
       }
+
+      // ── v1.6.8: Study area map — the core visual deliverable ──
+      // Self-rendered figure over real Carto basemap tiles (same CORS-enabled
+      // source as the on-screen map, attributed in the figure itself), with
+      // north arrow, in-frame scale bar, and labeled legend. Falls back to the
+      // clean tile-less rendering if the basemap can't be fetched at export
+      // time — the report itself can never break on a tile.
+      try {
+        const fig = await renderMapFigure({
+          hexGrid: (result as any).hexGrid ?? [],
+          locations: ranked,
+          studyAreaBoundary: (result as any).studyAreaBoundary,
+          withheld: (result as any).recommendationWithheld === true,
+          weightsAdjusted,
+        });
+        if (fig) {
+          const imgW = cw;
+          const imgH = imgW / fig.aspect;
+          need(imgH + 16);
+          hline(); gap(4);
+          sectionHead('Study Area Map — Suitability Surface & Ranked Zones');
+          pdf.addImage(fig.dataUrl, 'PNG', ml, y, imgW, imgH);
+          y += imgH + 3;
+          pdf.setFontSize(6.5); pdf.setFont('helvetica','normal'); T(C.s5);
+          pdf.text('Zones are H3 micro-market cells (screening level), not parcels. Exact coordinates for each ranked zone are listed in the detail pages.', ml, y);
+          y += 5;
+          gap(3);
+        }
+      } catch { /* the map figure must never break the report */ }
 
       // ══════════════════════════════════════════════════════════════════════════
       // LOCATION DETAIL PAGES — one per ranked location, flowing (no forced page)
@@ -1306,15 +1361,20 @@ const App: React.FC = () => {
         }
 
         // ── GIS Analyst Assessment ──
-        sectionHead('GIS Analyst Assessment');
-        // split to cw-10 to avoid right-edge cutoff
-        const rLines = pdf.splitTextToSize(loc.reasoning, cw - 10);
-        const rCount = Math.min(rLines.length, 10);
-        const rH = rCount * 4.5 + 6;
-        cardBg(rH, C.s1, ac);
-        pdf.setFontSize(8); pdf.setFont('helvetica','normal'); T(C.s7);
-        pdf.text(rLines.slice(0, rCount), ml + 5, y + 5);
-        y += rH + 5;
+        // v1.6.8 — SKIPPED when there is no assessment text: the live Pune
+        // report printed an empty orange-bar section, which reads as a bug
+        // in a client deliverable. Absent narrative = absent section.
+        if ((loc.reasoning || '').trim()) {
+          sectionHead('GIS Analyst Assessment');
+          // split to cw-10 to avoid right-edge cutoff
+          const rLines = pdf.splitTextToSize(asciiSafe(loc.reasoning), cw - 10);
+          const rCount = Math.min(rLines.length, 10);
+          const rH = rCount * 4.5 + 6;
+          cardBg(rH, C.s1, ac);
+          pdf.setFontSize(8); pdf.setFont('helvetica','normal'); T(C.s7);
+          pdf.text(rLines.slice(0, rCount), ml + 5, y + 5);
+          y += rH + 5;
+        }
 
         // ── Criteria breakdown ──
         sectionHead('Scoring Criteria Breakdown');
@@ -1467,19 +1527,22 @@ const App: React.FC = () => {
       // ── Methodology ──
       sectionHead('Methodology & Data Sources');
       const meths = [
-        { title: '1. Intent Extraction',
-          body: 'The user query is parsed by GPT-4o-mini using a sector-specific GIS handbook to extract business type, location, constraints, and scoring criteria. MCDA criteria are generated dynamically per business profile.' },
+        // v1.6.8 — rewritten to describe the ACTUAL v2 engine (the previous
+        // text described the retired single-shot pipeline and named a stale
+        // model, "GPT-4o-mini", in a client deliverable).
+        { title: '1. Intent & Deterministic Planning',
+          body: 'The brief is interpreted conversationally by a server-configured language model, then a deterministic planner locks the analysis structure: a reviewed business playbook (archetype) fixes the scoring factors, weights, and catchments, so an identical brief always produces an identical plan. The model writes explanations only - it cannot alter factors or weights.' },
         { title: '2. Spatial Data Collection',
-          body: 'Candidate neighborhoods are geocoded via Google Geocoding API (Nominatim fallback). OpenStreetMap Overpass API and Google Places API count relevant features (transit, commercial, competitors, etc.) within the search radius.' },
-        { title: '3. MCDA Scoring',
-          body: 'Raw feature counts are mapped to 0-10 scores using continuous linear interpolation against sector-calibrated thresholds. Positive criteria reward higher counts; negative criteria penalize them. A weighted composite score is computed per location.' },
+          body: 'The study area is geocoded (Google primary, OpenStreetMap Nominatim fallback; coordinates supplied in the brief are used verbatim) and tiled with an H3 hexagonal grid. OpenStreetMap Overpass and Google Places count relevant features (transit, commercial, competitors, etc.) per factor catchment; water and no-build land (railway/ghat/heritage) are masked out as hard exclusions.' },
+        { title: '3. Two-Pass MCDA Scoring',
+          body: 'Every grid cell is scored with fast screening proxies and a weighted composite ranks the field; the top zones are then re-verified with real travel-time isochrones, routing, and verified place counts, and FINAL ranking uses those refined scores. Positive factors reward higher counts; negative factors penalize them; factors with no data are excluded from the mean, never scored as zero.' },
         { title: '4. Exclusions & Confidence',
-          body: 'Named-area exclusions are geocoded and applied as hard filters. Confidence is scored 0-100 based on geocoding quality, OSM/Google data sufficiency, and candidate pool. Bands: high (80+), moderate (55-79), low (<55).' },
+          body: 'Named-area and engine-level exclusions are applied as hard filters. Confidence combines data sufficiency, provider health, and a deterministic reliability critique; the overall verdict always takes the most conservative of the signals and is disclosed alongside every recommendation.' },
         { title: 'Important Limitations',
           body: 'This is a screening-level assessment only. OSM coverage varies by region. Scores reflect relative suitability from available spatial data — not investment recommendations. Site-level due diligence and field validation are required before any real estate decision.',
           warn: true },
-        { title: '5. Version, Model & Planning Metadata',
-          body: `App v${__APP_VERSION__}  |  Engine v${__APP_VERSION__}  |  Spec v2.2  |  Analysis type: ${(result as any).uploadedCandidatesOnly ? 'Uploaded-candidates-only (candidate universe restricted to uploaded points)' : 'candidate zone screening (not parcel-level siting)'}  |  Recommendation mode: ${(result as any).recommendationMode || 'recommended_sites'}  |  Site claim level: ${(result as any).siteClaimLevel || 'micro_market_zone'}`,
+        { title: '5. Version & Analysis Metadata',
+          body: `App v${__APP_VERSION__}  |  Engine v${__APP_VERSION__}  |  Spec v2.3  |  Analysis type: ${(result as any).uploadedCandidatesOnly ? 'Uploaded-candidates-only (candidate universe restricted to uploaded points)' : 'candidate zone screening (not parcel-level siting)'}  |  Recommendation mode: ${humanize((result as any).recommendationMode || 'recommended_sites')}  |  Site claim level: ${humanize((result as any).siteClaimLevel || 'micro_market_zone')}`,
           warn: false },
         // ── v1.6.0 (Phase 3) — headline confidence + weight audit ─────────────
         ...((result as any).unifiedConfidence ? [{
@@ -1509,9 +1572,28 @@ const App: React.FC = () => {
             warn: adjusted,
           }];
         })(),
-        { title: '6. Deterministic Planning (v1.2.0)',
-          body: `Planning mode: ${(result as any).planningMode || 'not set'}  |  Archetype: ${(result as any).archetypeKey || 'unknown'}  |  Weights source: ${(result as any).weightsSource || 'unknown'}  |  LLM role: ${(result as any).llmRole || 'unknown'}  |  Planning ID: ${(result as any).planningFingerprint || 'n/a'}  |  Note: factor keys and weights are locked by the canonical archetype registry and cannot be changed by the LLM between runs.`,
-          warn: false },
+        // v1.6.8 — only include planning metadata that actually resolved.
+        // The live Pune report printed "Planning mode: not set | Archetype:
+        // unknown | ... | Planning ID: n/a" — raw fallback placeholders in a
+        // client deliverable. Absent fields are now omitted; if none resolve,
+        // the whole card is dropped (the guarantee sentence alone is not
+        // worth a card of unknowns).
+        ...(() => {
+          const dpParts = [
+            (result as any).planningMode ? `Planning mode: ${humanize((result as any).planningMode)}` : '',
+            (result as any).archetypeKey ? `Playbook: ${humanize((result as any).archetypeKey)}` : '',
+            (result as any).weightsSource ? `Weights source: ${humanize((result as any).weightsSource)}` : '',
+            (result as any).llmRole ? `LLM role: ${humanize((result as any).llmRole)}` : '',
+            (result as any).planningFingerprint ? `Planning ID: ${(result as any).planningFingerprint}` : '',
+          ].filter(Boolean);
+          if (dpParts.length === 0) return [];
+          return [{
+            title: '6. Deterministic Planning',
+            body: dpParts.join('  |  ')
+              + '  |  Factor keys and weights are locked by the reviewed playbook registry and cannot be changed by the language model between runs.',
+            warn: false,
+          }];
+        })(),
         // ── Evidence Appendix (v1.3.0) ──────────────────────────────────────────
         ...(() => {
           const et = (result as any).evidenceTrail;
@@ -1549,7 +1631,7 @@ const App: React.FC = () => {
         }] : []),
       ];
       meths.forEach((m, mi) => {
-        const mLines = pdf.splitTextToSize(m.body, cw - 10);
+        const mLines = pdf.splitTextToSize(asciiSafe(m.body), cw - 10);
         const mH = mLines.length * 4 + 10;
         need(mH + 2);
         const bgCol: [number,number,number] = m.warn ? [255,251,235] : C.s1;

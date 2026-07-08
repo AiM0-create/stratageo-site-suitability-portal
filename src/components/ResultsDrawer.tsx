@@ -220,6 +220,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
 }) => {
   const [expandedLoc, setExpandedLoc] = useState<string | null>(locations[0]?.name ?? null);
   const [showWeights, setShowWeights] = useState<boolean>(false);
+  // v1.6.8 - progressive disclosure: audit-trail notes and per-constraint
+  // detail default to collapsed when nothing needs attention.
+  const [showAllNotes, setShowAllNotes] = useState<boolean>(false);
+  const [showHcvDetail, setShowHcvDetail] = useState<boolean>(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
@@ -560,6 +564,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 Failed: <b>{hcv.failedCount}</b>
               </span>
             </div>
+            {(() => {
+              const needsAttention = (hcv.unknownCount + hcv.unenforcedCount + hcv.failedCount) > 0;
+              if (!needsAttention && !showHcvDetail) {
+                return (
+                  <button
+                    onClick={() => setShowHcvDetail(true)}
+                    style={{ marginTop: 4, fontSize: '10.5px', color: '#2563eb', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    Show per-constraint detail
+                  </button>
+                );
+              }
+              return (<>
             <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {hcv.constraints.filter(c => c.status !== 'not_required').map((c, i) => {
                 const meta = HC_STATUS_META[c.status] || HC_STATUS_META.not_verifiable;
@@ -589,6 +606,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 {c.reason}
               </div>
             ))}
+              </>);
+            })()}
           </div>
         )}
 
@@ -785,12 +804,24 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                     </div>
                   </div>
                 )}
-                {(spec.parsingNotes ?? []).length > 0 && (
+                {(spec.parsingNotes ?? []).length > 0 && (() => {
+                  const allNotes = spec.parsingNotes ?? [];
+                  const visibleNotes = showAllNotes ? allNotes : allNotes.slice(0, 3);
+                  return (
                   <div className="assumption-section">
-                    <span className="assumption-label">Notes</span>
-                    {(spec.parsingNotes ?? []).map((n, i) => <p key={i} className="assumption-note">{n}</p>)}
+                    <span className="assumption-label">Notes ({allNotes.length})</span>
+                    {visibleNotes.map((n, i) => <p key={i} className="assumption-note">{n}</p>)}
+                    {allNotes.length > 3 && (
+                      <button
+                        onClick={() => setShowAllNotes(!showAllNotes)}
+                        style={{ fontSize: '10.5px', color: '#2563eb', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                      >
+                        {showAllNotes ? 'Show fewer notes' : 'Show all ' + allNotes.length + ' notes (full audit trail)'}
+                      </button>
+                    )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* AI vs Fixed parameters */}
                 <div className="assumption-section">

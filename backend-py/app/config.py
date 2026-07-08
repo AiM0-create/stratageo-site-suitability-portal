@@ -129,6 +129,30 @@ v1.6.7 (cumulative, includes v1.6.5/v1.6.6): Report map & weight-responsive
   weight sliders, and moving weights re-SELECTS a screening-basis top-X from
   the whole grid (dashed amber pins + list), explicitly labeled unverified
   with a bold routing caveat when a travel-time constraint exists.
+v1.6.8: Pune-run fixes + professional report. Backend (boss patch): (1) a
+  single NAMED place study area now uses the geocoder's full mapped extent
+  (sanity window 1.5-60 km diagonal) instead of a 2 km point buffer —
+  "Pune" previously analyzed a 17-hex dot around its centroid; (2) explicit
+  "radius of 1.5 km" / "800 m catchment" prompt phrasing deterministically
+  overrides euclidean catchments (clamped 200 m – 5 km), disclosed in notes;
+  route constraints correctly excluded; (3) Places API (New) 400s fixed:
+  legacy meta-types (point_of_interest, establishment, …) are stripped from
+  includedTypes, an empty type list never sends the doomed request
+  (degraded: no_valid_new_api_types_for_layer), and any future 4xx carries
+  Google's actual error message in the note; (4) a single shortlisted
+  candidate is scored on the study-area screening basis instead of a
+  self-comparison that flagged every factor "did not vary"; (5) top-3
+  default disclosed in notes when the prompt names no count; (6) drawer
+  progressive disclosure (notes collapse to 3, constraint detail expands
+  only when something needs attention). Frontend (report overhaul): the PDF
+  map figure now draws real Carto basemap tiles (same CORS-enabled source
+  as the on-screen map, attributed; clean tile-less fallback), Web Mercator
+  projection, north arrow, in-frame scale bar, neatline, labeled legend;
+  all report text is Latin-1 sanitized (fixes the garbled evidence
+  appendix); key analysis notes appear on page 1; empty/placeholder
+  sections are omitted ("Planning mode: not set", empty GIS assessment);
+  the stale "GPT-4o-mini" methodology text replaced with an accurate v2
+  engine description; internal enum values humanized.
 """
 from functools import lru_cache
 from typing import Literal
@@ -136,9 +160,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.6.7"
+APP_VERSION     = "1.6.8"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00064"
+ENGINE_VERSION  = "stratageo-engine-00065"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -147,7 +171,7 @@ ENGINE_VERSION  = "stratageo-engine-00064"
 # these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Report Map & Weight-Responsive Grid Ranks"
+RELEASE_NAME    = "Pune Run Fixes & Professional Report"
 
 
 class Settings(BaseSettings):

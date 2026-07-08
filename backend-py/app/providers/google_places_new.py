@@ -60,8 +60,25 @@ def _headers() -> dict:
     }
 
 
+# v1.6.8 — legacy meta-types that Places API (New) REJECTS as includedTypes.
+# One invalid entry 400s the entire request (observed live: "Places Nearby
+# (New) failed (http_400) — falling back to legacy Places").
+_INVALID_NEW_TYPES = {
+    "establishment", "point_of_interest", "premise", "subpremise",
+    "political", "geocode", "plus_code", "food", "place_of_worship",
+    "natural_feature", "intersection", "street_address", "route",
+}
+
+
 def map_types(types: list[str] | None) -> list[str]:
-    return [LEGACY_TO_NEW_TYPE.get(t, t) for t in (types or []) if t]
+    mapped = [LEGACY_TO_NEW_TYPE.get(t, t) for t in (types or []) if t]
+    kept = [t for t in mapped if t not in _INVALID_NEW_TYPES]
+    dropped = [t for t in mapped if t in _INVALID_NEW_TYPES]
+    if dropped:
+        logger.info("places(new): dropped invalid includedTypes %s", dropped)
+    # dedupe, order-preserving
+    seen: set[str] = set()
+    return [t for t in kept if not (t in seen or seen.add(t))]
 
 
 def _place_to_poi(place: dict) -> dict | None:
@@ -102,6 +119,14 @@ async def search_nearby(
     """Nearby Search (New) around one point. data = {"pois": [...]}."""
     s = get_settings()
     new_types = map_types(types)
+    if not new_types:
+        # v1.6.8 — "includedTypes": [] is a guaranteed 400; skip the doomed
+        # call and hand the layer to the legacy path with an honest reason.
+        return ProviderResult(
+            provider="placesnew", feature="nearby_search", status="degraded",
+            data={"pois": []}, elapsed_ms=0,
+            degradation_reason="no_valid_new_api_types_for_layer",
+        )
     body = {
         "includedTypes": new_types,
         "maxResultCount": MAX_RESULTS_PER_REQUEST,

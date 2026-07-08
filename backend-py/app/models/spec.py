@@ -469,6 +469,9 @@ class SpecV2(BaseModel):
     # Together these let the report show "default vs. adjusted" honestly.
     canonicalWeights: Optional[dict[str, float]] = None
     weightsAdjustedByUser: Optional[bool] = None
+    # v1.6.8 — explicit search-radius from the prompt ("radius of 1.5 km");
+    # recorded so the report can disclose the customer override.
+    searchRadiusOverrideM: Optional[int] = None
 
     # ── v1.6.3 — grid-level choice ─────────────────────────────────────────────
     # Set true by the UI when the customer picks an H3 level (7 or 8) on the

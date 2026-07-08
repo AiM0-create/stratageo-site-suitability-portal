@@ -4,6 +4,80 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.6.8] — 2026-07-08 — Pune Run Fixes & Professional Report
+
+Backend (boss patch, cumulative v168 applied via 3-way merge — its
+v164–v167 half was already on master) + a frontend PDF-report overhaul from
+the live Apple-retail-Pune report review.
+
+### Fixed (backend — the Pune run's four questions)
+- **"Only part of Pune was analyzed"** — a single NAMED place study area
+  (no embedded coordinates) now uses the geocoder's full mapped extent as
+  the study area (new `geocode_with_bbox()`; sanity window 1.5–60 km
+  diagonal: street addresses keep the small point buffer, suspiciously huge
+  district/region matches fall back too). "Pune" previously became its
+  centroid + a 2 km minimum buffer — 17 hexes of a ~25 km city. The notes
+  disclose: "using its full mapped extent (~25 km across)…". `polyfill()`
+  auto-degrade still guards metro-scale bboxes.
+- **"Why is the radius always 0.8 km?"** — it's the retail playbook's
+  reviewed ~10-min-walk catchment, and it is now customer-controllable:
+  "radius of 1.5 km" / "800 m catchment" in the prompt deterministically
+  overrides euclidean catchments (clamped 200 m – 5 km), the displayed
+  Search Radius follows, notes disclose the override. Route constraints
+  ("within 10-min drive of X") are correctly NOT radius overrides.
+- **"Places Nearby (New) failed (http_400)"** — legacy meta-types
+  (`point_of_interest`, `establishment`, `food`, …) are stripped from
+  `includedTypes`; an empty type list never sends the doomed request
+  (degraded with reason `no_valid_new_api_types_for_layer`); any future
+  4xx note carries Google's actual error message (never the API key).
+- **"4 of 4 factors did not vary"** — with one shortlisted candidate the
+  relative refit compared the zone to itself; n=1 is now scored on the
+  study-area screening basis with a disclosing note.
+- **Top-3 default disclosed** — when the prompt names no candidate count,
+  the notes say so and point at the ranked grid.
+- **Drawer progressive disclosure** — notes collapse to the first 3 with
+  "Show all N", constraint detail auto-expands only when something needs
+  attention. Nothing removed from the record.
+
+### Changed (frontend — PDF report overhaul, from the live report review)
+- **The report map is now a real map**: Carto light basemap tiles drawn
+  under the choropleth (the same CORS-enabled source as the on-screen map,
+  attributed "© OpenStreetMap contributors © CARTO"), Web Mercator
+  projection so hexes align with tiles, plus a north arrow, an in-frame
+  scale bar (previously colliding with the caption), a neatline, and a
+  labeled legend (actual score range, ranked-pin/excluded/study-area
+  samples). If tiles can't be fetched at export time the figure falls back
+  to the previous clean analytical rendering — the report can never break
+  on a tile.
+- **Garbled text fixed**: all PDF text is routed through a Latin-1
+  sanitizer (jsPDF's built-in fonts choke on em-dashes/arrows/superscripts
+  — the evidence appendix rendered with exploded letter-spacing).
+- **Key analysis notes on page 1** — the audit log's most decision-relevant
+  lines (extent, radius override, shortfall, scoring basis) now appear
+  under the executive summary.
+- **No more placeholder/stale text**: the empty "GIS Analyst Assessment"
+  section is omitted when there is no text; "Planning mode: not set |
+  Archetype: unknown | Planning ID: n/a" placeholders are dropped
+  field-by-field (card omitted entirely if nothing resolved); the
+  methodology no longer claims "GPT-4o-mini" or describes the retired
+  single-shot pipeline — it now describes the actual v2 engine
+  (deterministic playbooks, H3 grid, two-pass scoring, no-data honesty);
+  internal enum values (micro_market_zone, recommended_sites) are
+  humanized; Spec version corrected to v2.3.
+- **Denser layout**: the criteria table moved ahead of the near-full-page
+  map figure, eliminating the mostly-empty pages.
+
+### Validation
+- Backend: **616 passed** (608 + 8 new).
+- Frontend: `tsc --noEmit` clean, Vitest **75 passed**, `vite build` clean.
+
+### Deploy
+- Backend: Cloud Run revision `stratageo-engine-00065-…` (see tag below).
+- Tag `rollback-pre-v1.6.8` points at the previously-live commit
+  (`f31d5f2`, backend revision `stratageo-engine-00064-5sx`).
+
+---
+
 ## [Unreleased — housekeeping] — 2026-07-08 — Historical docs archived
 
 No code changed; no version bump; no backend redeploy. 34 version-specific

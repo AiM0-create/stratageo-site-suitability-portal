@@ -166,6 +166,16 @@ async def run_provider(
         except httpx.HTTPStatusError as ex:
             code = ex.response.status_code
             last_reason = f"http_{code}"
+            # v1.6.8 — surface the provider's own error message for 4xx so a
+            # malformed-request bug is diagnosable from the run notes (never
+            # contains the API key; keys travel only in request headers).
+            if 400 <= code < 500:
+                try:
+                    _msg = (ex.response.json().get("error") or {}).get("message", "")
+                    if _msg:
+                        last_reason = f"http_{code}: {str(_msg)[:120]}"
+                except Exception:
+                    pass
             if code in DISABLED_HTTP:
                 elapsed_ms = int((time.monotonic() - start) * 1000)
                 logger.warning("provider %s/%s: HTTP %d — feature disabled for this job",

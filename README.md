@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.6.7 — Report Map & Weight-Responsive Grid Ranks**
+**Current version: v1.6.8 — Pune Run Fixes & Professional Report**
 
 ---
 
@@ -20,6 +20,17 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.6.8 Highlights
+
+- **A city brief now analyzes the whole city** — a single named place ("Pune") uses the geocoder's full mapped extent as the study area (with a 1.5–60 km sanity window) instead of a 2 km dot around its centroid.
+- **The search radius is customer-controllable** — "radius of 1.5 km" or "800 m catchment" in the prompt deterministically overrides the playbook's reviewed default (clamped 200 m–5 km), disclosed in the notes.
+- **Places API (New) 400s eliminated** — invalid legacy meta-types are stripped, empty type lists never send a doomed request, and any future 4xx carries Google's actual error message.
+- **Single-candidate runs score honestly** — n=1 uses the study-area screening basis instead of a self-comparison that flagged every factor "did not vary".
+- **The PDF report is now client-ready** — the map figure draws real basemap tiles (attributed, with automatic tile-less fallback) with a north arrow, in-frame scale bar, and labeled legend; all text is Latin-1 sanitized (no more garbled appendix); key analysis notes on page 1; placeholder/stale sections ("Planning mode: not set", "GPT-4o-mini") gone; dead whitespace eliminated.
+- **Results panel opens calm** — notes collapse to 3 lines, constraint detail expands only when something needs attention; everything stays one click away.
 
 ---
 
@@ -218,7 +229,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (608 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (616 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -384,7 +395,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.6.7** *(current)* | Report Map & Weight-Responsive Grid Ranks — self-rendered map figure in the PDF, Google Maps links per zone, live grid ranks on hover, weight-sliders re-select a screening-basis top-X (explicitly unverified), relative-score transparency + spread-aware refit, shortfall notes name the responsible filter |
+| **v1.6.8** *(current)* | Pune Run Fixes & Professional Report — city-extent study areas, prompt radius override, Places-New 400 guards, n=1 screening-basis scoring, basemap+north-arrow+legend in the PDF map, Latin-1-safe report text, placeholder/stale sections removed |
+| **v1.6.7** | Report Map & Weight-Responsive Grid Ranks — self-rendered map figure in the PDF, Google Maps links per zone, live grid ranks on hover, weight-sliders re-select a screening-basis top-X (explicitly unverified), relative-score transparency + spread-aware refit, shortfall notes name the responsible filter |
 | **v1.6.4** | Map Coherence & Coordinate Fidelity — candidate cells recoloured with final refined scores, grey context-only surface when the recommendation is withheld, prompt coordinates used verbatim + country-level geocode matches rejected, candidate-shortfall notes |
 | **v1.6.3** | H3 Grid-Level Choice — default grid coarsened from res 9 to res 8; plan-card picker for Level 7 (district-scale) vs Level 8 (neighbourhood-scale), preserved across chat turns like the weight sliders |
 | **v1.6.2** *(backend-only)* | Smart Water/Buildability Relevance — fixed a live bug where commercial briefs could land on port/rail/water land; buildability relevance now shares one source of truth with mask selection, water relevance is geography-aware (coastal metros), no timeout regression |

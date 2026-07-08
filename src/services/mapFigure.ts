@@ -1,17 +1,32 @@
 /**
- * v1.6.7 — Report map figure.
+ * v1.6.8 — Report map figure (professional-cartography pass).
  *
  * Renders the H3 suitability surface + ranked candidates onto an offscreen
  * canvas and returns a PNG data-URL for embedding in the PDF report.
  *
- * Deliberately NO basemap tiles: tile screenshots raise CORS + licensing
- * headaches in a client-generated commercial report, and a clean analytical
- * figure (choropleth + boundary + ranked markers + legend + scale bar) is the
- * defensible deliverable — every pixel derives from the analysis itself.
+ * v1.6.7 shipped this figure with no basemap (licensing caution). v1.6.8
+ * upgrade: the figure now draws real Carto "light_all" raster tiles under
+ * the choropleth — the SAME CORS-enabled tile source the on-screen map
+ * already uses, credited "(c) OpenStreetMap contributors (c) CARTO" (free
+ * for this use with attribution). Projection switched from equirectangular
+ * to Web Mercator so the hexes align with the tiles exactly. If any tile
+ * fails (offline, blocked, timeout), the figure falls back to the v1.6.7
+ * clean analytical rendering — the report itself can never break on a tile.
+ *
+ * Also added: north arrow, an in-frame scale bar (no longer colliding with
+ * the caption), a neatline, and a labeled legend (actual score range,
+ * ranked-pin and excluded-cell samples, study-area line sample).
  */
 import type { HexGridCell, LocationData } from '../types';
 
 const RAMP = (t: number) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) * 130)}, 80%, 46%)`; // matches MapView
+
+const TILE_SUBDOMAINS = ['a', 'b', 'c', 'd'];
+const tileUrl = (z: number, x: number, y: number) =>
+  `https://${TILE_SUBDOMAINS[(x + y) % 4]}.basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png`;
+
+const TILE_TIMEOUT_MS = 5000;   // whole-basemap budget; miss it -> clean fallback
+const MAX_TILES = 32;           // safety cap (a city extent needs ~6-16)
 
 interface FigureOptions {
   hexGrid: HexGridCell[];
@@ -23,7 +38,56 @@ interface FigureOptions {
   weightsAdjusted?: boolean;
 }
 
-export function renderMapFigure(opts: FigureOptions): { dataUrl: string; aspect: number } | null {
+// ── Web Mercator helpers (fraction of world, 0..1) ──
+const xFrac = (lng: number) => (lng + 180) / 360;
+const yFrac = (lat: number) => {
+  const s = Math.sin((Math.max(-85, Math.min(85, lat)) * Math.PI) / 180);
+  return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+};
+
+function loadTile(z: number, x: number, y: number): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // required to keep the canvas exportable
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('tile failed'));
+    img.src = tileUrl(z, x, y);
+  });
+}
+
+/** Fetch every tile covering the fraction-bounds at zoom z; null = fallback. */
+async function fetchBasemap(
+  z: number, xf0: number, xf1: number, yf0: number, yf1: number,
+): Promise<{ img: HTMLImageElement; tx: number; ty: number }[] | null> {
+  const n = 2 ** z;
+  const tx0 = Math.floor(xf0 * n), tx1 = Math.floor(xf1 * n);
+  const ty0 = Math.floor(yf0 * n), ty1 = Math.floor(yf1 * n);
+  const jobs: { tx: number; ty: number }[] = [];
+  for (let tx = tx0; tx <= tx1; tx++)
+    for (let ty = ty0; ty <= ty1; ty++)
+      jobs.push({ tx, ty });
+  if (jobs.length === 0 || jobs.length > MAX_TILES) return null;
+  try {
+    const timeout = new Promise<never>((_, rej) =>
+      setTimeout(() => rej(new Error('basemap timeout')), TILE_TIMEOUT_MS));
+    const settled = await Promise.race([
+      Promise.allSettled(jobs.map(j => loadTile(z, j.tx, j.ty))),
+      timeout,
+    ]);
+    const tiles: { img: HTMLImageElement; tx: number; ty: number }[] = [];
+    settled.forEach((s, i) => {
+      if (s.status === 'fulfilled') tiles.push({ img: s.value, tx: jobs[i].tx, ty: jobs[i].ty });
+    });
+    // Partial coverage looks worse than none — require the full set.
+    return tiles.length === jobs.length ? tiles : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function renderMapFigure(
+  opts: FigureOptions,
+): Promise<{ dataUrl: string; aspect: number; hasBasemap: boolean } | null> {
   const { hexGrid, locations, studyAreaBoundary, withheld = false, weightsAdjusted = false } = opts;
   if (!hexGrid || hexGrid.length === 0) return null;
 
@@ -40,19 +104,24 @@ export function renderMapFigure(opts: FigureOptions): { dataUrl: string; aspect:
     for (const l of locations) eat(l.lat, l.lng);
     if (!Number.isFinite(minLat) || maxLat <= minLat || maxLng <= minLng) return null;
 
-    // ── Equirectangular projection with latitude correction ──
-    const midLat = (minLat + maxLat) / 2;
-    const kx = Math.cos((midLat * Math.PI) / 180);
-    const spanX = (maxLng - minLng) * kx;
-    const spanY = maxLat - minLat;
-    const pad = 0.06; // 6% margin
+    // Breathing room around the geometry (5% of the span each side)
+    const latPad = (maxLat - minLat) * 0.05, lngPad = (maxLng - minLng) * 0.05;
+    minLat -= latPad; maxLat += latPad; minLng -= lngPad; maxLng += lngPad;
+
+    // ── Web Mercator projection into the plot rect ──
+    const xf0 = xFrac(minLng), xf1 = xFrac(maxLng);
+    const yf0 = yFrac(maxLat), yf1 = yFrac(minLat); // y grows southward
+    const xfSpan = xf1 - xf0, yfSpan = yf1 - yf0;
+    if (xfSpan <= 0 || yfSpan <= 0) return null;
+
     const W = 1500;
-    const plotW = W * (1 - 2 * pad);
-    const plotH = plotW * (spanY / spanX);
-    const legendH = 150;
-    const H = Math.round(plotH / (1 - 2 * pad) + legendH);
-    const px = (lng: number) => W * pad + ((lng - minLng) * kx / spanX) * plotW;
-    const py = (lat: number) => (H - legendH) * pad + (1 - (lat - minLat) / spanY) * plotH;
+    const m = 36;                     // frame margin
+    const plotW = W - 2 * m;
+    const plotH = Math.max(300, Math.min(1700, plotW * (yfSpan / xfSpan)));
+    const legendH = 170;
+    const H = Math.round(m + plotH + m + legendH);
+    const px = (lng: number) => m + ((xFrac(lng) - xf0) / xfSpan) * plotW;
+    const py = (lat: number) => m + ((yFrac(lat) - yf0) / yfSpan) * plotH;
 
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
@@ -61,13 +130,39 @@ export function renderMapFigure(opts: FigureOptions): { dataUrl: string; aspect:
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, W, H);
 
+    // ── Basemap tiles (Carto light; clean fallback when unavailable) ──
+    // Zoom: enough resolution that a tile pixel >= a canvas pixel across the extent.
+    const z = Math.max(3, Math.min(18, Math.ceil(Math.log2(plotW / (256 * xfSpan)))));
+    const tiles = await fetchBasemap(z, xf0, xf1, yf0, yf1);
+    const hasBasemap = !!tiles;
+    if (tiles) {
+      const n = 2 ** z;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(m, m, plotW, plotH);
+      ctx.clip();
+      for (const t of tiles) {
+        const dx = m + ((t.tx / n - xf0) / xfSpan) * plotW;
+        const dy = m + ((t.ty / n - yf0) / yfSpan) * plotH;
+        const dw = (1 / n / xfSpan) * plotW;
+        const dh = (1 / n / yfSpan) * plotH;
+        ctx.drawImage(t.img, dx, dy, dw + 0.75, dh + 0.75); // slight overlap kills seams
+      }
+      // Mute the basemap so the choropleth stays the star
+      ctx.fillStyle = 'rgba(255,255,255,0.32)';
+      ctx.fillRect(m, m, plotW, plotH);
+      ctx.restore();
+    }
+
     // ── Contrast stretch identical to the on-screen map ──
     const vals = hexGrid.filter(c => !c.excluded).map(c => c.score).filter(v => typeof v === 'number');
     const lo = vals.length ? Math.min(...vals) : 0;
     const hi = vals.length ? Math.max(...vals) : 10;
     const span = hi - lo > 0.1 ? hi - lo : 1;
 
-    // ── Hex cells ──
+    // ── Hex cells (clipped to the frame) ──
+    ctx.save();
+    ctx.beginPath(); ctx.rect(m, m, plotW, plotH); ctx.clip();
     for (const cell of hexGrid) {
       const b = cell.boundary;
       if (!Array.isArray(b) || b.length < 3) continue;
@@ -77,16 +172,17 @@ export function renderMapFigure(opts: FigureOptions): { dataUrl: string; aspect:
       ctx.closePath();
       const t = Math.max(0, Math.min(1, (cell.score - lo) / span));
       if (cell.excluded) {
-        ctx.fillStyle = 'rgba(100,116,139,0.28)';
+        ctx.fillStyle = 'rgba(100,116,139,0.30)';
       } else if (withheld) {
         ctx.fillStyle = `rgba(148,163,184,${(0.15 + t * 0.30).toFixed(2)})`;
       } else {
-        ctx.globalAlpha = 0.42 + t * 0.40;
+        // More transparent over a basemap so streets/labels read through
+        ctx.globalAlpha = hasBasemap ? 0.34 + t * 0.34 : 0.42 + t * 0.40;
         ctx.fillStyle = RAMP(t);
       }
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -121,52 +217,131 @@ export function renderMapFigure(opts: FigureOptions): { dataUrl: string; aspect:
       ctx.textBaseline = 'middle';
       ctx.fillText(String(i + 1), x, y + 1);
     });
+    ctx.restore();
 
-    // ── Legend, scale bar, caption strip ──
-    const ly = H - legendH + 28;
+    // ── Map frame (neatline) ──
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(m, m, plotW, plotH);
+
+    // ── North arrow (inside frame, top-right) ──
+    const nx = m + plotW - 46, nyTop = m + 22;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(nx, nyTop + 26, 30, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.fill();
+    ctx.strokeStyle = '#334155'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath();                       // arrow, dark (west) half
+    ctx.moveTo(nx, nyTop + 8);
+    ctx.lineTo(nx - 9, nyTop + 34);
+    ctx.lineTo(nx, nyTop + 27);
+    ctx.closePath();
+    ctx.fillStyle = '#0f172a'; ctx.fill();
+    ctx.beginPath();                       // arrow, light (east) half
+    ctx.moveTo(nx, nyTop + 8);
+    ctx.lineTo(nx + 9, nyTop + 34);
+    ctx.lineTo(nx, nyTop + 27);
+    ctx.closePath();
+    ctx.fillStyle = '#94a3b8'; ctx.fill();
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 17px Helvetica, Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('N', nx, nyTop + 50);
+    ctx.restore();
+
+    // ── Scale bar (inside frame, bottom-left, on a backdrop) ──
+    const midLat = (minLat + maxLat) / 2;
+    const totalKm = (maxLng - minLng) * 111.32 * Math.cos((midLat * Math.PI) / 180);
+    const niceKm = [0.2, 0.5, 1, 2, 5, 10, 20, 50].find(k => k / totalKm > 0.14) ?? 50;
+    const barPx = (niceKm / totalKm) * plotW;
+    const sbX = m + 18, sbY = m + plotH - 22;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.fillRect(sbX - 8, sbY - 28, barPx + 24, 42);
+    ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+    ctx.strokeRect(sbX - 8, sbY - 28, barPx + 24, 42);
+    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(sbX, sbY); ctx.lineTo(sbX + barPx, sbY);
+    ctx.moveTo(sbX, sbY - 7); ctx.lineTo(sbX, sbY + 7);
+    ctx.moveTo(sbX + barPx, sbY - 7); ctx.lineTo(sbX + barPx, sbY + 7);
+    ctx.stroke();
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px Helvetica, Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(`${niceKm} km`, sbX + barPx / 2, sbY - 12);
+    ctx.restore();
+
+    // ── Legend strip (below the frame; fixed rows — nothing can collide) ──
+    const lx = m;
+    const row1 = m + plotH + 38;
+    const row2 = row1 + 44;
+    const row3 = row2 + 28;
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.font = '22px Helvetica, Arial, sans-serif'; ctx.fillStyle = '#0f172a';
+
     if (withheld) {
-      ctx.fillText('Screening surface — context only (result flagged unreliable; no recommendation made)', W * pad, ly);
+      ctx.font = 'bold 22px Helvetica, Arial, sans-serif'; ctx.fillStyle = '#475569';
+      ctx.fillText('Screening surface - context only (result flagged unreliable; no recommendation made)', lx, row1);
     } else {
-      // gradient bar
-      const gx = W * pad, gw = 300, gh = 20;
+      // gradient ramp labeled with the ACTUAL plotted range
+      const gw = 260, gh = 20;
       for (let i = 0; i < gw; i++) {
         ctx.fillStyle = RAMP(i / gw);
-        ctx.fillRect(gx + i, ly - gh / 2, 1.5, gh);
+        ctx.fillRect(lx + i, row1 - gh / 2, 1.5, gh);
       }
+      ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+      ctx.strokeRect(lx, row1 - gh / 2, gw, gh);
       ctx.fillStyle = '#0f172a';
-      ctx.fillText('lower', gx + gw + 12, ly);
-      ctx.fillText('higher suitability', gx + gw + 84, ly);
-      // excluded swatch
-      ctx.fillStyle = 'rgba(100,116,139,0.35)';
-      ctx.fillRect(gx + gw + 320, ly - 11, 26, 22);
-      ctx.fillStyle = '#0f172a';
-      ctx.fillText('excluded', gx + gw + 356, ly);
-    }
-    // scale bar: pick a round km length spanning ~20% of width
-    const kmPerLng = 111.32 * kx;
-    const plotKm = spanX / kx * kmPerLng / kx; // spanLng*kx already; recompute simply:
-    const totalKm = (maxLng - minLng) * 111.32 * kx;
-    const niceKm = [0.5, 1, 2, 5, 10, 20, 50].find(k => k / totalKm > 0.15) ?? 50;
-    const barPx = (niceKm / totalKm) * plotW;
-    const bx = W - W * pad - barPx, by = ly + 46;
-    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + barPx, by);
-    ctx.moveTo(bx, by - 8); ctx.lineTo(bx, by + 8);
-    ctx.moveTo(bx + barPx, by - 8); ctx.lineTo(bx + barPx, by + 8);
-    ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.fillText(`${niceKm} km`, bx + barPx / 2, by - 18);
-    // caption
-    ctx.textAlign = 'left'; ctx.font = '19px Helvetica, Arial, sans-serif'; ctx.fillStyle = '#475569';
-    ctx.fillText(
-      `Analytical figure (no basemap). Numbered pins = ranked candidate zones${weightsAdjusted ? ' — CUSTOM WEIGHTS APPLIED' : ''}. Cell colors: screening surface; candidate cells show final refined scores.`,
-      W * pad, ly + 46,
-    );
-    ctx.fillText('Data: © OpenStreetMap contributors; Google Places. H3 hexagonal grid.', W * pad, ly + 78);
+      ctx.font = '17px Helvetica, Arial, sans-serif';
+      ctx.fillText(`${lo.toFixed(1)}`, lx, row1 + 26);
+      const hiLbl = `${hi.toFixed(1)}`;
+      ctx.fillText(hiLbl, lx + gw - ctx.measureText(hiLbl).width, row1 + 26);
+      ctx.fillStyle = '#475569';
+      ctx.fillText('suitability (low to high)', lx + gw / 2 - ctx.measureText('suitability (low to high)').width / 2, row1 + 26);
 
-    return { dataUrl: canvas.toDataURL('image/png'), aspect: W / H };
+      // excluded swatch
+      let cx2 = lx + gw + 52;
+      ctx.fillStyle = 'rgba(100,116,139,0.35)';
+      ctx.fillRect(cx2, row1 - 11, 26, 22);
+      ctx.strokeStyle = '#94a3b8'; ctx.strokeRect(cx2, row1 - 11, 26, 22);
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '18px Helvetica, Arial, sans-serif';
+      ctx.fillText('excluded land', cx2 + 34, row1);
+      cx2 += 34 + ctx.measureText('excluded land').width + 48;
+
+      // ranked pin sample
+      ctx.beginPath(); ctx.arc(cx2 + 11, row1, 11, 0, Math.PI * 2);
+      ctx.fillStyle = '#059669'; ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Helvetica, Arial, sans-serif';
+      ctx.textAlign = 'center'; ctx.fillText('1', cx2 + 11, row1 + 1);
+      ctx.textAlign = 'left'; ctx.fillStyle = '#0f172a'; ctx.font = '18px Helvetica, Arial, sans-serif';
+      ctx.fillText('ranked candidate zone', cx2 + 30, row1);
+      cx2 += 30 + ctx.measureText('ranked candidate zone').width + 48;
+
+      // AOI line sample
+      ctx.strokeStyle = '#1d4ed8'; ctx.lineWidth = 3; ctx.setLineDash([10, 7]);
+      ctx.beginPath(); ctx.moveTo(cx2, row1); ctx.lineTo(cx2 + 44, row1); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillText('study area', cx2 + 52, row1);
+    }
+
+    // caption + data credit (their own rows — no collisions possible)
+    ctx.font = '17px Helvetica, Arial, sans-serif'; ctx.fillStyle = '#475569';
+    ctx.fillText(
+      `Numbered pins = ranked candidate zones${weightsAdjusted ? ' - CUSTOM WEIGHTS APPLIED' : ''}. Cell colors: screening surface; candidate cells carry final refined scores.`,
+      lx, row2,
+    );
+    ctx.fillText(
+      hasBasemap
+        ? 'Basemap (c) OpenStreetMap contributors, (c) CARTO. Analysis data: OpenStreetMap, Google Places. H3 hexagonal grid, Web Mercator.'
+        : 'Analytical figure (basemap unavailable at export time). Data: (c) OpenStreetMap contributors; Google Places. H3 hexagonal grid.',
+      lx, row3,
+    );
+
+    return { dataUrl: canvas.toDataURL('image/png'), aspect: W / H, hasBasemap };
   } catch {
     return null; // the figure must never break the report
   }

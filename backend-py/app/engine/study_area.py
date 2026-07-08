@@ -27,6 +27,61 @@ def _m_to_deg_lng(m: float, lat: float) -> float:
     return m / (111_320.0 * max(0.2, math.cos(math.radians(lat))))
 
 
+async def geocode_with_bbox(
+    query: str,
+) -> tuple[float, float, tuple[float, float, float, float] | None] | None:
+    """Like geocode(), but also returns the provider's extent for the place:
+    (lat, lng, (south, west, north, east) | None).
+
+    v1.6.8 — needed because a single-place study area was previously a point
+    + 2 km minimum buffer, which turned "Pune" (a ~25 km-wide city) into 17
+    hexes around its centroid. The geocoder KNOWS the extent; use it.
+    """
+    s = get_settings()
+    async with httpx.AsyncClient(timeout=15) as client:
+        if s.google_places_api_key:
+            try:
+                r = await client.get(GOOGLE_GEOCODE_URL, params={
+                    "address": query if "india" in query.lower() else f"{query}, India",
+                    "key": s.google_places_api_key,
+                })
+                data = r.json()
+                for res in data.get("results", []):
+                    types = set(res.get("types") or [])
+                    if types & {"country", "administrative_area_level_1"}:
+                        continue
+                    geom = res.get("geometry") or {}
+                    loc = geom["location"]
+                    box = geom.get("bounds") or geom.get("viewport")
+                    bbox = None
+                    if box and box.get("southwest") and box.get("northeast"):
+                        bbox = (
+                            float(box["southwest"]["lat"]), float(box["southwest"]["lng"]),
+                            float(box["northeast"]["lat"]), float(box["northeast"]["lng"]),
+                        )
+                    return loc["lat"], loc["lng"], bbox
+            except Exception as e:
+                logger.warning("google geocode(bbox) failed for %r: %s", query, e)
+        try:
+            r = await client.get(NOMINATIM_URL, params={
+                "q": query if "india" in query.lower() else f"{query}, India",
+                "format": "json", "limit": 3, "countrycodes": "in",
+            }, headers={"User-Agent": USER_AGENT})
+            data = r.json()
+            for res in data or []:
+                if (res.get("addresstype") or res.get("type")) in ("country", "state"):
+                    continue
+                bb = res.get("boundingbox")
+                bbox = None
+                if bb and len(bb) == 4:
+                    # Nominatim order: [south, north, west, east]
+                    bbox = (float(bb[0]), float(bb[2]), float(bb[1]), float(bb[3]))
+                return float(res["lat"]), float(res["lon"]), bbox
+        except Exception as e:
+            logger.warning("nominatim geocode(bbox) failed for %r: %s", query, e)
+    return None
+
+
 async def geocode(query: str) -> tuple[float, float] | None:
     """Google first (if key present), Nominatim fallback.
 
@@ -149,11 +204,43 @@ async def resolve_study_area(area: StudyArea) -> tuple[object, list[str]]:
         poly = Point(lng, lat).buffer(max(_m_to_deg_lat(r), _m_to_deg_lng(r, lat)))
         return poly, notes
 
-    # places: use embedded coordinates verbatim where the user provided them;
-    # geocode only the (cleaned) names that lack them (Google primary;
-    # Nominatim fallback), convex hull, buffer
     places = area.places or []
     parsed = [extract_embedded_coords(name) for name in places]
+
+    # v1.6.8 — single NAMED place (no embedded coordinates): use the
+    # geocoder's actual extent. "Pune" previously became its centroid + a
+    # 2 km minimum buffer — 17 hexes of a ~25 km city (user-reported). Extent
+    # sanity window: 1.5–60 km diagonal (below → keep the point buffer, a
+    # street address doesn't need a bbox; above → likely a district/region
+    # match, too coarse to trust). polyfill() still auto-degrades resolution
+    # if a metro-scale bbox would explode the hex budget.
+    if len(parsed) == 1 and parsed[0][1] is None:
+        clean = parsed[0][0]
+        g = await geocode_with_bbox(clean)
+        if g:
+            lat, lng, bbox = g
+            if bbox:
+                s_, w_, n_, e_ = bbox
+                diag_km = math.hypot((n_ - s_) * 111.32,
+                                     (e_ - w_) * 111.32 * math.cos(math.radians(lat)))
+                if 1.5 <= diag_km <= 60.0:
+                    notes.append(
+                        f'Geocoded "{clean}" → {lat:.4f}, {lng:.4f}; using its full '
+                        f"mapped extent (~{diag_km:.0f} km across) as the study area "
+                        "instead of a 2 km point buffer."
+                    )
+                    return box(w_, s_, e_, n_), notes
+            buffer_deg = max(_m_to_deg_lat(area.hullBufferM),
+                             _m_to_deg_lng(area.hullBufferM, lat))
+            notes.append(f'Geocoded "{clean}" → {lat:.4f}, {lng:.4f}')
+            notes.append("Single place — using 2km minimum buffer")
+            return Point(lng, lat).buffer(max(buffer_deg, _m_to_deg_lat(2000))), notes
+        notes.append(f'Could not geocode "{clean}" — omitted from study area')
+        raise ValueError("none of the study-area places could be geocoded")
+
+    # places with embedded coordinates and/or multiple names: use coordinates
+    # verbatim where provided; geocode only the (cleaned) names that lack them
+    # (Google primary; Nominatim fallback), convex hull, buffer
     to_geocode = [clean for clean, pt in parsed if pt is None]
     geocoded = await asyncio.gather(*(geocode(name) for name in to_geocode))
     geo_iter = iter(geocoded)

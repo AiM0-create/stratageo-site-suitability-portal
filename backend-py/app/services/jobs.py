@@ -1841,7 +1841,27 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # Pass B / traffic values live on a different scale than the Pass-A Euclidean
     # grid; refit so they discriminate among candidates instead of flooring to ~0.
     # Layers that don't vary across candidates carry no information → flagged.
-    non_discriminating = scoring.refit_refined_layers(scores, candidates)
+    if len(candidates) < 2:
+        # v1.6.8 — a single shortlisted candidate has no shortlist to be
+        # compared against: a relative refit would flag EVERY factor as
+        # "did not vary" and score them all neutral (observed live on the
+        # Pune run — 4 of 4 factors "no effect on ranking", pure artifact).
+        # Score it on the study-area screening basis instead — the only
+        # comparison that actually exists. Refined data (routing, Places
+        # aggregate) still shows as verification evidence.
+        for _ls in scores.values():
+            if _ls.refined:
+                _ls.refined = {}
+                _ls.refined_low = _ls.refined_high = None
+        if candidates:
+            notes.append(
+                "Single shortlisted candidate — factor scores are shown on the "
+                "study-area screening basis (a relative-to-shortlist comparison "
+                "requires at least 2 zones)."
+            )
+        non_discriminating = []
+    else:
+        non_discriminating = scoring.refit_refined_layers(scores, candidates)
     if non_discriminating:
         fallbacks.append(
             "Factor(s) that did not vary across the shortlisted sites (no effect on "
@@ -1890,6 +1910,22 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         job.id[:8], len(_factor_results), len(candidates),
         len(_contract_violations), int((_time.monotonic() - _t0) * 1000),
     )
+
+    # v1.6.8 — when the user never asked for a count, say the default was
+    # applied and point at the grid ranks (user-reported: "I didn't ask for
+    # top X — why am I seeing ranked candidates?").
+    if getattr(spec, "searchRadiusOverrideM", None):
+        notes.append(
+            f"Search radius set to {spec.searchRadiusOverrideM} m from your prompt "
+            "(overrides the sector default)."
+        )
+    _oc = getattr(spec, "outputCount", None)
+    if _oc is not None and getattr(_oc, "requestedTopNRaw", None) is None:
+        notes.append(
+            f"No candidate count was specified in the prompt — showing the top "
+            f"{spec.output.topN} by default. Every eligible grid cell is also "
+            "ranked on the map (hover any cell for its rank)."
+        )
 
     _route_dropped = [ci for ci in candidates if not passes_required_routes(ci)]
     eligible = [ci for ci in candidates if passes_required_routes(ci)] or candidates

@@ -429,3 +429,36 @@ Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`, backe
 ### 53. Tests
 - 4 new backend tests (spread-aware refit: near-identical compression, full-range preservation, order preservation, constant-flagging) appended to `test_v164_map_and_coords.py`; 9 new frontend tests (ranking, re-selection, separation, exclusion handling) in `reweighting.test.ts`.
 - **608 backend passed** (604 + 4); frontend `tsc` clean, Vitest **75 passed** (66 + 9), build clean.
+
+---
+
+## v1.6.8 — Pune Run Fixes & Professional Report
+
+### 54. `backend-py/app/engine/study_area.py` — single named place uses the geocoder's full extent
+- **What:** new `geocode_with_bbox()` (Google `bounds`/`viewport`, Nominatim `boundingbox` with its [south, north, west, east] order translated — pinned by test); `resolve_study_area()` uses the extent as the study area for a single NAMED place (no embedded coordinates) when its diagonal is 1.5–60 km; smaller (street address) keeps the point buffer, larger (district/region match) falls back too. Notes disclose "using its full mapped extent (~N km across)".
+- **Why (live-reported):** "show me locations for apple retail shop in pune" analyzed a 17-hex, 2 km dot around Pune's centroid and called it Pune (~25 km across).
+- **Risk:** medium-low — changes study-area geometry for the single-named-place case only; multi-place and coordinate-tagged briefs unchanged; hex-budget auto-degrade still applies. **Rollback:** tag `rollback-pre-v1.6.8`.
+
+### 55. `backend-py/app/engine/deterministic_planner.py` + `jobs.py` — customer radius override + top-N default disclosure
+- **What:** `parse_radius_override_m()` reads "radius of 1.5 km" / "800 m catchment" phrasing (clamped 200 m–5 km) and overrides every euclidean layer catchment (`searchRadiusOverrideM` on the spec; walk/drive time-based catchments untouched); route-constraint wording deliberately does not match. jobs.py notes disclose the override, and disclose the top-3 default when the prompt names no candidate count.
+- **Why:** the "0.8 km radius" is the retail playbook's reviewed ~10-min-walk catchment — correct as a default, but previously not customer-controllable and (per the Pune review) read as arbitrary.
+
+### 56. `backend-py/app/providers/google_places_new.py` + `providers/base.py` — Places (New) 400 class fixed
+- **What:** `map_types()` strips legacy meta-types the New API rejects (`point_of_interest`, `establishment`, `food`, …) and dedupes; an empty `includedTypes` never sends the request (degraded, reason `no_valid_new_api_types_for_layer` — straight to legacy path); provider 4xx notes now carry Google's actual error message body (keys never included).
+- **Why (live-observed):** "Places Nearby (New) failed (http_400) — falling back to legacy Places" on the Pune run; one invalid meta-type or an empty list 400s the entire request.
+
+### 57. `backend-py/app/engine/scoring.py` / `results.py` / `jobs.py` — n=1 scored on screening basis
+- **What:** a single shortlisted candidate is no longer refit against itself (which flagged every factor "did not vary" and scored all neutral); it keeps the study-area screening normalization, with a disclosing note.
+- **Why:** pure artifact observed in the Pune run's log ("4 of 4 factors did not vary").
+
+### 58. `src/components/ResultsDrawer.tsx` — progressive disclosure
+- **What:** audit-trail Notes collapse to the first 3 with "Show all N notes (full audit trail)"; hard-constraint per-line detail auto-expands only when something needs attention (unknown/unenforced/failed), otherwise sits behind "Show per-constraint detail". Header + counts always visible; nothing removed from the record or the PDF.
+
+### 59. `src/services/mapFigure.ts` + `src/App.tsx` — PDF report overhaul (from the live Apple-retail-Pune report review)
+- **What (map):** the report figure now draws Carto light basemap tiles under the choropleth (same CORS-enabled source as the on-screen map; muted 32% white overlay; attributed "(c) OpenStreetMap contributors (c) CARTO"), switched to Web Mercator so hexes align with tiles, and gained a north arrow, an in-frame scale bar on a backdrop (the previous one collided with the caption), a neatline, and a labeled legend (actual plotted score range + ranked-pin/excluded/study-area samples). Tile fetch is bounded (≤32 tiles, 5 s budget, full-coverage-or-nothing) and falls back to the previous tile-less rendering — `renderMapFigure` is now async and can never break the report.
+- **What (text/layout):** every string reaching `pdf.text` is Latin-1 sanitized (jsPDF built-in fonts rendered em-dashes/arrows/superscripts as garbage with exploded letter-spacing — observed on the evidence appendix); "Key Analysis Notes" (first 4) now on page 1 under the executive summary; empty "GIS Analyst Assessment" omitted; the Deterministic Planning card only prints fields that resolved (no more "not set / unknown / n/a") and is dropped when none do; methodology items 1–4 rewritten to describe the actual v2 engine (the old text described the retired single-shot pipeline and named "GPT-4o-mini"); internal enums humanized (micro_market_zone → "Micro market zone"); Spec v2.3; criteria table moved ahead of the near-full-page map figure to kill the dead-space pages.
+- **Risk:** low-medium — report generation only; the sanitizer wraps pdf.text centrally; tile failures degrade to the shipped v1.6.7 rendering. **Rollback:** tag `rollback-pre-v1.6.8`.
+
+### 60. Tests
+- 8 new backend tests appended to `test_v164_map_and_coords.py`: radius-override phrasings, clamping, route-constraint non-match; Places-New meta-type stripping, legacy mapping/dedupe, empty-list degradation, only-invalid-types degradation; Nominatim boundingbox order translation.
+- **616 backend passed** (608 + 8); frontend `tsc` clean, Vitest **75 passed**, build clean.

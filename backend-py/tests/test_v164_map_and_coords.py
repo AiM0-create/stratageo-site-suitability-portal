@@ -177,3 +177,73 @@ def test_constant_values_still_neutral_and_flagged():
     flagged = refit_refined_layers({"x": ls}, [0, 1])
     assert flagged == ["Commercial co-tenancy"]
     assert ls.discriminating is False
+
+
+# ── v1.6.8: city-extent study areas, radius override, Places-New 400 guard ───
+
+from app.engine.deterministic_planner import parse_radius_override_m
+from app.providers.google_places_new import map_types, search_nearby
+
+
+class TestRadiusOverride:
+    def test_common_phrasings(self):
+        assert parse_radius_override_m("with a radius of 1.5 km") == 1500
+        assert parse_radius_override_m("use 800 m catchment") == 800
+        assert parse_radius_override_m("catchment of 1.2km") == 1200
+
+    def test_clamped_to_sane_screening_band(self):
+        assert parse_radius_override_m("radius of 50 m") == 200
+        assert parse_radius_override_m("radius of 25 km") == 5000
+
+    def test_route_constraints_and_plain_prompts_do_not_match(self):
+        assert parse_radius_override_m("within 10-min drive of Ballygunge Phari") is None
+        assert parse_radius_override_m("apple retail shop in pune") is None
+
+
+class TestPlacesNewGuards:
+    def test_invalid_meta_types_dropped(self):
+        assert map_types(["electronics_store", "point_of_interest", "establishment"]) == [
+            "electronics_store"
+        ]
+
+    def test_legacy_mapping_and_dedupe(self):
+        assert map_types(["grocery_or_supermarket", "grocery_store"]) == ["grocery_store"]
+
+    def test_empty_types_never_sends_a_doomed_request(self):
+        import asyncio
+        pr = asyncio.run(search_nearby([], (18.52, 73.87), 1500.0))
+        assert pr.status == "degraded"
+        assert pr.degradation_reason == "no_valid_new_api_types_for_layer"
+        assert pr.data == {"pois": []}
+
+    def test_only_invalid_types_also_degrades_cleanly(self):
+        import asyncio
+        pr = asyncio.run(search_nearby(["establishment", "food"], (18.52, 73.87), 1500.0))
+        assert pr.status == "degraded"
+
+
+class TestGeocodeBbox:
+    def test_nominatim_boundingbox_order_translated(self, monkeypatch):
+        import app.engine.study_area as sa
+        import asyncio
+
+        class FakeResp:
+            def json(self):
+                return [{
+                    "lat": "18.5246", "lon": "73.8786", "addresstype": "city",
+                    # Nominatim order: [south, north, west, east]
+                    "boundingbox": ["18.40", "18.64", "73.74", "74.00"],
+                }]
+
+        class FakeClient:
+            def __init__(self, *a, **k): ...
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, url, **k): return FakeResp()
+
+        monkeypatch.setattr(sa.httpx, "AsyncClient", FakeClient)
+        monkeypatch.setattr(sa.get_settings(), "google_places_api_key", "", raising=False)
+        out = asyncio.run(sa.geocode_with_bbox("Pune"))
+        assert out is not None
+        lat, lng, bbox = out
+        assert bbox == (18.40, 73.74, 18.64, 74.00)  # (south, west, north, east)

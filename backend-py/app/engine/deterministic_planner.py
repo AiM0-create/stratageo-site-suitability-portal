@@ -107,6 +107,29 @@ def extract_prompt_place_coords(raw_prompt: str) -> list[str]:
     return out
 
 
+# v1.6.8 — explicit search-radius / catchment override in the user's own
+# words ("radius of 1.5 km", "1.2 km catchment", "catchment of 800 m").
+# Answers the user question "why is the radius always 0.8 km — can it not be
+# changed?": 0.8 km is the archetype's reviewed default; this makes it
+# customer-controllable per prompt, deterministically, clamped to a sane
+# screening band (200 m – 5 km).
+_RADIUS_OVERRIDE_RE = re.compile(
+    r"(?:radius|catchment)\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*(km|m)\b"
+    r"|(\d+(?:\.\d+)?)\s*(km|m)\b\s*(?:radius|catchment)",
+    re.I,
+)
+
+
+def parse_radius_override_m(raw_prompt: str) -> int | None:
+    m = _RADIUS_OVERRIDE_RE.search(raw_prompt or "")
+    if not m:
+        return None
+    val = float(m.group(1) or m.group(3))
+    unit = (m.group(2) or m.group(4) or "m").lower()
+    meters = val * 1000 if unit == "km" else val
+    return int(max(200, min(5000, meters)))
+
+
 # v1.5.2 — user asked for block/intersection-level output → res-10 grid.
 _BLOCK_GRANULARITY_RE = re.compile(
     r"\b(intersections?|blocks?|street\s+corners?|street[- ]level|corner\s+plots?)\b",
@@ -313,6 +336,18 @@ def apply_deterministic_plan(
     # recorded note) if the study area would explode the hex budget.
     if _BLOCK_GRANULARITY_RE.search(intent.rawPrompt or "") and spec["grid"]["resolution"] < 10:
         spec["grid"]["resolution"] = 10
+
+    # 3a-bis. v1.6.8 — apply an explicit radius/catchment from the prompt to
+    # every euclidean catchment (walk/drive catchments stay time-based). The
+    # displayed "Search Radius" follows automatically (it is the max layer
+    # catchment).
+    _radius_m = parse_radius_override_m(intent.rawPrompt or "")
+    if _radius_m:
+        for _l in spec.get("layers") or []:
+            _c = _l.get("catchment") if isinstance(_l, dict) else None
+            if isinstance(_c, dict) and _c.get("type") == "euclidean":
+                _c["meters"] = _radius_m
+        spec["searchRadiusOverrideM"] = _radius_m
 
     # 3b. v1.5.2 — canonical objective. The LLM re-phrased the objective
     # differently for the IDENTICAL prompt across runs ("3 candidate
