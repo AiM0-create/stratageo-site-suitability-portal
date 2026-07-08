@@ -4,6 +4,19 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [Unreleased — housekeeping] — 2026-07-08 — Historical docs archived
+
+No code changed; no version bump; no backend redeploy. 34 version-specific
+historical documents (v0.8.x–v1.4.x release notes, deployment checklists,
+post-deploy smoke tests, phase audits, superseded reports, and the
+`upgrade_backups/` baseline) moved from `docs/` into `docs/archive/` with an
+index README; the 8 living documents (engine change log, QA findings,
+security review, current-state audits, framework walkthroughs, known
+limitations) stay at `docs/` root. CHANGELOG/README pointers to the moved
+files updated. A `v1.6.7` release tag was added on GitHub.
+
+---
+
 ## [1.6.7] — 2026-07-08 — Report Map & Weight-Responsive Grid Ranks
 
 Cumulative release (includes the boss-numbered v1.6.5 and v1.6.6 fixes that
@@ -681,7 +694,7 @@ The local `OPENAI_API_KEY` was expired and `ORS_API_KEY` / `GOOGLE_PLACES_API_KE
 - **Config flags**: `STRATAGEO_DETERMINISTIC_PLANNING=true`, `STRATAGEO_SPEC_TEMPERATURE=0.0`, `STRATAGEO_SPEC_SEED=42`.
 - **SpecV2 v2.2**: new fields `planningMode`, `archetypeSource`, `weightsSource`, `llmRole`, `planningFingerprint`, `specFingerprint`, `normalizedPrompt`, `constraintEnforcementRecords`, `llmSuggestedButNotApplied`, `relaxationOptions`.
 - **Golden test suite** (`tests/golden/test_deterministic_planning.py`): 24 tests, same prompt × 5 runs asserts stable archetype/factors/weights/fingerprint.
-- `docs/V1.2_NONDETERMINISM_AUDIT.md`, `docs/RELEASE_NOTES_v1.2.0.md`, `docs/DEPLOYMENT_CHECKLIST_v1.2.0.md`, `docs/V1.2_DETERMINISM_VERIFICATION.md`.
+- `docs/archive/V1.2_NONDETERMINISM_AUDIT.md`, `docs/archive/RELEASE_NOTES_v1.2.0.md`, `docs/archive/DEPLOYMENT_CHECKLIST_v1.2.0.md`, `docs/archive/V1.2_DETERMINISM_VERIFICATION.md`.
 
 ### Changed
 - `llm.py`: temperature set to 0 (from 0.2) + seed=42 in deterministic mode; deterministic planner applied after LLM spec building at `framework`/`ready` stage.
@@ -752,9 +765,9 @@ The local `OPENAI_API_KEY` was expired and `ORS_API_KEY` / `GOOGLE_PLACES_API_KE
 - **Universal critic contract**: returns `shouldWithholdRecommendations`, `recommendationModeOverride`, `downgrades`, `confidenceAdjustment`, `requiredFixes`, `userFacingWarning`.
 - **Upgraded recommendation labels**: `RECOMMENDED`, `CANDIDATE_ZONE`, `WEAK_CANDIDATE`, `RAW_DIAGNOSTIC`, `EXCLUDED`, `NO_RELIABLE_RECOMMENDATION` replacing simple STRONG/VIABLE/WEAK.
 - **Frontend type extensions**: `AnalysisResult` and `LocationData` carry new v1.1.0 fields. ResultsDrawer shows Rank Score, Absolute Viability, and Confidence alongside composite score.
-- `docs/upgrade_backups/V1.1.0_BASELINE.md` — rollback reference.
-- `docs/RELEASE_NOTES_v1.1.0.md` — full release narrative.
-- `docs/DEPLOYMENT_CHECKLIST_v1.1.0.md` — staging / deployment checklist.
+- `docs/archive/upgrade_backups/V1.1.0_BASELINE.md` — rollback reference.
+- `docs/archive/RELEASE_NOTES_v1.1.0.md` — full release narrative.
+- `docs/archive/DEPLOYMENT_CHECKLIST_v1.1.0.md` — staging / deployment checklist.
 
 ### Changed
 - `config.py`: all model names now configurable via env vars; cost-mode tiers control LLM call budget.
@@ -779,7 +792,7 @@ The local `OPENAI_API_KEY` was expired and `ORS_API_KEY` / `GOOGLE_PLACES_API_KE
 
 ## [1.0.3] — 2026-06 — Spatial Reliability Upgrade
 
-See `docs/SPATIAL_RELIABILITY_UPGRADE_REPORT.md`.
+See `docs/archive/SPATIAL_RELIABILITY_UPGRADE_REPORT.md`.
 
 ---
 

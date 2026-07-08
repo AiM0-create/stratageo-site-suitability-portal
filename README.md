@@ -414,7 +414,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 - [`CHANGELOG.md`](CHANGELOG.md) — every release, most recent first
 - [`docs/STRATAGEO_PORTAL_LATEST_PROJECT_AUDIT.md`](docs/STRATAGEO_PORTAL_LATEST_PROJECT_AUDIT.md) — critical architecture/performance audit that motivated PlannerLite (v1.4.9); a good starting point for understanding why the pipeline is shaped the way it is
 - [`docs/STRATAGEO_V1_4_KNOWN_LIMITATIONS.md`](docs/STRATAGEO_V1_4_KNOWN_LIMITATIONS.md)
-- `docs/` contains 30+ additional release-note, deployment-checklist, and phase-audit files from earlier versions (v1.0.x–v1.3.x) — browse the directory for full history
+- [`docs/analysis-engine-v1.5-change-log.md`](docs/analysis-engine-v1.5-change-log.md) — living per-change engine log (v1.5.0 onward): what changed, why, risk, rollback
+- [`docs/archive/`](docs/archive/) — historical version-specific documents (v0.8.x–v1.4.x release notes, deployment checklists, smoke tests, phase audits), kept for the audit trail
 
 ---
 
