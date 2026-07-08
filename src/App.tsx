@@ -9,7 +9,8 @@ import { isAnalysisSpecWithPoints, isConfirmationPhrase, isFollowUpQuestion } fr
 import { normalizeAnalysisResult } from './services/resultNormalizer';
 import type { SpecV2, AnalysisPhase } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
-import { recalculateWithWeights, reweightHexGrid, weightsDiffer } from './services/mcdaEngine';
+import { recalculateWithWeights, reweightHexGrid, weightsDiffer, computeGridRanks, selectTopCellsFromGrid, type ScreeningCell } from './services/mcdaEngine';
+import { renderMapFigure } from './services/mapFigure';
 import { parseCSV } from './services/csvParser';
 import { resolveContext } from './services/contextResolver';
 import { compareToBenchmark } from './services/benchmarks';
@@ -236,6 +237,21 @@ const App: React.FC = () => {
   const handleWeightsReset = useCallback(() => {
     setCustomWeights(defaultWeights);
   }, [defaultWeights]);
+
+  // v1.6.7 — every eligible cell ranked under the CURRENT weights, so the map
+  // can label cells "Rank 17 of 214" and re-rank live when sliders move.
+  const gridRanks = useMemo(() => computeGridRanks(displayHexGrid), [displayHexGrid]);
+
+  // v1.6.7 — when weights are adjusted, re-SELECT the top-X zones from the
+  // whole re-weighted grid (not just re-sort the original shortlist). These
+  // are screening-basis picks: no isochrone/routing/Places verification has
+  // run for them — the UI labels them accordingly.
+  const screeningCandidates: ScreeningCell[] = useMemo(() => {
+    if (!weightsAdjusted || !displayHexGrid) return [];
+    const topX = (spec as any)?.output?.topN ?? Math.max(locations.length, 3);
+    const rings = (spec as any)?.output?.minCandidateSeparationHexRings ?? 2;
+    return selectTopCellsFromGrid(displayHexGrid, topX, rings);
+  }, [weightsAdjusted, displayHexGrid, spec, locations.length]);
 
   const selectedRecalculated = useMemo(() => {
     return locations.filter(loc => selectedLocations.some(sl => sl.name === loc.name));
@@ -1176,6 +1192,34 @@ const App: React.FC = () => {
       });
       gap(5);
 
+      // ── v1.6.7: Study area map — the core visual deliverable ──
+      // Self-rendered analytical figure (choropleth + boundary + ranked
+      // pins + legend + scale bar). No basemap tiles: keeps the report free
+      // of tile-licensing/CORS issues and every pixel derives from the
+      // analysis itself.
+      try {
+        const fig = renderMapFigure({
+          hexGrid: (result as any).hexGrid ?? [],
+          locations: ranked,
+          studyAreaBoundary: (result as any).studyAreaBoundary,
+          withheld: (result as any).recommendationWithheld === true,
+          weightsAdjusted,
+        });
+        if (fig) {
+          const imgW = cw;
+          const imgH = imgW / fig.aspect;
+          need(imgH + 16);
+          hline(); gap(4);
+          sectionHead('Study Area Map — Suitability Surface & Ranked Zones');
+          pdf.addImage(fig.dataUrl, 'PNG', ml, y, imgW, imgH);
+          y += imgH + 3;
+          pdf.setFontSize(6.5); pdf.setFont('helvetica','normal'); T(C.s5);
+          pdf.text('Zones are H3 micro-market cells (screening level), not parcels. Exact coordinates for each ranked zone are listed in the detail pages.', ml, y);
+          y += 5;
+          gap(3);
+        }
+      } catch { /* the map figure must never break the report */ }
+
       // ── Criteria overview table ──
       if (ranked[0]?.criteria_breakdown.length > 0) {
         need(6 + ranked[0].criteria_breakdown.length * 6.5 + 10);
@@ -1235,6 +1279,9 @@ const App: React.FC = () => {
         // Coords
         pdf.setFontSize(7); pdf.setFont('helvetica','normal'); T(C.s5);
         pdf.text(`${loc.lat.toFixed(5)}, ${loc.lng.toFixed(5)}   |   Search radius: ${(loc.searchRadiusM/1000).toFixed(1)} km`, ml + 15, y + 15.5);
+        // v1.6.7 — one-tap navigation for the field-validation visit
+        pdf.setTextColor(29, 78, 216);
+        pdf.textWithLink('Open in Google Maps', ml + 15 + 62, y + 15.5, { url: `https://maps.google.com/?q=${loc.lat.toFixed(6)},${loc.lng.toFixed(6)}` });
         // Score pill
         F(ac); pdf.roundedRect(pw-mr-24, y+4, 22, 14, 2, 2, 'F');
         pdf.setFontSize(18); pdf.setFont('helvetica','bold'); T(C.white);
@@ -1596,6 +1643,8 @@ const App: React.FC = () => {
           showBuffers={showBuffers}
           bufferRadiusM={spec?.userPointConstraints?.[0]?.radiusM}
           hexGrid={displayHexGrid}
+          cellRanks={gridRanks}
+          screeningCandidates={screeningCandidates}
           catchments={result?.catchments}
           recommendationWithheld={result?.recommendationWithheld}
           studyAreaBoundary={result?.studyAreaBoundary}
@@ -1702,6 +1751,8 @@ const App: React.FC = () => {
             onWeightChange={handleWeightChange}
             defaultWeights={defaultWeights}
             weightsAdjusted={weightsAdjusted}
+            screeningCandidates={screeningCandidates}
+            routeConstraintPresent={Boolean((spec as any)?.routeConstraint)}
             onWeightsReset={handleWeightsReset}
             heatmapType={heatmapType}
             onHeatmapChange={setHeatmapType}

@@ -506,3 +506,63 @@ export function generateSummary(
 
   return parts.join(' ');
 }
+
+/** v1.6.7 — rank every eligible (non-excluded) cell by its current score.
+ * Returns h3 → rank (1 = best) plus the eligible total, so the map can say
+ * "Rank 17 of 214". Recomputes instantly under custom weights. */
+export function computeGridRanks(hexGrid: HexGridCell[] | undefined): { ranks: Record<string, number>; total: number } {
+  if (!hexGrid || hexGrid.length === 0) return { ranks: {}, total: 0 };
+  const eligible = hexGrid.filter(c => !c.excluded && typeof c.score === 'number');
+  const sorted = [...eligible].sort((a, b) => b.score - a.score);
+  const ranks: Record<string, number> = {};
+  sorted.forEach((c, i) => { ranks[c.h3] = i + 1; });
+  return { ranks, total: eligible.length };
+}
+
+const _haversineM = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (bLat - aLat) * r, dLng = (bLng - aLng) * r;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+};
+
+export interface ScreeningCell {
+  h3: string;
+  lat: number;
+  lng: number;
+  score: number;
+  rank: number;
+}
+
+/** v1.6.7 — client-side top-X selection over the (re-weighted) grid, with a
+ * near-duplicate separation approximating the backend's H3 ring rule via
+ * centroid distance (rings x cell width). Screening basis only — the caller
+ * MUST label these as unverified: no isochrone/routing/Places refinement has
+ * run for them. */
+export function selectTopCellsFromGrid(
+  hexGrid: HexGridCell[] | undefined,
+  topX: number,
+  separationRings = 2,
+): ScreeningCell[] {
+  if (!hexGrid || hexGrid.length === 0 || topX <= 0) return [];
+  const { ranks } = computeGridRanks(hexGrid);
+  const cells = hexGrid
+    .filter(c => !c.excluded && typeof c.score === 'number' && Array.isArray(c.boundary) && c.boundary.length >= 3)
+    .map(c => {
+      const lat = c.boundary.reduce((s, p) => s + p[0], 0) / c.boundary.length;
+      const lng = c.boundary.reduce((s, p) => s + p[1], 0) / c.boundary.length;
+      // cell width (flat-to-flat) ≈ bbox height of the hexagon in metres
+      const lats = c.boundary.map(p => p[0]);
+      const widthM = (Math.max(...lats) - Math.min(...lats)) * 111_320;
+      return { h3: c.h3, lat, lng, score: c.score, rank: ranks[c.h3] ?? 0, widthM };
+    })
+    .sort((a, b) => b.score - a.score);
+  const minSepM = separationRings * (cells[0]?.widthM || 500);
+  const chosen: ScreeningCell[] = [];
+  for (const c of cells) {
+    if (chosen.length >= topX) break;
+    if (chosen.some(k => _haversineM(k.lat, k.lng, c.lat, c.lng) < minSepM)) continue;
+    chosen.push({ h3: c.h3, lat: c.lat, lng: c.lng, score: c.score, rank: c.rank });
+  }
+  return chosen;
+}

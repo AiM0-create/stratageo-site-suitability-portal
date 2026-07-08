@@ -1891,6 +1891,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         len(_contract_violations), int((_time.monotonic() - _t0) * 1000),
     )
 
+    _route_dropped = [ci for ci in candidates if not passes_required_routes(ci)]
     eligible = [ci for ci in candidates if passes_required_routes(ci)] or candidates
     finals = sorted(
         eligible,
@@ -1899,14 +1900,20 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     )[: spec.output.topN]
     # v1.6.4 — candidate-shortfall transparency: when fewer zones survive than
     # the user asked for, say so and say why, instead of silently returning a
-    # shorter list (a long-standing known gap).
+    # shorter list. v1.6.6 — name the ACTUAL filter responsible: in live runs
+    # the dominant cause was the required travel-time route check, which the
+    # original wording ("scoring, exclusions, separation") did not mention.
     if len(finals) < spec.output.topN:
+        _causes = ["scoring", "hard exclusions",
+                   f"the {spec.output.minCandidateSeparationHexRings}-ring "
+                   "near-duplicate separation rule"]
+        if _route_dropped and len(_route_dropped) < len(candidates):
+            _causes.insert(0, f"the required travel-time route check "
+                              f"(which {len(_route_dropped)} shortlisted zone(s) failed)")
         notes.append(
             f"Requested {spec.output.topN} candidate zones; {len(finals)} distinct "
-            "viable zone(s) survived scoring, hard exclusions and the "
-            f"{spec.output.minCandidateSeparationHexRings}-ring near-duplicate "
-            "separation rule within this study area. Widening the study area or "
-            "relaxing exclusions may yield more."
+            f"viable zone(s) survived {', '.join(_causes)} within this study "
+            "area. Widening the study area or relaxing constraints may yield more."
         )
 
     # ── 8. Build result (names resolved in parallel) ────────────────

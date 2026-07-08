@@ -139,6 +139,31 @@ def build_location(
             just += f" {layer.whyItMatters}"
         if layer.proxyWarning:
             just += f" ⚠ Proxy caveat: {layer.proxyWarning}"
+        # v1.6.5 — comparative context for refined scores (user-reported
+        # confusion: "score 0.0 but 934 features observed"). Refined scores are
+        # RELATIVE — they compare the shortlisted candidates against each other
+        # (0 = weakest of the shortlist, 10 = strongest, direction applied).
+        # 934 co-tenancy features is objectively plenty; 0.0 only means it was
+        # the lowest AMONG THE CANDIDATES. Each refined criterion now says so,
+        # with the observed range, instead of leaving 0.0 to read as "terrible".
+        comparative = None
+        _ls = scores.get(layer.id) or scores.get(layer.name)
+        if (
+            d.get("refined") and d.get("discriminating", True)
+            and _ls is not None and _ls.refined and hex_index in _ls.refined
+            and len(_ls.refined) >= 2
+        ):
+            _vals = [float(v) for v in _ls.refined.values()]
+            _lo, _hi = min(_vals), max(_vals)
+            _mine = float(_ls.refined[hex_index])
+            _pos = ("highest" if _mine >= _hi else "lowest" if _mine <= _lo else "mid-range")
+            comparative = {
+                "basis": "relative-to-shortlist",
+                "n": len(_vals),
+                "min": round(_lo, 1),
+                "max": round(_hi, 1),
+                "position": _pos,
+            }
         criteria.append({
             "name": layer.name,
             "weight": layer.weight,
@@ -147,8 +172,15 @@ def build_location(
             "direction": layer.direction,
             "required": getattr(layer, "required", False),
             "justification": just,
-            "evidenceBasis": _evidence_basis(d, raw, layer.source.provider)
-                if layer.confidence != "low" else "ai-generated",
+            # v1.6.5 — the evidence badge reports the ACTUAL data source; a
+            # low-confidence generic proxy is flagged separately instead of
+            # overwriting the source with an opaque "ai-generated" label
+            # (real OSM/Google counts were showing as "AI").
+            "evidenceBasis": _evidence_basis(d, raw, layer.source.provider),
+            "lowConfidenceProxy": (
+                layer.confidence == "low" or layer.source.provider == "custom"
+            ),
+            **({"comparative": comparative} if comparative else {}),
             "osmQuery": ", ".join(layer.source.tags) if layer.source.provider == "osm" else None,
         })
         osm_signals[_signal_key(layer.name)] = int(raw)
@@ -382,4 +414,10 @@ async def write_explanations(
         return data.get("summary", ""), data.get("reasonings", [])
     except Exception as e:
         logger.warning("explanation pass failed: %s", e)
-        return f"MCDA comparison of {len(locations)} candidates for {spec.businessType}.", []
+        n = len(locations)
+        return (
+            f"MCDA assessment of the single surviving candidate zone for {spec.businessType}."
+            if n == 1 else
+            f"MCDA comparison of {n} candidates for {spec.businessType}.",
+            [],
+        )

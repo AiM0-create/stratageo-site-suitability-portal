@@ -408,3 +408,24 @@ Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`, backe
 ### 49. Tests
 - New `tests/test_v164_map_and_coords.py` (10 tests): bracketed/parens/@ coordinate extraction with clean names, plain names untouched, swapped-order auto-correction, out-of-range rejection, the customer's exact Kolkata prompt yielding four clean in-Kolkata places, coordinate-tagged places overriding an LLM-stripped study area end-to-end through `apply_deterministic_plan`, and the Google country-level-match rejection (mocked).
 - **604 passed** (594 + 10 new); frontend `tsc` clean, Vitest 66 passed, build clean.
+
+---
+
+## v1.6.7 — Report Map & Weight-Responsive Grid Ranks (cumulative; includes v1.6.5/v1.6.6)
+
+### 50. `backend-py/app/engine/results.py` + `backend-py/app/engine/scoring.py` — relative-score transparency + spread-aware refit (v1.6.5)
+- **What:** each refined, discriminating criterion on a candidate now carries a `comparative` block (`basis: relative-to-shortlist`, `n`, `min`, `max`, `position: highest|mid-range|lowest`); `evidenceBasis` always reports the actual provider (OSM/Google) with a separate `lowConfidenceProxy` boolean instead of being overwritten by an opaque "ai-generated" label; the LLM-failure fallback summary handles n=1 grammatically. `refit_refined_layers()` in scoring.py compresses the refined normalization when the shortlist's values are nearly identical (no more 934 vs 1010 stretching to 0.0 vs 10.0), preserves ranking order, keeps full-range behavior for genuinely different values, and flags constant layers non-discriminating.
+- **Why (live-reported):** "score 0.0 but 934 features observed" read as "terrible site" when it only meant "lowest among the shortlisted candidates"; and real OSM counts were being labeled "AI-generated".
+- **Risk:** low-medium (scoring normalization touched) — pinned by 4 new tests including order preservation. **Rollback:** tag `rollback-pre-v1.6.7`.
+
+### 51. `backend-py/app/services/jobs.py` — shortfall note names the responsible filter (v1.6.6)
+- **What:** the v1.6.4 candidate-shortfall note now enumerates actual causes, leading with the required travel-time route check (and its failed-zone count) when that's what dropped candidates.
+- **Why:** the dominant live cause of "asked 3, got 1" was route filtering, which the original wording never mentioned.
+
+### 52. Frontend — report map figure, Google Maps links, live grid ranks, weight-responsive top-X (v1.6.7)
+- **What:** new `src/services/mapFigure.ts` renders an offscreen-canvas analytical map (H3 surface with the on-screen colour ramp and contrast stretch, excluded land grey, AOI boundary, numbered ranked pins, legend, scale bar, data-credit caption; grey variant when the recommendation is withheld; custom-weights disclosure) embedded in the PDF report by `App.tsx`; ranked-zone pages get "Open in Google Maps" links. `mcdaEngine.computeGridRanks()` ranks every eligible cell (hover tooltip: "rank X of N eligible cells", recomputed live under sliders); `selectTopCellsFromGrid()` re-selects a screening-basis top-X from the whole re-weighted grid with a centroid-distance approximation of the backend's H3-ring separation, rendered as dashed amber pins (`MapView.tsx`) plus an explicitly-unverified list in `ResultsDrawer.tsx` with a bold routing caveat when the spec carries a travel-time constraint. Deliberately NOT route-checking every cell: one routing call per cell × hundreds of cells would multiply cost/runtime ~100-fold; the correct middle tier (verify a larger pool during the original run) is noted as a future config option.
+- **Risk:** low — all client-side, no new provider calls; the verified/unverified distinction is explicit everywhere the amber selection appears. **Rollback:** tag `rollback-pre-v1.6.7`.
+
+### 53. Tests
+- 4 new backend tests (spread-aware refit: near-identical compression, full-range preservation, order preservation, constant-flagging) appended to `test_v164_map_and_coords.py`; 9 new frontend tests (ranking, re-selection, separation, exclusion handling) in `reweighting.test.ts`.
+- **608 backend passed** (604 + 4); frontend `tsc` clean, Vitest **75 passed** (66 + 9), build clean.

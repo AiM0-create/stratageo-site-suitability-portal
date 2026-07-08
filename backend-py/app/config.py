@@ -111,6 +111,24 @@ v1.6.4: Map coherence & coordinate fidelity — three live-reported issues.
   the analysis ran near the centroid of India). Country/state-level geocode
   matches are now rejected outright for every brief. Bonus: a candidate
   shortfall (< topN survivors) is now explained in the result notes.
+v1.6.7 (cumulative, includes v1.6.5/v1.6.6): Report map & weight-responsive
+  grid ranks. v1.6.5 — refined scores are RELATIVE to the shortlist and now
+  say so: each refined criterion carries a comparative block (n/min/max/
+  position, basis relative-to-shortlist) so "0.0 with 934 features observed"
+  reads as "lowest among candidates", not "terrible"; spread-aware refit in
+  scoring.py stops near-identical refined values stretching to 0..10;
+  evidence badges report the ACTUAL data source with a separate
+  lowConfidenceProxy flag instead of an opaque "ai-generated" overwrite.
+  v1.6.6 — the candidate-shortfall note names the actual responsible filter
+  (e.g. the required travel-time route check, with the failed count).
+  v1.6.7 (frontend) — the PDF report embeds a self-rendered analytical map
+  figure (H3 surface, AOI boundary, ranked pins, legend, scale bar; grey
+  when the recommendation is withheld; custom weights disclosed in the
+  caption) plus per-zone "Open in Google Maps" links; every eligible grid
+  cell is ranked (hover: "rank 17 of 214"), ranks recompute live under the
+  weight sliders, and moving weights re-SELECTS a screening-basis top-X from
+  the whole grid (dashed amber pins + list), explicitly labeled unverified
+  with a bold routing caveat when a travel-time constraint exists.
 """
 from functools import lru_cache
 from typing import Literal
@@ -118,9 +136,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.6.4"
+APP_VERSION     = "1.6.7"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00063"
+ENGINE_VERSION  = "stratageo-engine-00064"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -129,7 +147,7 @@ ENGINE_VERSION  = "stratageo-engine-00063"
 # these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Map Coherence & Coordinate Fidelity"
+RELEASE_NAME    = "Report Map & Weight-Responsive Grid Ranks"
 
 
 class Settings(BaseSettings):

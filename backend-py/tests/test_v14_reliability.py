@@ -659,7 +659,7 @@ class TestHealthCapabilityFlags:
         assert "criticMode" in data
         assert "evidenceVersion" in data
         assert data["evidenceVersion"] == "1.4.0"
-        assert data["appVersion"] == "1.6.4"
+        assert data["appVersion"] == "1.6.7"
 
     def test_verified_metro_always_true(self):
         from fastapi.testclient import TestClient

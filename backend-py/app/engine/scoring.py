@@ -188,7 +188,21 @@ def refit_refined_layers(scores: dict[str, "LayerScores"], candidates: list[int]
             non_discriminating.append(ls.layer.name)
             ls.refined_low, ls.refined_high = lo, lo + 1.0
         else:
-            ls.refined_low, ls.refined_high = lo, hi
+            # v1.6.5 — spread-aware refit. A plain min-max over a tiny candidate
+            # set ALWAYS produces a 0 and a 10, even when the underlying values
+            # are practically identical (e.g. co-tenancy 934 vs 1010 → one site
+            # shows "0.0" next to "934 observed" — user-reported trust-killer,
+            # and a real noise amplifier worth up to the factor's full weight).
+            # The refit window is widened symmetrically so the mapped range is
+            # proportional to the RELATIVE spread: candidates differing by
+            # ≥50% still span the full 0–10; near-identical values compress
+            # toward the neutral 5, honestly reflecting how little this factor
+            # distinguishes them. Ranking ORDER within the factor is unchanged.
+            rel_spread = (hi - lo) / max(abs(hi), abs(lo), 1e-9)
+            k = min(1.0, rel_spread / 0.5)
+            span = (hi - lo) / k
+            mid = (lo + hi) / 2.0
+            ls.refined_low, ls.refined_high = mid - span / 2.0, mid + span / 2.0
     return non_discriminating
 
 

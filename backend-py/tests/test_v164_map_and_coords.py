@@ -118,3 +118,62 @@ class TestGeocodeCoarsenessGuard:
         monkeypatch.setattr(sa.get_settings(), "google_places_api_key", "x", raising=False)
         pt = asyncio.run(sa.geocode("Chinar Park"))
         assert pt == (22.6246, 88.4384), "must skip the country-level match"
+
+
+# ── v1.6.5: spread-aware refit + relative-score transparency ─────────────────
+
+import numpy as np
+from app.engine.scoring import refit_refined_layers, _layer_norm_for_hex
+
+
+class _FakeLayer:
+    def __init__(self):
+        self.direction = "positive"
+        self.weight = 0.2
+        self.id = "cotenancy"
+        self.name = "Commercial co-tenancy"
+
+
+class _FakeLS:
+    """Duck-typed LayerScores good enough for refit + norm."""
+    def __init__(self, refined: dict[int, float]):
+        self.layer = _FakeLayer()
+        self.refined = refined
+        self.raw = np.zeros(10)
+        self.has_data = True
+        self.discriminating = True
+        self.norm_low, self.norm_high = 0.0, 1.0
+        self.refined_low = self.refined_high = None
+        self.proxy_radius_m = 800
+
+
+def _norms(refined: dict[int, float]) -> dict[int, float]:
+    ls = _FakeLS(refined)
+    refit_refined_layers({"x": ls}, list(refined.keys()))
+    return {ci: _layer_norm_for_hex(ls, ci) for ci in refined}
+
+
+def test_near_identical_values_no_longer_stretch_to_0_and_10():
+    """The reported case in spirit: two sites with objectively-plenty and
+    nearly-equal co-tenancy must not show 0.0 vs 10.0."""
+    n = _norms({0: 934.0, 1: 1010.0})           # ~8% apart
+    lo, hi = min(n.values()), max(n.values())
+    assert hi - lo < 0.25, f"near-identical values spread {lo}..{hi}"
+    assert 0.3 < lo and hi < 0.7                 # both hover near neutral
+
+
+def test_genuinely_different_values_still_use_most_of_the_range():
+    n = _norms({0: 100.0, 1: 1000.0})            # 10x apart
+    assert min(n.values()) < 0.05 and max(n.values()) > 0.95
+
+
+def test_ranking_order_is_preserved_by_compression():
+    n = _norms({0: 934.0, 1: 1200.0, 2: 1672.0})
+    assert n[0] < n[1] < n[2]
+
+
+def test_constant_values_still_neutral_and_flagged():
+    ls = _FakeLS({0: 500.0, 1: 500.0})
+    flagged = refit_refined_layers({"x": ls}, [0, 1])
+    assert flagged == ["Commercial co-tenancy"]
+    assert ls.discriminating is False

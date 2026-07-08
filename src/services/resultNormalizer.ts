@@ -372,8 +372,16 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
     out.critique = {
       ...src.critique,
       headline: asStr(src.critique.headline),
-      confidence: asStr(src.critique.confidence, 'low'),
-      issues: asArr(src.critique.issues),
+      // v1.6.6 FIX — the deterministic critic emits `confidenceLabel`, not
+      // `confidence`; defaulting the missing field to 'low' made EVERY
+      // analysis display "CONFIDENCE: LOW" even when the verdict was
+      // Reliable/High (user-reported). Read the real field; if neither
+      // exists, leave it empty so the drawer hides the chip rather than
+      // inventing a value.
+      confidence: asStr(src.critique.confidence ?? src.critique.confidenceLabel, ''),
+      // The deterministic critic reports its findings under `reasons`; the
+      // drawer read only `issues`, so the audit reasoning never displayed.
+      issues: asArr(src.critique.issues ?? src.critique.reasons),
       whatWouldStrengthen: asArr(src.critique.whatWouldStrengthen),
     };
   } else if (src.critique !== undefined && src.critique !== null) {

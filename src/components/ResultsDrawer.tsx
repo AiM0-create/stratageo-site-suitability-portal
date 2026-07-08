@@ -18,6 +18,10 @@ interface ResultsDrawerProps {
   weightsAdjusted?: boolean;
   /** v1.6.0 (Phase 2) — restore all weights to defaults. */
   onWeightsReset?: () => void;
+  /** v1.6.7 — top-X zones RE-SELECTED from the whole grid under custom weights (screening basis). */
+  screeningCandidates?: { h3: string; lat: number; lng: number; score: number; rank: number }[];
+  /** v1.6.7 — the analysis includes a travel-time route constraint. */
+  routeConstraintPresent?: boolean;
   onWeightChange: (name: string, weight: number) => void;
   heatmapType: HeatmapType;
   onHeatmapChange: (type: HeatmapType) => void;
@@ -181,7 +185,8 @@ const EvidenceTag: React.FC<{ basis: string }> = ({ basis }) => {
     basis === 'insufficient-data'   ? 'No data was available to evaluate this factor — it is excluded from the score, not scored 0 or 10' :
     basis === 'osm-absent'          ? 'Zero features observed in OSM — may be a coverage gap, not genuine absence' :
     basis === 'google-corroborated' ? 'OSM data sparse but Google Places confirms real-world activity here; score floor lifted' :
-    basis === 'osm-observed'        ? 'Score based on features counted from OpenStreetMap Overpass data' : undefined;
+    basis === 'osm-observed'        ? 'Score based on features counted from OpenStreetMap Overpass data' :
+    basis === 'ai-generated'        ? 'This factor\u2019s data definition (what to count) was written by the AI rather than a reviewed playbook — the counted features are real, but treat this factor with extra caution' : undefined;
   return <span className={`evidence-tag ${cls}`} title={title}>{label}</span>;
 };
 
@@ -203,6 +208,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   defaultWeights = {},
   weightsAdjusted = false,
   onWeightsReset,
+  screeningCandidates = [],
+  routeConstraintPresent = false,
   onWeightChange,
   heatmapType,
   onHeatmapChange,
@@ -655,12 +662,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 {result.critique.verdict === 'reliable' ? '✅' : result.critique.verdict === 'unreliable' ? '❌' : '⚠️'}{' '}
                 Analyst review — {result.critique.verdict}
               </span>
-              <span className="review-conf">confidence: {result.critique.confidence}</span>
+              {result.critique.confidence ? (
+                <span
+                  className="review-conf"
+                  title="The review's own confidence in its verdict — how thoroughly this result could be audited — not the quality of the location."
+                >
+                  review confidence: {result.critique.confidence}
+                </span>
+              ) : null}
             </div>
             <p className="review-headline">{result.critique.headline}</p>
             {(result.critique.issues ?? []).length > 0 && (
               <div className="review-section">
-                <div className="review-label">Issues</div>
+                <div className="review-label">{result.critique.verdict === 'reliable' ? 'Checks' : 'Issues'}</div>
                 <ul>{(result.critique.issues ?? []).map((x, i) => <li key={i}>{x}</li>)}</ul>
               </div>
             )}
@@ -996,9 +1010,35 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             <b>Custom weights active.</b> Scores and ranking below are recomputed
             from your weights using this analysis's verified factor data.
             Confidence, stability and verification labels were computed under the
-            default weights. Candidate zones were shortlisted under default
-            weights — to discover and verify <i>different</i> zones under your
-            weights, re-run the analysis.
+            default weights.
+          </div>
+        )}
+        {/* v1.6.7 — top-X RE-SELECTED from the whole grid under custom weights.
+            This closes the "sliders only re-sort the old shortlist" gap: the
+            selection itself now responds to the customer's weights — honestly
+            labeled as screening-basis because Pass-B verification (isochrones,
+            routing, Places) only ran for the original shortlist. */}
+        {!withheld && weightsAdjusted && screeningCandidates.length > 0 && (
+          <div style={{ background: '#fffbeb', border: '1px dashed #d97706', borderRadius: 6, padding: '8px 10px', fontSize: '12px', margin: '0 0 8px', lineHeight: 1.45 }}>
+            <div style={{ fontWeight: 700, color: '#92400e', marginBottom: 4 }}>
+              Top {screeningCandidates.length} zones under YOUR weights (screening basis — dashed amber pins on the map)
+            </div>
+            {screeningCandidates.map((c, i) => (
+              <div key={c.h3} style={{ display: 'flex', gap: 8, padding: '1.5px 0', color: '#78350f' }}>
+                <span style={{ fontWeight: 700, flex: '0 0 18px' }}>{i + 1}.</span>
+                <span style={{ flex: 1 }}>{c.lat.toFixed(5)}, {c.lng.toFixed(5)}</span>
+                <span>score {c.score.toFixed(1)}/10</span>
+                <span style={{ color: '#a16207' }}>grid rank {c.rank}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 5, fontSize: '11px', color: '#92400e' }}>
+              These are selected from every eligible cell using your weights, but have <b>not</b> been
+              verified with real travel-time, routing or Google Places data — only the original
+              candidates were.{routeConstraintPresent && (
+                <> In particular, this analysis includes a <b>travel-time route constraint</b> that has
+                NOT been checked for these zones.</>
+              )} To fully verify them, re-run the analysis with these weights.
+            </div>
           </div>
         )}
         {/* Comparison chart */}
@@ -1217,6 +1257,14 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             <DirectionIcon direction={c.direction} />
                             <span className="criterion-name">{c.name}{(c as any).required && <span title="Required hard constraint" style={{ color: '#dc2626', marginLeft: 3 }}>*</span>}</span>
                             <EvidenceTag basis={c.evidenceBasis} />
+                            {(c as any).lowConfidenceProxy && (
+                              <span
+                                style={{ fontSize: '9px', padding: '1px 5px', borderRadius: 4, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', whiteSpace: 'nowrap' }}
+                                title="Generic AI-selected proxy: the data counted is real (see source tag), but WHAT is counted is a generic stand-in because the business type didn't match a reviewed playbook. Specify the business type more precisely for a curated factor set."
+                              >
+                                AI proxy
+                              </span>
+                            )}
                             <span className="criterion-score">{noData ? '—' : (c.score as number).toFixed(1)}</span>
                           </div>
                           {noData ? (
@@ -1237,6 +1285,24 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                               className="criterion-slider"
                             />
                           </div>
+                          {(() => {
+                            // v1.6.5 — refined scores are RELATIVE to the shortlist;
+                            // say so, or "0.0 next to 934 observed" reads as broken.
+                            const comp = (c as any).comparative;
+                            if (!comp || noData || weightsAdjusted) return null;
+                            const shown = ranked.filter(l => !l.excluded).length;
+                            return (
+                              <div style={{ fontSize: '10.5px', color: '#64748b', padding: '1px 0 2px' }}>
+                                Relative score: {comp.position} of the {comp.n} shortlisted candidates on this
+                                factor (observed range {comp.min}–{comp.max}). 0 = weakest of the shortlist,
+                                10 = strongest{c.direction === 'negative' ? ' (after inverting — less is better here)' : ''} — not an absolute judgement.
+                                {comp.n > shown && (
+                                  <> The comparison includes {comp.n - shown} shortlisted zone(s) that failed a
+                                  required constraint or viability check and are not shown.</>
+                                )}
+                              </div>
+                            );
+                          })()}
                           <p className="criterion-justification">{c.justification}</p>
                         </div>
                         );

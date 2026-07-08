@@ -74,6 +74,10 @@ export interface MCDACriteria {
   weight: number;
   score: number | null;        // null = insufficient data (layer excluded from composite)
   rawValue: number | null;
+  /** v1.6.5 — this factor is a generic AI-selected proxy (low confidence). */
+  lowConfidenceProxy?: boolean;
+  /** v1.6.5 — refined scores compare the shortlisted candidates against each other. */
+  comparative?: { basis: string; n: number; min: number; max: number; position: string };
   direction: CriterionDirection;
   required?: boolean;          // hard-constraint layer
   justification: string;

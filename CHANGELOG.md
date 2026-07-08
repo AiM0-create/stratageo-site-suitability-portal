@@ -4,6 +4,76 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.6.7] — 2026-07-08 — Report Map & Weight-Responsive Grid Ranks
+
+Cumulative release (includes the boss-numbered v1.6.5 and v1.6.6 fixes that
+were never separately shipped). Backend + frontend.
+
+### Added (v1.6.7)
+- **The PDF report now contains the map** (`src/services/mapFigure.ts`) — a
+  self-rendered analytical figure drawn from the analysis data itself (H3
+  suitability surface in the on-screen colours, excluded land greyed, the
+  study-area boundary, numbered pins for ranked zones, a legend, and a scale
+  bar). Deliberately not a tile screenshot: no basemap licensing/CORS risk,
+  cannot fail at render time, and every pixel is defensible. When the
+  recommendation is withheld the figure renders grey (the PDF can never look
+  more confident than the verdict); custom weights are disclosed in the
+  caption. Each ranked zone's detail page also gains a clickable **"Open in
+  Google Maps"** link for field validation.
+- **Every eligible grid cell is ranked** (`computeGridRanks`): hovering a
+  cell shows "Overall suitability: 7.2/10 — rank 17 of 214 eligible cells";
+  ranks recompute instantly under the weight sliders.
+- **The top-X selection now responds to weights** (`selectTopCellsFromGrid`):
+  moving sliders re-selects the top X zones from the whole re-weighted grid
+  (with a centroid-distance approximation of the backend's H3-ring
+  near-duplicate rule) and shows them as dashed amber numbered pins plus a
+  list in the results panel — a zone that was never in the original
+  shortlist can now surface when priorities change. These are explicitly
+  labeled **screening basis — not yet verified** (no isochrone/routing/
+  Places refinement has run for them), with a bold caveat when the prompt
+  carried a travel-time constraint. The original verified candidates keep
+  their green pins and full verification.
+
+### Fixed (v1.6.5, backend)
+- **Refined scores are relative and now say so** — live confusion: a
+  criterion showed "0.0" with "934 features observed". Refined (Pass-B)
+  values compare shortlisted candidates against each other; 0.0 means
+  "lowest among the candidates", not "terrible". Each refined criterion now
+  carries a `comparative` block (basis relative-to-shortlist, n, min, max,
+  position) surfaced in the drawer/report.
+- **Spread-aware refit** (`scoring.py`): near-identical refined values
+  (e.g. 934 vs 1010) no longer contrast-stretch to 0.0 vs 10.0 — they
+  compress toward neutral; genuinely different values still use the full
+  range; constant values stay neutral and are flagged non-discriminating.
+- **Evidence badges report the actual data source** — real OSM/Google counts
+  were displaying as "AI-generated" whenever a layer had low confidence; the
+  source label and a separate `lowConfidenceProxy` flag are now independent.
+- Single-candidate fallback summary no longer says "comparison of 1
+  candidates".
+
+### Fixed (v1.6.6, backend)
+- **The candidate-shortfall note names the actual responsible filter** — in
+  live runs the dominant cause was the required travel-time route check,
+  which the v1.6.4 wording never mentioned; it now leads with it, including
+  how many shortlisted zones failed it.
+
+### Tests
+- 4 new backend tests (spread-aware refit) appended to
+  `test_v164_map_and_coords.py`; 9 new frontend tests (grid ranking,
+  re-selection, separation, exclusions) in `reweighting.test.ts`.
+
+### Validation
+- Backend: **608 passed** (604 + 4 new).
+- Frontend: `tsc --noEmit` clean, Vitest **75 passed** (66 + 9 new),
+  `vite build` clean.
+
+### Deploy
+- Backend: Cloud Run revision `stratageo-engine-00064-…` (see tag below).
+- Tag `rollback-pre-v1.6.7` points at the previously-live commit (`29639eb`,
+  backend revision `stratageo-engine-00063-ph2`).
+
+---
+
 ## [1.6.4] — 2026-07-07 — Map Coherence & Coordinate Fidelity
 
 Backend + frontend release fixing three live-reported issues (customer

@@ -109,3 +109,104 @@ describe('weightsDiffer', () => {
     expect(weightsDiffer({}, {})).toBe(false);
   });
 });
+
+// ── v1.6.6 — critique confidence field-mismatch regression ──────────────────
+// The deterministic critic emits `confidenceLabel`; the UI read `confidence`
+// and DEFAULTED the missing field to 'low', so every analysis displayed
+// "CONFIDENCE: LOW" even when the verdict was Reliable/High (user-reported).
+import { normalizeAnalysisResult } from '../services/resultNormalizer';
+
+describe('critique confidence normalization (v1.6.6)', () => {
+  const base = {
+    status: 'success', locations: [], summary: '', hexGrid: [],
+  };
+
+  it('reads confidenceLabel from the deterministic critic', () => {
+    const out = normalizeAnalysisResult({
+      ...base,
+      critique: { verdict: 'reliable', confidenceLabel: 'High', reasons: ['All deterministic checks passed.'] },
+    } as any);
+    expect((out as any).critique.confidence).toBe('High');
+  });
+
+  it('never invents "low" when no confidence field exists', () => {
+    const out = normalizeAnalysisResult({
+      ...base,
+      critique: { verdict: 'reliable' },
+    } as any);
+    expect((out as any).critique.confidence).toBe('');
+  });
+
+  it('deterministic critic reasons surface as issues for display', () => {
+    const out = normalizeAnalysisResult({
+      ...base,
+      critique: { verdict: 'weak', confidenceLabel: 'Medium', reasons: ['Coverage thin in the north.'] },
+    } as any);
+    expect((out as any).critique.issues).toEqual(['Coverage thin in the north.']);
+  });
+
+  it('an explicit LLM-critic confidence still wins', () => {
+    const out = normalizeAnalysisResult({
+      ...base,
+      critique: { verdict: 'reliable', confidence: 'high', confidenceLabel: 'High' },
+    } as any);
+    expect((out as any).critique.confidence).toBe('high');
+  });
+});
+
+// ── v1.6.7 — grid ranks + client-side top-X re-selection ────────────────────
+import { computeGridRanks, selectTopCellsFromGrid } from '../services/mcdaEngine';
+
+const gridCell = (h3: string, score: number, lat: number, lng: number, excluded = false): HexGridCell => ({
+  h3, score, excluded,
+  // ~350m-wide pseudo-hex around the centroid
+  boundary: [
+    [lat + 0.0016, lng], [lat + 0.0008, lng + 0.0014], [lat - 0.0008, lng + 0.0014],
+    [lat - 0.0016, lng], [lat - 0.0008, lng - 0.0014], [lat + 0.0008, lng - 0.0014],
+  ] as [number, number][],
+});
+
+describe('computeGridRanks (v1.6.7)', () => {
+  it('ranks eligible cells 1..n by score, excluded cells unranked', () => {
+    const g = [gridCell('a', 8, 22.50, 88.30), gridCell('b', 9, 22.52, 88.32),
+               gridCell('c', 3, 22.54, 88.34), gridCell('x', 10, 22.56, 88.36, true)];
+    const { ranks, total } = computeGridRanks(g);
+    expect(total).toBe(3);
+    expect(ranks['b']).toBe(1);
+    expect(ranks['a']).toBe(2);
+    expect(ranks['c']).toBe(3);
+    expect(ranks['x']).toBeUndefined();
+  });
+
+  it('re-ranking responds to reweighted scores (the whole point)', () => {
+    const g1 = [gridCell('a', 8, 22.5, 88.3), gridCell('b', 6, 22.6, 88.4)];
+    const g2 = [gridCell('a', 4, 22.5, 88.3), gridCell('b', 6, 22.6, 88.4)];
+    expect(computeGridRanks(g1).ranks['a']).toBe(1);
+    expect(computeGridRanks(g2).ranks['b']).toBe(1);
+  });
+});
+
+describe('selectTopCellsFromGrid (v1.6.7)', () => {
+  it('picks the best-scoring, spatially separated cells', () => {
+    const g = [
+      gridCell('best', 9.5, 22.500, 88.300),
+      gridCell('neighbour', 9.4, 22.503, 88.300),   // ~330m away → within 2-ring sep
+      gridCell('far', 8.0, 22.560, 88.360),          // ~9km away
+      gridCell('weak', 2.0, 22.700, 88.500),
+    ];
+    const picks = selectTopCellsFromGrid(g, 2, 2);
+    expect(picks.map(p => p.h3)).toEqual(['best', 'far']);  // near-duplicate skipped
+    expect(picks[0].rank).toBe(1);
+  });
+
+  it('never selects excluded cells and respects topX', () => {
+    const g = [gridCell('a', 9, 22.5, 88.3, true), gridCell('b', 8, 22.6, 88.4), gridCell('c', 7, 22.7, 88.5)];
+    const picks = selectTopCellsFromGrid(g, 5, 2);
+    expect(picks.map(p => p.h3)).toEqual(['b', 'c']);
+  });
+
+  it('empty/undefined grid → empty selection', () => {
+    expect(selectTopCellsFromGrid(undefined, 3)).toEqual([]);
+    expect(selectTopCellsFromGrid([], 3)).toEqual([]);
+  });
+});

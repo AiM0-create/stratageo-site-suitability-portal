@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.6.4 — Map Coherence & Coordinate Fidelity**
+**Current version: v1.6.7 — Report Map & Weight-Responsive Grid Ranks**
 
 ---
 
@@ -20,6 +20,16 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.6.7 Highlights
+
+- **The PDF report now contains the map** — a self-rendered analytical figure (H3 surface, AOI boundary, numbered ranked pins, legend, scale bar) drawn entirely from the analysis data; grey when the recommendation is withheld, custom weights disclosed in the caption. Each ranked zone gets an "Open in Google Maps" link for field validation.
+- **Every eligible grid cell is ranked** — hover any cell for "rank X of N eligible cells", recomputed live as you move weight sliders.
+- **Top-X selection responds to weights** — sliders re-select the best zones from the whole re-weighted grid (dashed amber pins + list), explicitly labeled screening-basis/unverified with a bold routing caveat; original verified candidates keep their green pins.
+- **Refined scores say they're relative** (v1.6.5) — "0.0" with 934 observed features now explains it's the lowest *among the shortlist* (with the observed range); near-identical values no longer stretch to 0-vs-10; real OSM/Google counts are no longer mislabeled "AI-generated".
+- **Shortfall notes name the actual filter** (v1.6.6) — e.g. the required travel-time route check, with the failed count.
 
 ---
 
@@ -208,7 +218,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (604 backend tests) · Vitest (66 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (608 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -374,7 +384,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.6.4** *(current)* | Map Coherence & Coordinate Fidelity — candidate cells recoloured with final refined scores, grey context-only surface when the recommendation is withheld, prompt coordinates used verbatim + country-level geocode matches rejected, candidate-shortfall notes |
+| **v1.6.7** *(current)* | Report Map & Weight-Responsive Grid Ranks — self-rendered map figure in the PDF, Google Maps links per zone, live grid ranks on hover, weight-sliders re-select a screening-basis top-X (explicitly unverified), relative-score transparency + spread-aware refit, shortfall notes name the responsible filter |
+| **v1.6.4** | Map Coherence & Coordinate Fidelity — candidate cells recoloured with final refined scores, grey context-only surface when the recommendation is withheld, prompt coordinates used verbatim + country-level geocode matches rejected, candidate-shortfall notes |
 | **v1.6.3** | H3 Grid-Level Choice — default grid coarsened from res 9 to res 8; plan-card picker for Level 7 (district-scale) vs Level 8 (neighbourhood-scale), preserved across chat turns like the weight sliders |
 | **v1.6.2** *(backend-only)* | Smart Water/Buildability Relevance — fixed a live bug where commercial briefs could land on port/rail/water land; buildability relevance now shares one source of truth with mask selection, water relevance is geography-aware (coastal metros), no timeout regression |
 | **v1.6.1** | Confidence, Report & Quotas — unified confidence verdict, PDF weight-audit table, per-customer admin-granted quota allotments, server-side auth/quota enforcement (off by default), chat rate limiting |

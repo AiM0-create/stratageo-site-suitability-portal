@@ -22,6 +22,10 @@ interface MapViewProps {
   catchments?: CatchmentOutline[];
   /** Spatial Reliability Upgrade v1.0.3 */
   recommendationWithheld?: boolean;             // grey out pins, label as raw candidates
+  /** v1.6.7 — h3 → rank (1 = best) over eligible cells, under current weights */
+  cellRanks?: { ranks: Record<string, number>; total: number };
+  /** v1.6.7 — screening-basis top-X re-selected under custom weights (unverified) */
+  screeningCandidates?: { h3: string; lat: number; lng: number; score: number; rank: number }[];
   studyAreaBoundary?: [number, number][];        // [lat,lng] ring of the AOI
 }
 
@@ -62,6 +66,8 @@ export const MapView: React.FC<MapViewProps> = ({
   hexGrid,
   catchments,
   recommendationWithheld = false,
+  cellRanks,
+  screeningCandidates = [],
   studyAreaBoundary,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -303,14 +309,45 @@ export const MapView: React.FC<MapViewProps> = ({
             ? `${factor}: no data here`
             : recommendationWithheld
               ? `Screening value ${v!.toFixed(1)}/10 — context only: this result was flagged unreliable, no recommendation is made`
-              : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10${factor ? '' : finalTag}`;
+              : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10${factor ? '' : finalTag}${
+                  !factor && cellRanks?.ranks?.[cell.h3]
+                    ? ` — rank ${cellRanks.ranks[cell.h3]} of ${cellRanks.total} eligible cells`
+                    : ''}`;
         poly.bindTooltip(label, { sticky: true, direction: 'top', className: 'sg-tooltip-container' });
         group.addLayer(poly);
       } catch { /* skip malformed cell */ }
     }
     group.addTo(map);
     hexLayerRef.current = group;
-  }, [hexGrid, showHexGrid, heatmapType, recommendationWithheld]);
+  }, [hexGrid, showHexGrid, heatmapType, recommendationWithheld, cellRanks]);
+
+  // ── v1.6.7: screening-basis top-X under custom weights (amber, unverified) ──
+  const screeningLayerRef = useRef<any>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (screeningLayerRef.current) {
+      map.removeLayer(screeningLayerRef.current);
+      screeningLayerRef.current = null;
+    }
+    if (!screeningCandidates || screeningCandidates.length === 0) return;
+    const group = L.layerGroup();
+    screeningCandidates.forEach((c, i) => {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="width:26px;height:26px;border-radius:50%;background:#fffbeb;border:2.5px dashed #d97706;color:#92400e;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,0.3)">${i + 1}</div>`,
+        iconSize: [26, 26], iconAnchor: [13, 13],
+      });
+      const m = L.marker([c.lat, c.lng], { icon });
+      m.bindTooltip(
+        `Top ${i + 1} under YOUR weights — screening basis only (score ${c.score.toFixed(1)}/10, grid rank ${c.rank}). Not yet verified with travel-time / routing / Places data.`,
+        { direction: 'top', className: 'sg-tooltip-container' },
+      );
+      group.addLayer(m);
+    });
+    group.addTo(map);
+    screeningLayerRef.current = group;
+  }, [screeningCandidates]);
 
   // ── Catchment isochrone outlines (v2 engine, selected location) ──
   useEffect(() => {
