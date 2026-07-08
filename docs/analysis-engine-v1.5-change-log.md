@@ -462,3 +462,18 @@ Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`, backe
 ### 60. Tests
 - 8 new backend tests appended to `test_v164_map_and_coords.py`: radius-override phrasings, clamping, route-constraint non-match; Places-New meta-type stripping, legacy mapping/dedupe, empty-list degradation, only-invalid-types degradation; Nominatim boundingbox order translation.
 - **616 backend passed** (608 + 8); frontend `tsc` clean, Vitest **75 passed**, build clean.
+
+---
+
+## v1.7.0 — Scoring Standard v1 (log-space normalization)
+
+### 61. `backend-py/app/models/spec.py` + `backend-py/app/engine/scoring.py` — log_percentile normalization default
+- **What:** `Normalization.method` default changes from `"percentile"` (linear) to `"log_percentile"`, and the Literal gains the third option. `scoring.py` adds `uses_log_scale(layer)` and `tx(layer, values)` — a value transform (`np.log1p`) applied identically at `fit_normalization` time and at every score/refit call site (`pass_a` composite, `refit_refined_layers`, `_layer_norm_for_hex`), so bounds and values always live in the same space. Raw displayed counts are never transformed; `tx()` is defensive (a poisoned list/NaN passes through untransformed so the v1.4.7 `normalize_0_1` scalar-coercion contract still owns degradation).
+- **Why:** every factor the product scores is a POI count and urban counts are heavy-tailed (roughly log-normal). Under linear scaling a single CBD mega-cell (~2,000 co-tenants) compressed the meaningful mid-range (20 vs 110 co-tenants) into nearly one score. Log scaling is the standard, one-sentence-defensible treatment for count data ("log-transformed, then percentile-stretched p5–p95") and spreads the mid-range where siting decisions live. Measured on a 0–2,000 skew: 20 POIs moves ~0.9/10 → 4.4/10, 110 POIs ~5.3/10 → 7.3/10; the 2,000-cell stays 10/10 and a 0-cell stays low.
+- **Governance:** recorded in-code as Scoring Standard v1 (pre-launch decision — no customer scores existed to preserve) and **test-locked** so the default can never drift silently; any future change must be a versioned, disclosed v2. The report/panel methodology disclosure reads `layer.normalization.method` (`results.py` methodology string, `evidence_builder.py` `normalizationMethod`), so it states log-space automatically — no hardcoded text.
+- **Knock-on (by design):** two candidates differing by a modest ratio (934 vs 1,672 ≈ 1.8×) now score closer — honest, since both have plenty; ranking order is unchanged (tested). The "0.0 next to 934 observed" complaint is now structurally impossible.
+- **Risk:** medium — this changes the scoring surface of every new analysis (existing reports unaffected). Ordering is preserved and pinned by tests; the change is disclosed in every report. **Rollback:** tag `rollback-pre-v1.7.0`.
+
+### 62. Tests
+- New `TestLogPercentileNormalization` (5 tests) in `test_v164_map_and_coords.py`: default locked to `log_percentile`; `percentile` still available per-layer; log spreads the mid-range ≥2× more than linear on a skewed distribution; ordering preserved; `tx()` defensive on poisoned values. `test_scoring.py` refined-discrimination assertion relaxed (`== 1.0` → `> 0.8`) since log-space refit softens the endpoints while keeping the never-floored-to-0 contract.
+- **621 backend passed** (616 + 5 new); frontend `tsc` clean, Vitest **75 passed** (backend-only change).

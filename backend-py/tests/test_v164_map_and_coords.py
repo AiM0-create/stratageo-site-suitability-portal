@@ -247,3 +247,68 @@ class TestGeocodeBbox:
         assert out is not None
         lat, lng, bbox = out
         assert bbox == (18.40, 73.74, 18.64, 74.00)  # (south, west, north, east)
+
+
+# ── v1.6.9: classification/normalization — log_percentile option ─────────────
+
+from app.engine.scoring import fit_normalization, normalize, tx, uses_log_scale
+from app.models.spec import Layer as SpecLayer
+
+
+def _layer(method: str) -> SpecLayer:
+    return SpecLayer(
+        id="t", name="T", weight=1.0, direction="positive",
+        source={"provider": "osm", "tags": ["shop=yes"]},
+        catchment={"type": "euclidean", "meters": 800},
+        normalization={"method": method},
+    )
+
+
+class TestLogPercentileNormalization:
+    # Heavy-tailed metro counts: one CBD mega-cell, everything else modest.
+    SKEWED = np.array([0, 2, 5, 8, 12, 20, 35, 60, 110, 2000], dtype=float)
+
+    def test_launch_default_is_log_percentile(self):
+        """Scoring Standard v1 (pre-launch decision): count factors default to
+        log-space percentile normalization. Locked here so it can never
+        change silently once customers hold reports."""
+        lay = SpecLayer(
+            id="d", name="D", weight=1.0, direction="positive",
+            source={"provider": "osm", "tags": ["shop=yes"]},
+            catchment={"type": "euclidean", "meters": 800},
+        )  # NO normalization specified → model default
+        assert lay.normalization.method == "log_percentile"
+        assert uses_log_scale(lay) is True
+        assert (lay.normalization.pLow, lay.normalization.pHigh) == (5.0, 95.0)
+
+    def test_linear_percentile_still_available_per_layer(self):
+        lay = _layer("percentile")
+        lo, hi = fit_normalization(self.SKEWED, lay)
+        assert lo == float(np.percentile(self.SKEWED, 5))
+        assert hi == float(np.percentile(self.SKEWED, 95))
+        assert uses_log_scale(lay) is False
+        assert np.array_equal(tx(lay, self.SKEWED), self.SKEWED)
+
+    def test_log_spreads_midrange_that_linear_compresses(self):
+        lin, log = _layer("percentile"), _layer("log_percentile")
+        lo_l, hi_l = fit_normalization(self.SKEWED, lin)
+        lo_g, hi_g = fit_normalization(self.SKEWED, log)
+        # score gap between a 20-POI and a 110-POI cell:
+        gap_lin = abs(normalize(tx(lin, 110.0), lo_l, hi_l, "positive")
+                      - normalize(tx(lin, 20.0), lo_l, hi_l, "positive"))
+        gap_log = abs(normalize(tx(log, 110.0), lo_g, hi_g, "positive")
+                      - normalize(tx(log, 20.0), lo_g, hi_g, "positive"))
+        assert gap_log > gap_lin * 2, (
+            f"log scaling should differentiate the mid-range (lin={gap_lin:.3f}, log={gap_log:.3f})"
+        )
+
+    def test_log_preserves_ordering(self):
+        lay = _layer("log_percentile")
+        lo, hi = fit_normalization(self.SKEWED, lay)
+        scored = [normalize(tx(lay, v), lo, hi, "positive") for v in self.SKEWED]
+        assert scored == sorted(scored)
+
+    def test_tx_defensive_on_poisoned_values(self):
+        lay = _layer("log_percentile")
+        poisoned = ["not", "numbers"]
+        assert tx(lay, poisoned) is poisoned  # passes through; coercion downstream owns it

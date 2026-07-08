@@ -4,6 +4,64 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.7.0] — 2026-07-08 — Scoring Standard v1 (log-space normalization)
+
+Backend-only. A deliberate **pre-launch** scoring decision, applied from the
+boss's v170 patch (only the genuinely-new normalization content was taken;
+the patch's v1.6.4–v1.6.8 half was already on master, so our v1.6.8 PDF
+basemap work was left untouched).
+
+### Changed
+- **Per-factor normalization default: `percentile` (linear) → `log_percentile`
+  (log-space).** Values are `log1p`-transformed, then percentile-stretched
+  between p5 and p95. Every factor the product scores is a POI **count**, and
+  urban counts are heavy-tailed (roughly log-normal): under linear scaling
+  one CBD mega-cell with ~2,000 co-tenants compressed cells with 20 vs 110
+  co-tenants — a meaningful retail difference — into nearly the same score.
+  Log scaling is the standard statistical treatment for count data and
+  spreads the mid-range where siting decisions actually live. **Ranking order
+  is always preserved** (test-locked); only exaggeration is removed, so the
+  earlier "0.0 next to 934 observed" artifact is now structurally impossible.
+- `scoring.py` gains `uses_log_scale()` and `tx()` (the value transform,
+  applied identically at fit and score time; raw displayed counts are never
+  transformed); every `normalize`/`normalize_0_1`/refit call now routes
+  through it. `tx()` is defensive — a poisoned (list/NaN) value passes
+  through untransformed so the v1.4.7 scalar-coercion contract still owns the
+  degradation path.
+- `percentile` (linear) and `minmax` remain available per-layer for any
+  future non-count metric.
+
+### Governance
+- The decision is recorded in-code as "Scoring Standard v1 — decision taken
+  pre-launch; must not change silently once customers hold reports," and a
+  test **locks the default** so no future edit can drift it unnoticed. From
+  the first paying customer on, any change to the scoring standard should be
+  a versioned, disclosed event (v2) — that is what makes two reports from
+  different months comparable.
+- The methodology disclosure in the report and side panel reads the
+  normalization method from the spec, so it now states log-space
+  normalization automatically — no hardcoded text to go stale.
+
+### Tests
+- New `TestLogPercentileNormalization` (5 tests): default is locked to
+  `log_percentile`; linear percentile still available per-layer; log spreads
+  the mid-range at least 2× more than linear on a realistic skewed
+  distribution; ordering preserved; `tx()` defensive on poisoned values. One
+  existing refined-discrimination assertion relaxed (`== 1.0` → `> 0.8`)
+  since log-space refit softens the endpoints while keeping the
+  never-floored-to-0 contract.
+
+### Validation
+- Backend: **621 passed** (616 + 5 new). Frontend: `tsc` clean, Vitest **75
+  passed**, unaffected (backend-only change).
+
+### Deploy
+- Backend: Cloud Run revision `stratageo-engine-00066-…` (see tag below).
+- Tag `rollback-pre-v1.7.0` points at the previously-live commit (`5cfbe8d`,
+  backend revision `stratageo-engine-00065-4js`).
+
+---
+
 ## [1.6.8] — 2026-07-08 — Pune Run Fixes & Professional Report
 
 Backend (boss patch, cumulative v168 applied via 3-way merge — its

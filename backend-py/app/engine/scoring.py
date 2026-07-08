@@ -69,11 +69,33 @@ def count_within(tree: BallTree | None, hexes: list[HexCell], radius_m: float) -
     return counts.astype(float)
 
 
+def uses_log_scale(layer: Layer) -> bool:
+    """v1.6.9 — layer normalization operates in log1p space."""
+    n = getattr(layer, "normalization", None)
+    return getattr(n, "method", "percentile") == "log_percentile"
+
+
+def tx(layer: Layer, values):
+    """Value transform matching the layer's normalization space. Applied
+    identically at fit time and score time so bounds and values always live
+    in the same space; raw counts stored/displayed are NEVER transformed.
+    Defensive: a poisoned value (list/NaN from a misbehaving provider) passes
+    through untransformed so normalize_0_1's scalar-coercion contract (v1.4.7)
+    still owns the degradation path."""
+    if not uses_log_scale(layer):
+        return values
+    try:
+        return np.log1p(values)
+    except Exception:
+        return values
+
+
 def fit_normalization(values: np.ndarray, layer: Layer) -> tuple[float, float]:
     n = layer.normalization
+    values = tx(layer, values)
     if n.method == "minmax":
         lo, hi = float(values.min()), float(values.max())
-    else:
+    else:  # "percentile" and "log_percentile" both stretch between percentiles
         lo = float(np.percentile(values, n.pLow))
         hi = float(np.percentile(values, n.pHigh))
     if hi <= lo:
@@ -121,7 +143,7 @@ def pass_a(
     if pw > 0:
         for ls in scores.values():
             if ls.has_data:
-                composite += ls.layer.weight * normalize(ls.raw, ls.norm_low, ls.norm_high, ls.layer.direction)
+                composite += ls.layer.weight * normalize(tx(ls.layer, ls.raw), ls.norm_low, ls.norm_high, ls.layer.direction)
         composite /= pw
 
     return composite, scores
@@ -179,6 +201,7 @@ def refit_refined_layers(scores: dict[str, "LayerScores"], candidates: list[int]
         if not ls.refined:
             continue
         vals = np.array([ls.refined[ci] for ci in candidates if ci in ls.refined], dtype=float)
+        vals = tx(ls.layer, vals)  # v1.6.9 — refit in the layer's normalization space
         if vals.size == 0:
             continue
         lo, hi = float(vals.min()), float(vals.max())
@@ -220,9 +243,9 @@ def _layer_norm_for_hex(ls: "LayerScores", hex_index: int) -> float:
             return 0.5
         lo = ls.refined_low if ls.refined_low is not None else ls.norm_low
         hi = ls.refined_high if ls.refined_high is not None else ls.norm_high
-        return normalize_0_1(ls.refined[hex_index], lo, hi, ls.layer.direction,
+        return normalize_0_1(tx(ls.layer, ls.refined[hex_index]), lo, hi, ls.layer.direction,
                              label=f"{ls.layer.id}.refined[{hex_index}]")
-    return normalize_0_1(ls.raw[hex_index], ls.norm_low, ls.norm_high, ls.layer.direction,
+    return normalize_0_1(tx(ls.layer, ls.raw[hex_index]), ls.norm_low, ls.norm_high, ls.layer.direction,
                          label=f"{ls.layer.id}.raw[{hex_index}]")
 
 

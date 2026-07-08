@@ -208,7 +208,18 @@ class Catchment(BaseModel):
 
 
 class Normalization(BaseModel):
-    method: Literal["percentile", "minmax"] = "percentile"
+    # v1.7.0 — LAUNCH DEFAULT: "log_percentile" — a percentile stretch
+    # (pLow–pHigh winsorization) performed in log1p space. Every factor in
+    # this product is a POI COUNT, and urban POI counts are heavy-tailed
+    # (roughly log-normal): one CBD cell with 2,000 co-tenants vs suburbs
+    # with 20. Linear stretching compresses all meaningful mid-range
+    # differentiation toward the bottom of the scale; log scaling is the
+    # standard, defensible treatment for count data. Decision taken PRE-
+    # LAUNCH (no customer scores existed to preserve) — this is Scoring
+    # Standard v1 and must not change silently once customers hold reports.
+    # "percentile" (linear) and "minmax" remain available per layer for any
+    # future non-count metric.
+    method: Literal["percentile", "minmax", "log_percentile"] = "log_percentile"
     pLow: float = 5.0
     pHigh: float = 95.0
 

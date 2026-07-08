@@ -153,6 +153,22 @@ v1.6.8: Pune-run fixes + professional report. Backend (boss patch): (1) a
   sections are omitted ("Planning mode: not set", empty GIS assessment);
   the stale "GPT-4o-mini" methodology text replaced with an accurate v2
   engine description; internal enum values humanized.
+v1.7.0: Scoring Standard v1 (boss patch). The per-factor normalization
+  default changes from linear "percentile" to "log_percentile" — values are
+  log1p-transformed, then percentile-stretched (p5–p95). Every factor in the
+  product is a POI count and urban counts are heavy-tailed (roughly
+  log-normal): under linear scaling one CBD mega-cell forced cells with 20
+  vs 110 co-tenants into nearly the same score; log scaling is the standard,
+  defensible treatment for count data and spreads the mid-range where siting
+  decisions actually live. Ranking order is always preserved (tested); only
+  exaggeration is removed, so the earlier "0.0 next to 934 observed"
+  complaint is now structurally impossible. Recorded in-code and test-locked
+  as Scoring Standard v1 — a deliberate PRE-LAUNCH decision (no customer
+  scores existed to preserve) that must become a versioned, disclosed event
+  if ever changed once customers hold reports. Linear "percentile" and
+  "minmax" remain available per-layer for future non-count metrics. The
+  methodology disclosure (report + panel) reads the method automatically, so
+  it now states log-space normalization without any hardcoded text.
 """
 from functools import lru_cache
 from typing import Literal
@@ -160,9 +176,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.6.8"
+APP_VERSION     = "1.7.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00065"
+ENGINE_VERSION  = "stratageo-engine-00066"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -171,7 +187,7 @@ ENGINE_VERSION  = "stratageo-engine-00065"
 # these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Pune Run Fixes & Professional Report"
+RELEASE_NAME    = "Scoring Standard v1 (log-space normalization)"
 
 
 class Settings(BaseSettings):

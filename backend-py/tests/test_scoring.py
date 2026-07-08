@@ -111,7 +111,12 @@ class TestRefinedNormalizationDiscrimination:
         assert non_disc == []                        # they DO vary → discriminating
         s_hi, _ = scoring.composite_for_hex(spec, scores, 1)   # 18 → top of refined range
         s_lo, _ = scoring.composite_for_hex(spec, scores, 0)   # 5  → bottom
-        assert s_hi == pytest.approx(1.0, abs=0.01)  # not floored to ~0
+        # v1.7.0 Scoring Standard v1: log-space refit + spread-aware
+        # compression soften the endpoints (a 5-vs-18 gap is meaningful but
+        # not extreme in log terms) — the CONTRACT is that refined values
+        # discriminate strongly and are never floored to ~0 by the Pass-A
+        # Euclidean scale.
+        assert s_hi > 0.8                             # near the top, not floored
         assert s_lo < s_hi
 
     def test_constant_refined_layer_scores_neutral_not_zero(self):

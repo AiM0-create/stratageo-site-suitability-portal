@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.6.8 — Pune Run Fixes & Professional Report**
+**Current version: v1.7.0 — Scoring Standard v1 (log-space normalization)**
 
 ---
 
@@ -20,6 +20,14 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.7.0 Highlights
+
+- **Scoring Standard v1 — log-space normalization is now the default.** Every factor is a POI count and urban counts are heavy-tailed; values are log-transformed then percentile-stretched (p5–p95), so the mid-range where siting decisions live actually spreads across the scale instead of being flattened by one dominant hotspot. Ranking order is always preserved; only exaggeration is removed.
+- **Governance built in** — the decision is recorded in-code and **test-locked** as a pre-launch standard, so it can never drift silently; any future change is a versioned, disclosed event. Reports disclose the method automatically.
+- Linear `percentile` and `minmax` remain available per-layer for future non-count metrics.
 
 ---
 
@@ -229,7 +237,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (616 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (621 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -395,7 +403,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.6.8** *(current)* | Pune Run Fixes & Professional Report — city-extent study areas, prompt radius override, Places-New 400 guards, n=1 screening-basis scoring, basemap+north-arrow+legend in the PDF map, Latin-1-safe report text, placeholder/stale sections removed |
+| **v1.7.0** *(current)* | Scoring Standard v1 — log-space (log_percentile) normalization is now the default for count factors, spreading the mid-range and removing linear-scale exaggeration; ordering preserved, test-locked, disclosed automatically |
+| **v1.6.8** | Pune Run Fixes & Professional Report — city-extent study areas, prompt radius override, Places-New 400 guards, n=1 screening-basis scoring, basemap+north-arrow+legend in the PDF map, Latin-1-safe report text, placeholder/stale sections removed |
 | **v1.6.7** | Report Map & Weight-Responsive Grid Ranks — self-rendered map figure in the PDF, Google Maps links per zone, live grid ranks on hover, weight-sliders re-select a screening-basis top-X (explicitly unverified), relative-score transparency + spread-aware refit, shortfall notes name the responsible filter |
 | **v1.6.4** | Map Coherence & Coordinate Fidelity — candidate cells recoloured with final refined scores, grey context-only surface when the recommendation is withheld, prompt coordinates used verbatim + country-level geocode matches rejected, candidate-shortfall notes |
 | **v1.6.3** | H3 Grid-Level Choice — default grid coarsened from res 9 to res 8; plan-card picker for Level 7 (district-scale) vs Level 8 (neighbourhood-scale), preserved across chat turns like the weight sliders |
