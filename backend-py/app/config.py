@@ -169,32 +169,6 @@ v1.7.0: Scoring Standard v1 (boss patch). The per-factor normalization
   "minmax" remain available per-layer for future non-count metrics. The
   methodology disclosure (report + panel) reads the method automatically, so
   it now states log-space normalization without any hardcoded text.
-v1.7.1: Stress-test battery (boss patch). Four deterministic capabilities
-  hardened against a canonical prompt-stress suite. (1) Drive catchments are
-  now traffic-aware by DEFAULT for every playbook that uses them
-  (supermarkets, dark kitchens, warehouses): the free-flow ORS isochrone
-  massively overstates reach in congested Indian metros (observed live:
-  Sealdah, ~30 real minutes from Sector V, sat inside a "10-min" free-flow
-  drive), so Pass-B refinement now routes through Google Routes with
-  typical-traffic times for the shortlist. Any drive catchment that is NOT
-  traffic-aware (older specs, ORS fallback) is labeled "FREE-FLOW estimate —
-  congested-city reach is substantially smaller" everywhere it appears. (2)
-  Explicit factor weights stated in the prompt ("'Student Population'
-  (Weight: 0.7)") are parsed, fuzzy-matched to factors, applied, and audited
-  as weightsSource=user_prompt; an unmatchable request ("Low Rent" — rent is
-  never scored) is disclosed, never silently eaten. (3) Named-place
-  exclusions ("I have branches in Colaba and Worli … exclude my existing
-  areas") are parsed deterministically (ownership context required so the
-  business's own location never matches), each place geocoded and
-  buffer-masked (1.5 km), disclosed in notes; a place that can't be geocoded
-  is flagged NOT enforced, never silently dropped. (4) A rent/floor-area
-  constraint now attaches an explicit feasibility note: the system holds no
-  rent-market/parcel-size data, so the shortlist satisfies the VERIFIABLE
-  constraints only and must be tested against commercial requirements in the
-  field — honest posture, never fabricated market knowledge. Also completes
-  a v1.7.0 display detail: the map's per-factor layer colors now use the same
-  log transform as the composite, and the methodology text spells out the
-  log-space percentile stretch.
 """
 from functools import lru_cache
 from typing import Literal
@@ -202,9 +176,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.7.1"
+APP_VERSION     = "1.7.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00067"
+ENGINE_VERSION  = "stratageo-engine-00066"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -213,7 +187,7 @@ ENGINE_VERSION  = "stratageo-engine-00067"
 # these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Stress-Test Battery (traffic-aware, prompt weights, exclusions)"
+RELEASE_NAME    = "Scoring Standard v1 (log-space normalization)"
 
 
 class Settings(BaseSettings):

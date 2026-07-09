@@ -131,15 +131,7 @@ class CanonicalArchetype:
             if f.catchment_type == "euclidean":
                 catchment = {"type": "euclidean", "meters": f.catchment_meters or 500}
             elif f.catchment_type == "drive":
-                # v1.7.1 — drive catchments are traffic-aware by default. The
-                # free-flow ORS isochrone massively overstates reach in Indian
-                # metros (observed live: Sealdah, ~30 real minutes from Sector
-                # V, inside a "10-min" free-flow drive). trafficAware routes
-                # Pass-B refinement through Google Routes with typical-traffic
-                # times for the shortlisted candidates — bounded cost, honest
-                # reach. Pass-A screening remains the labeled Euclidean proxy.
-                catchment = {"type": "drive", "minutes": f.catchment_minutes or 15,
-                             "trafficAware": True}
+                catchment = {"type": "drive", "minutes": f.catchment_minutes or 15}
             else:
                 catchment = {"type": "walk", "minutes": f.catchment_minutes or 10}
 
