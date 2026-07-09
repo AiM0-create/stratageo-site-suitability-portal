@@ -4,6 +4,82 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.7.2] — 2026-07-09 — Bengaluru Run Fixes (custom weights, coordinate exclusions, baseline land-cover mask)
+
+Backend + one frontend string. Applied from the boss's v172 patch, which
+**supersedes v1.7.1**. Note on history: v1.7.1 shipped, was reverted at an
+operator's request (a live Bengaluru supermarket run looked broken), and its
+content is reinstated here as part of this cumulative patch — which also
+fixes the three problems that run exposed. The reverted v1.7.1 release commit
+is preserved as tag `v1.7.1`; its revert is commit `49dece7`. Applied
+surgically: the boss's standalone files for the five most-changed modules,
+the v1.7.1 traffic-aware / free-flow work restored from the original v1.7.1
+commit (unchanged in v1.7.2), and the frontend basemap work from v1.6.8 left
+untouched (the patch carried stale pre-basemap copies).
+
+### Added
+- **Custom MCDA weights in bare "Name (0.5)" form** — the v1.7.1 parser only
+  understood "'Factor' (Weight: 0.7)"; "Residential Affluence (0.5),
+  Competitor Proximity (0.3), Parking Availability (0.2)" was ignored and the
+  archetype defaults silently won. Bare pairs are now parsed **only when the
+  prompt explicitly frames them as weights/MCDA and the numbers roughly sum to
+  1** (a stray "(2024)" or "(3 km)" can never be mistaken for a weight).
+- **Factor-name matching by stem + synonym bridge** — "Competitor" ↔
+  "competition", "Residential Affluence" → co-tenancy factor, etc. A criterion
+  with no scoreable factor (Parking) is disclosed in `promptWeightUnmatched`,
+  never silently eaten. Weights are audited as `user_prompt`.
+- **Coordinate-anchored exclusion** — "exclude any suggestions within a
+  3-kilometer radius of lat: 12.9067, long: 77.5818" is parsed to an exact
+  coordinate + buffer (never geocoded, never modeled by the LLM), masked at
+  run time, and disclosed in the notes with the cell count. It is fenced off
+  from the search-radius override so "3-kilometer radius" can't be misread as
+  a catchment change.
+- **Always-on baseline unbuildable-land mask** — one bounded Overpass fetch
+  masks cells centred on water, wetland/mangrove, forest/wood, military land,
+  airfields, and bare rock/scree for **every** run (physical unbuildability
+  doesn't depend on prompt wording — a lake-dotted South Bengaluru run was
+  scoring cells sitting in lakes). Degrades gracefully with a disclosed
+  confidence reduction if the provider times out. Heavier context-dependent
+  checks (railway, ghats, heritage, road frontage) stay planner-gated.
+
+### Fixed
+- **Landlocked brief no longer inherits a riverfront corridor** — a
+  water-tagged corridor carried over from an earlier riverside turn in the
+  same chat is now stripped whenever the deterministic detector finds no
+  water signal in the current prompt (previously it hunted for a nonexistent
+  river, masked everything, and returned `no_viable_site`).
+- **Truthful zero-viable message** — "No viable site under the applied
+  constraints" with cause-appropriate relaxation advice; the hardcoded
+  riverfront wording now appears only for genuine waterfront briefs
+  (`ResultsDrawer` + the engine note).
+
+### Reinstated from v1.7.1 (reverted between 1.7.1 and 1.7.2)
+- Drive catchments traffic-aware by default (+ free-flow honesty label),
+  prompt-stated factor weights, named-place exclusions, rent/floor-area
+  feasibility note. (v1.7.1 was reverted to v1.7.0 on 2026-07-09 per an
+  operator request; the `[1.7.1]` changelog entry was reverted with it and is
+  superseded by this section. The release commit lives on at tag `v1.7.1`.)
+
+### Tests
+- 7 new backend tests built from the exact Bengaluru prompt (bare-weight
+  parsing with/without weights framing, sum-to-1 gate, synonym matching +
+  end-to-end disclosure, coordinate-exclusion parsing + override fencing +
+  spec reach). Two pre-existing `test_v149_planner_lite` assertions updated to
+  the new contract: the baseline land-cover mask always fetches
+  `natural=water` (one area fetch) while the heavy water-corridor stage stays
+  gated.
+
+### Validation
+- Backend: **636 passed** (629 v1.7.1 baseline + 7 new). Frontend: `tsc`
+  clean, Vitest **75 passed**, `vite build` clean.
+
+### Deploy
+- Backend: Cloud Run revision `stratageo-engine-00069-…` (see tag below).
+- Tag `rollback-pre-v1.7.2` points at the previously-live commit (`49dece7`,
+  the v1.7.0 revert, backend revision `stratageo-engine-00068-stx`).
+
+---
+
 ## [1.7.0] — 2026-07-08 — Scoring Standard v1 (log-space normalization)
 
 Backend-only. A deliberate **pre-launch** scoring decision, applied from the

@@ -312,3 +312,156 @@ class TestLogPercentileNormalization:
         lay = _layer("log_percentile")
         poisoned = ["not", "numbers"]
         assert tx(lay, poisoned) is poisoned  # passes through; coercion downstream owns it
+
+
+# ── v1.7.1: canonical stress-test battery — deterministic layer ──────────────
+
+from app.engine.deterministic_planner import (
+    parse_prompt_weights, parse_named_exclusions,
+)
+
+_PUNE_WEIGHTS_PROMPT = (
+    "Find 3 locations for a budget coffee shop chain in Pune. Rank them "
+    "primarily on 'Student Population' (Weight: 0.7) and 'Low Rent' (Weight: 0.3)."
+)
+_GYM_EXCLUSION_PROMPT = (
+    "I want to open a high-end gym in South Mumbai. I already have branches in "
+    "Colaba and Worli. Suggest 3 new locations but exclude my existing areas."
+)
+
+
+def _plan(prompt: str, biz: str, place: str):
+    from app.engine.intent_parser import parse_raw_intent
+    from app.engine.canonical_archetypes import resolve_canonical_archetype
+    from app.engine.deterministic_planner import apply_deterministic_plan
+    ri = parse_raw_intent(prompt)
+    return apply_deterministic_plan(
+        llm_spec={"objective": "x", "businessType": biz,
+                  "studyArea": {"type": "places", "places": [place]}, "layers": []},
+        intent=ri, canonical=resolve_canonical_archetype(ri.businessTypeKey, prompt),
+        engine_version="t", cost_mode="standard",
+    )
+
+
+class TestCriteriaWeightingPrompt:  # canonical test #8
+    def test_stated_weights_parsed(self):
+        assert parse_prompt_weights(_PUNE_WEIGHTS_PROMPT) == {
+            "Student Population": 0.7, "Low Rent": 0.3,
+        }
+
+    def test_percent_style_normalized(self):
+        assert parse_prompt_weights("rank on 'Footfall' (weight: 70%)") == {"Footfall": 0.7}
+
+    def test_weights_drive_the_spec(self):
+        s = _plan(_PUNE_WEIGHTS_PROMPT, "budget coffee shop", "Pune")
+        total = sum(l["weight"] for l in s["layers"])
+        by_name = {l["name"]: l["weight"] / total for l in s["layers"]}
+        student = next(v for k, v in by_name.items() if "student" in k.lower())
+        assert student > 0.6                      # ≈0.70 after renormalization
+        assert s.get("weightsAdjustedByUser") is True
+        assert s.get("weightsSource") == "user_prompt"
+        # 'Low Rent' has no scoreable factor — must be disclosed, never silently eaten
+        assert any("Low Rent" in u for u in s.get("promptWeightUnmatched", []))
+        # audit defaults survive
+        assert isinstance(s.get("canonicalWeights"), dict)
+
+
+class TestExclusionProximityPrompt:  # canonical test #5
+    def test_existing_sites_extracted(self):
+        assert parse_named_exclusions(_GYM_EXCLUSION_PROMPT) == ["Colaba", "Worli"]
+
+    def test_business_own_location_never_matches(self):
+        assert parse_named_exclusions("open a gym in South Mumbai") == []
+
+    def test_named_exclusions_reach_the_spec(self):
+        s = _plan(_GYM_EXCLUSION_PROMPT, "high-end gym", "South Mumbai")
+        ne = s.get("namedExclusions") or []
+        assert [e["name"] for e in ne] == ["Colaba", "Worli"]
+        assert all(e["bufferM"] == 1500 for e in ne)
+
+
+class TestIsochroneRealism:  # the Sealdah/Howrah complaint
+    def test_drive_catchments_are_traffic_aware_by_default(self):
+        from app.engine.canonical_archetypes import get_canonical
+        arch = get_canonical("supermarket")   # large_format_retail — drive catchments
+        layers = arch.to_layers_dict()
+        drives = [l for l in layers if l["catchment"]["type"] == "drive"]
+        assert drives, "large-format retail must have drive catchments"
+        assert all(l["catchment"].get("trafficAware") is True for l in drives)
+
+    def test_free_flow_drive_labeled_honestly(self):
+        from app.engine.results import _catchment_label
+        from app.models.spec import Layer as SL
+        lay = SL(id="d", name="D", weight=1.0, direction="positive",
+                 source={"provider": "osm", "tags": ["shop=yes"]},
+                 catchment={"type": "drive", "minutes": 10})
+        assert "FREE-FLOW" in _catchment_label(lay)
+        lay2 = SL(id="d2", name="D2", weight=1.0, direction="positive",
+                  source={"provider": "osm", "tags": ["shop=yes"]},
+                  catchment={"type": "drive", "minutes": 10, "trafficAware": True})
+        assert "typical traffic" in _catchment_label(lay2)
+
+
+# ── v1.7.2: custom MCDA weights, coordinate exclusions, baseline mask ────────
+
+from app.engine.deterministic_planner import parse_coordinate_exclusions
+
+_BLR_SUPERMARKET_PROMPT = (
+    "Find 3 optimal locations for a premium organic supermarket in South "
+    "Bengaluru. I want to use MCDA with these weights: Residential Affluence "
+    "(0.5), Competitor Proximity (0.3), Parking Availability (0.2). Crucially, "
+    "I already have a location at lat: 12.9067, long: 77.5818 (JP Nagar 2nd "
+    "Phase). You must completely exclude any suggestions that fall within a "
+    "3-kilometer radius of these coordinates. Present the top 3 spots with "
+    "their final MCDA scores."
+)
+
+
+class TestBareWeightPairs:  # the live-reported miss
+    def test_bare_pairs_parsed_with_weights_context(self):
+        assert parse_prompt_weights(_BLR_SUPERMARKET_PROMPT) == {
+            "Residential Affluence": 0.5,
+            "Competitor Proximity": 0.3,
+            "Parking Availability": 0.2,
+        }
+
+    def test_bare_pairs_ignored_without_weights_context(self):
+        # "(0.5)" without any weights/MCDA framing must never be treated as a weight
+        assert parse_prompt_weights("open a cafe near Ruby (0.5), Salt Lake (0.5)") == {}
+
+    def test_pairs_not_summing_to_one_rejected(self):
+        assert parse_prompt_weights("MCDA weights: A (0.9), B (0.9)") == {}
+
+    def test_end_to_end_weights_and_disclosure(self):
+        s = _plan(_BLR_SUPERMARKET_PROMPT, "premium organic supermarket", "South Bengaluru")
+        assert s.get("weightsAdjustedByUser") is True
+        total = sum(l["weight"] for l in s["layers"])
+        by_name = {l["name"]: l["weight"] / total for l in s["layers"]}
+        cotenancy = next(v for k, v in by_name.items() if "tenancy" in k.lower())
+        competition = next(v for k, v in by_name.items() if "competition" in k.lower())
+        assert cotenancy > 0.4          # 'Residential Affluence' ≈ 0.5 → co-tenancy proxy
+        assert competition > 0.25       # 'Competitor Proximity' ≈ 0.3
+        # 'Parking Availability' has no factor — disclosed, never silently eaten
+        assert any("Parking" in u for u in s.get("promptWeightUnmatched", []))
+
+
+class TestCoordinateExclusion:  # "exclude within 3 km of lat/long"
+    def test_parsed_exactly(self):
+        excl, cleaned = parse_coordinate_exclusions(_BLR_SUPERMARKET_PROMPT)
+        assert len(excl) == 1
+        e = excl[0]
+        assert (e["lat"], e["lng"], e["bufferM"]) == (12.9067, 77.5818, 3000)
+        # the exclusion radius must NOT leak into the search-radius override
+        assert parse_radius_override_m(cleaned) is None
+
+    def test_reaches_spec_with_exact_coordinates(self):
+        s = _plan(_BLR_SUPERMARKET_PROMPT, "premium organic supermarket", "South Bengaluru")
+        ne = s.get("namedExclusions") or []
+        assert any(
+            e.get("lat") == 12.9067 and e.get("lng") == 77.5818 and e.get("bufferM") == 3000
+            for e in ne
+        )
+
+    def test_no_coordinates_no_exclusion(self):
+        excl, _ = parse_coordinate_exclusions("exclude anything within 3 km radius of downtown")
+        assert excl == []

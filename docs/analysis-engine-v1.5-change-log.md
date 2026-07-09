@@ -477,3 +477,34 @@ Tag `rollback-pre-v1.6.2` points at the previously-live commit (`5162fd5`, backe
 ### 62. Tests
 - New `TestLogPercentileNormalization` (5 tests) in `test_v164_map_and_coords.py`: default locked to `log_percentile`; `percentile` still available per-layer; log spreads the mid-range ≥2× more than linear on a skewed distribution; ordering preserved; `tx()` defensive on poisoned values. `test_scoring.py` refined-discrimination assertion relaxed (`== 1.0` → `> 0.8`) since log-space refit softens the endpoints while keeping the never-floored-to-0 contract.
 - **621 backend passed** (616 + 5 new); frontend `tsc` clean, Vitest **75 passed** (backend-only change).
+
+---
+
+## v1.7.1 — Stress-Test Battery (reverted, then reinstated in v1.7.2)
+
+Shipped as v1.7.1 (traffic-aware drive catchments by default + free-flow honesty label, prompt-stated factor weights, named-place exclusions, rent/floor-area feasibility note), then **reverted to v1.7.0** on 2026-07-09 at an operator's request after a live Bengaluru supermarket run looked broken. The content was **reinstated as part of the cumulative v1.7.2 patch** below (which also fixes what that run exposed). The original release commit is preserved at tag `v1.7.1`; the revert is commit `49dece7`. See the `[1.7.1]`/`[1.7.2]` entries in `CHANGELOG.md` for the full item list.
+
+---
+
+## v1.7.2 — Bengaluru Run Fixes (custom weights, coordinate exclusions, baseline land-cover mask)
+
+### 63. `backend-py/app/engine/deterministic_planner.py` — bare weight pairs + synonym factor matching + coordinate exclusions
+- **What:** `parse_prompt_weights()` now also accepts bare `Name (0.5)` pairs, but ONLY when the prompt contains a weights/MCDA framing token AND the pairs roughly sum to 1 (0.8–1.2) — so "(2024)"/"(3 km)" never match. `_match_layer_for_stated_name()` matches on 7-char word STEMS ("Competitor"↔"competition") extended by a `_FACTOR_SYNONYMS` domain bridge ("affluence/income"→co-tenancy/premium, "parking"→frontage/access, "rent"→∅ so it always falls through to unmatched). New `parse_coordinate_exclusions()` reads "exclude … within N km … lat: …, long: …", returns an exact `{lat,lng,bufferM}` entry AND a cleaned prompt with the exclusion sentence removed, so its radius can't be misread by `parse_radius_override_m` (order: coordinate-exclusion parse → radius override on the cleaned prompt). Coordinate + named exclusions are merged into `spec["namedExclusions"]`.
+- **Why (live-reported, Bengaluru run):** custom weights in `Residential Affluence (0.5)` form were ignored (archetype defaults silently won); "Competitor" didn't match "competition"; and the "3-kilometer radius" exclusion risked being read as a catchment change.
+- **Risk:** low — all deterministic, additive, disclosed; the sum-to-1 + framing gate prevents false weight matches. **Rollback:** tag `rollback-pre-v1.7.2`.
+
+### 64. `backend-py/app/services/jobs.py` — always-on baseline land-cover mask + coordinate-exclusion masking + truthful zero-viable message
+- **What:** a new always-on baseline mask issues one bounded Overpass fetch for `natural=water`, wetland/mangrove, `natural=wood`/`landuse=forest`, `landuse=military`/`aeroway`, and bare rock/scree, masking cells centred on them for EVERY run (degrades with a disclosed confidence reduction on timeout). Coordinate exclusions (entries already carrying `lat`/`lng`) are masked directly without geocoding; named ones geocode as before. The no-viable-site note is now cause-appropriate and brief-agnostic (riverfront wording only when `waterfront.isWaterfront`).
+- **Why:** water/land-cover masking was gated on the prompt mentioning water — so lake-dotted South Bengaluru scored cells sitting in lakes. Physical unbuildability doesn't depend on prompt wording. Heavier context checks (railway/ghat/heritage/road-frontage) stay planner-gated.
+- **Risk:** low-medium — adds one Overpass call per run (free OSM, 30 s cap, graceful degrade). **Rollback:** tag `rollback-pre-v1.7.2`.
+
+### 65. `backend-py/app/services/llm.py` — corridor contamination guard
+- **What:** in a multi-turn chat, any water-tagged corridor carried into the new spec by the LLM is stripped whenever `detect_waterfront()` finds no water signal in the current prompt (parallel to the existing waterfront-FLAG guard, which didn't touch corridors).
+- **Why:** a landlocked South Bengaluru supermarket brief executed a "strict riverfront corridor" (leftover from an earlier riverside turn), masked everything, and returned `no_viable_site` with riverfront relaxation advice.
+
+### 66. `src/components/ResultsDrawer.tsx` — truthful zero-viable copy
+- **What:** the insufficient-site banner reads "No viable site under the applied constraints" and only mentions the strict riverfront corridor when `spec.waterfront.isWaterfront` — the previous copy was hardcoded riverfront wording from the original Hooghly implementation.
+
+### 67. Tests
+- 7 new backend tests in `test_v164_map_and_coords.py` (`TestBareWeightPairs`, `TestCoordinateExclusion`) built from the exact Bengaluru prompt: bare-weight parsing with/without weights framing, sum-to-1 rejection, synonym end-to-end with `Parking` disclosed unmatched, coordinate-exclusion exact parse + override fencing + spec reach + no-coordinates-no-exclusion. `test_v149_planner_lite.py` contract updated: the baseline land-cover mask always fetches `natural=water` (one area fetch) while the gated water-corridor stage stays off for a cafe brief.
+- **636 backend passed** (629 v1.7.1 baseline + 7 new); frontend `tsc` clean, Vitest **75 passed**, build clean.

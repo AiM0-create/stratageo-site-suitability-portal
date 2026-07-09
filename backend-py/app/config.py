@@ -169,6 +169,40 @@ v1.7.0: Scoring Standard v1 (boss patch). The per-factor normalization
   "minmax" remain available per-layer for future non-count metrics. The
   methodology disclosure (report + panel) reads the method automatically, so
   it now states log-space normalization without any hardcoded text.
+v1.7.1 (reverted, then reinstated by v1.7.2): Stress-test battery — drive
+  catchments traffic-aware by default (+ free-flow honesty label),
+  prompt-stated factor weights, named-place exclusions of existing sites,
+  rent/floor-area feasibility note. Shipped as 1.7.1, reverted per an
+  operator request (the Bengaluru run looked broken), then reinstated as
+  part of the cumulative v1.7.2 patch below, which also fixes what that run
+  exposed. Tag `v1.7.1` preserves the original release commit.
+v1.7.2: Bengaluru supermarket run fixes (boss patch, supersedes v1.7.1).
+  (1) Custom MCDA weights now parse even in bare "Name (0.5)" form — but
+  ONLY when the prompt explicitly frames them as weights/MCDA AND the
+  numbers roughly sum to 1 (a stray "(2024)" or "(3 km)" never matches);
+  factor names are matched to scoreable factors by word-stem overlap plus a
+  small domain synonym bridge ("Competitor"↔"competition", "Affluence"→
+  co-tenancy), and a criterion with no scoreable factor (e.g. Parking) is
+  disclosed in promptWeightUnmatched, never silently eaten. (2) Coordinate-
+  anchored exclusion: "exclude within 3 km of lat: 12.9067, long: 77.5818"
+  is parsed deterministically to an exact coordinate + buffer (never
+  geocoded, never modeled by the LLM) and fenced off from the search-radius
+  override so the exclusion radius can't be misread as a catchment. (3)
+  Corridor contamination guard: a water-tagged corridor carried over from a
+  previous riverside turn is stripped whenever the deterministic detector
+  finds no water signal in the current prompt (a landlocked South Bengaluru
+  supermarket was executing a "strict riverfront corridor" and returning
+  no_viable_site with riverfront relaxation advice); the zero-viable message
+  is now truthful for every brief, riverfront wording only for genuine
+  waterfront briefs. (4) Always-on baseline unbuildable-land mask: one
+  bounded Overpass fetch masks cells centred on water, wetland/mangrove,
+  forest/wood, military land, airfields and bare rock/scree for EVERY run
+  (physical unbuildability doesn't depend on prompt wording — lake-dotted
+  areas were scoring cells sitting in lakes); degrades gracefully with a
+  disclosed confidence reduction if the provider times out. Heavier
+  context-dependent checks (railway, ghats, heritage, road frontage) remain
+  planner-gated. Roads/slope stated openly as parcel-level/DEM questions
+  outside screening resolution.
 """
 from functools import lru_cache
 from typing import Literal
@@ -176,9 +210,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.7.0"
+APP_VERSION     = "1.7.2"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00066"
+ENGINE_VERSION  = "stratageo-engine-00069"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -187,7 +221,7 @@ ENGINE_VERSION  = "stratageo-engine-00066"
 # these versioned contracts.
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Scoring Standard v1 (log-space normalization)"
+RELEASE_NAME    = "Bengaluru Run Fixes (custom weights, coord exclusions, baseline mask)"
 
 
 class Settings(BaseSettings):

@@ -283,13 +283,18 @@ def test_cafe_pipeline_skips_water_but_runs_buildability():
     r = job.result
     assert r["status"] == "success"
     assert r["locations"], "candidates must still be returned"
-    # Water body geometry (the water_geometry stage) never fetched — no water
-    # tag ever requested — but buildability (v1.6.2: correctly required for a
-    # commercial "cafe" brief) DOES make its own area/named/line calls.
+    # v1.7.2 CONTRACT CHANGE — the always-on BASELINE land-cover mask now
+    # fetches natural=water (among forest/wetland/military) for EVERY run,
+    # because physical unbuildability doesn't depend on prompt wording
+    # (lake-dotted South Bengaluru was scoring cells in lakes). The heavy
+    # water-CORRIDOR stage (waterway line geometry, riverbank logic) remains
+    # planner-gated: no waterway/riverbank tags may be fetched here.
     assert not any(
-        t.startswith(("natural=water", "waterway", "water="))
-        for t in spies["water_tags_seen"]
-    )
+        t.startswith(("waterway",)) for t in spies["water_tags_seen"]
+    ), "the gated water-corridor stage must not run for a cafe brief"
+    assert any(
+        t == "natural=water" for t in spies["water_tags_seen"]
+    ), "the baseline land-cover mask must always fetch water polygons"
     assert spies["area"] > 0 or spies["named"] > 0
     ac = r["analysisCompleteness"]
     skipped = {s["stage"] for s in ac["skippedStages"]}
@@ -363,7 +368,9 @@ def test_dark_kitchen_pipeline_routes_and_skips_buildability():
     assert job.status == "done", f"job failed: {job.error}"
     r = job.result
     assert r["status"] in RESULT_STATES
-    assert spies["area"] == 0 and spies["named"] == 0   # water+buildability skipped
+    # v1.7.2 — exactly one area fetch is the always-on baseline land-cover
+    # mask; buildability's own area/named fetches remain correctly skipped.
+    assert spies["area"] == 1 and spies["named"] == 0
     ac = r.get("analysisCompleteness")
     assert ac is not None
     assert ac["routeVerified"] is True                  # routing genuinely evaluated

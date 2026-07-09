@@ -398,6 +398,32 @@ async def chat_turn(
                 _full_prompt[:120],
             )
             new_spec["waterfront"] = {"isWaterfront": False, "strictness": None, "corridorWidthM": None}
+    # v1.7.2 — corridor contamination guard (observed live: a landlocked
+    # South Bengaluru supermarket brief executed a "strict riverfront
+    # corridor" and returned no_viable_site with riverfront relaxation
+    # advice). In a multi-turn chat, a PREVIOUS riverside brief's water
+    # corridor can be carried into the new spec by the LLM. The waterfront
+    # FLAG guard above doesn't touch corridors — so strip any water-tagged
+    # corridor whenever the deterministic detector finds no water signal in
+    # the current prompt. (Water-tagged EXCLUSIONS were already handled in
+    # v1.5.2 planner logic; corridors are gates and must be removed here.)
+    if isinstance(new_spec, dict) and new_spec.get("corridors"):
+        from ..models.spec import detect_waterfront as _detect_wf2
+        _full_prompt2 = effective_raw_prompt if "effective_raw_prompt" in dir() else last_user
+        if not _detect_wf2(_full_prompt2).get("isWaterfront"):
+            from ..engine.planner_lite import _is_water_tag as _iwt
+            _before = len(new_spec["corridors"])
+            new_spec["corridors"] = [
+                c for c in new_spec["corridors"]
+                if not any(_iwt(t) for t in ((c.get("source") or {}).get("tags") or []))
+            ]
+            _dropped = _before - len(new_spec["corridors"])
+            if _dropped:
+                logger.warning(
+                    "Corridor contamination: removed %d water-tagged corridor(s) "
+                    "from a prompt with no water signal. Prompt: %r",
+                    _dropped, _full_prompt2[:120],
+                )
 
     # ── Feasibility-first gate (server-side, prompt-independent) ──────────
     # A not_feasible plan can NEVER execute, even on an explicit go signal —

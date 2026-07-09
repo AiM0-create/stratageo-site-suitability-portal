@@ -392,14 +392,14 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         {withheld && (
           <div className="withheld-notice">
             <div className="withheld-head">
-              {insufficient ? '❌ No viable site in the strict corridor' : '❌ No reliable recommendation'}
+              {insufficient ? '❌ No viable site under the applied constraints' : '❌ No reliable recommendation'}
             </div>
             <p className="withheld-body">
               {insufficient ? (
-                <>No buildable site remained inside the strict riverfront corridor after removing
-                water, railway, ghat, heritage and open-space land. Raw candidates (if any) are not
-                a recommendation. You can relax the analysis as suggested below — the geographic area
-                stays the same.</>
+                <>No viable site remained after applying the hard constraints and land
+                masks for this brief{(spec as any)?.waterfront?.isWaterfront ? ' (including the strict riverfront corridor)' : ''}.
+                Raw candidates (if any) are not a recommendation. You can relax the analysis
+                as suggested below — the geographic area stays the same.</>
               ) : (
                 <>The analyst review flagged this result as <b>unreliable</b>, so no ranked
                 recommendation is shown. The reasons — and what would make a reliable analysis

@@ -51,6 +51,7 @@ from ..engine.uploaded_candidates import (
 )
 from ..engine.evidence_builder import QueryTracker, assemble_evidence_trail
 from ..engine.constraint_policy import evaluate_constraint_policy, downgrade_status_for_unverified
+from ..engine.constraint_policy import _RENT_RE as _RENT_NOTE_RE, _FOOTPRINT_RE as _FLOOR_NOTE_RE
 from ..engine.reliability_critic import run_deterministic_critic, merge_with_llm_critic
 from ..engine.metro import (
     resolve_metro_stations,
@@ -185,7 +186,14 @@ def _viability_suggestions(spec) -> list[str]:
         out.append("Allow BOTH riverbanks if the brief implied only one.")
     if _PREMIUM_RE.search(f"{spec.objective} {spec.businessType}".lower()):
         out.append("Relax the premium co-tenancy / affluence requirement so well-located but less-affluent frontage qualifies.")
-    out.append("Consider converting existing restaurant / heritage buildings on the bank instead of requiring new construction.")
+    # v1.7.2 — riverbank conversion advice only makes sense for waterfront
+    # briefs; for everything else, suggest relaxing the actual constraints.
+    if wf and wf.isWaterfront:
+        out.append("Consider converting existing restaurant / heritage buildings on the bank instead of requiring new construction.")
+    else:
+        if getattr(spec, "namedExclusions", None):
+            out.append("Reduce the exclusion buffer around your existing site(s), or widen the study area.")
+        out.append("Lower the minimum viability threshold, or widen the study area, and re-run.")
     # Keep the geographic constraint explicit in the guidance.
     if spec.studyArea.type == "places" and spec.studyArea.places and len(spec.studyArea.places) >= 2:
         a, b = spec.studyArea.places[0].split(",")[0], spec.studyArea.places[-1].split(",")[0]
@@ -1348,6 +1356,47 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 "for strict riverfront feasibility."
             )
 
+    # ── v1.7.2: BASELINE unbuildable-land mask — ALWAYS ON ─────────────
+    # Water/forest/wetland masking was previously gated on a waterfront
+    # signal in the PROMPT (a cost optimization) — so a supermarket brief in
+    # lake-dotted South Bengaluru scored cells sitting in lakes and forests.
+    # Physical unbuildability doesn't depend on what the prompt mentions.
+    # One bounded Overpass fetch of universally-unbuildable land cover:
+    # water, wetland/mangrove, forest/wood, military land, aerodromes.
+    # Degrades gracefully (disclosed) on timeout; heavier context-dependent
+    # checks (railway, ghat, heritage, frontage) remain planner-gated.
+    # Roads themselves are NOT maskable at screening resolution (every urban
+    # cell contains roads); mountain slope needs DEM/external land-use data —
+    # both stated in Known Limitations.
+    _BASELINE_UNBUILDABLE_TAGS = [
+        "natural=water", "natural=wetland", "natural=wood",
+        "landuse=forest", "landuse=military", "aeroway=aerodrome",
+        "natural=bare_rock", "natural=scree",
+    ]
+    try:
+        _base_geoms = await asyncio.wait_for(
+            fetch_area_geometries(_BASELINE_UNBUILDABLE_TAGS, overpass_bbox),
+            timeout=30,
+        )
+    except Exception as _bex:
+        _base_geoms = []
+        fallbacks.append(
+            "Baseline land-cover mask (water/forest/wetland/military) could not "
+            f"be fetched ({type(_bex).__name__}) — cells may overlap unbuildable "
+            "land cover this run. Confidence reduced."
+        )
+    if _base_geoms:
+        _bmask = buildability.centroid_in_polygon_mask(hexes, _base_geoms)
+        _nb = int(_bmask.sum())
+        if _nb:
+            excluded |= _bmask
+            mask_stats["baselineUnbuildableRemoved"] = _nb
+            notes.append(
+                f"Baseline land-cover mask: removed {_nb} cell(s) centred on "
+                "water / wetland / forest / military / airfield land "
+                f"({len(_base_geoms)} feature(s); always applied, regardless of prompt)."
+            )
+
     # ── 4d. Water mask — no candidate can sit inside a river/lake/pond ──
     # H3 fills the whole polygon, water surface included. Mask hexes whose
     # centroid lies inside a water body so the engine never ranks a site in
@@ -1374,6 +1423,41 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             notes.append(
                 f"Water overlap mask removed {n_overlap} hex(es) with >30% water area."
             )
+
+    # ── v1.7.1: named-place exclusions (user's existing sites) ─────────
+    # "exclude my existing areas" with named branches: geocode each place
+    # (coarse country/state matches already rejected by the geocoder) and
+    # mask every cell within the buffer. A place that cannot be geocoded is
+    # disclosed as NOT enforced — never silently dropped.
+    for _ne in (getattr(spec, "namedExclusions", None) or []):
+        _ne_name = str(_ne.get("name", "")).strip()
+        _ne_buf = float(_ne.get("bufferM", 1500))
+        if not _ne_name:
+            continue
+        if isinstance(_ne.get("lat"), (int, float)) and isinstance(_ne.get("lng"), (int, float)):
+            _pt = (float(_ne["lat"]), float(_ne["lng"]))   # exact user coordinates — never geocoded
+        else:
+            try:
+                _pt = await geocode(_ne_name)
+            except Exception:
+                _pt = None
+        if not _pt:
+            fallbacks.append(
+                f"Named exclusion '{_ne_name}' could not be geocoded — this "
+                "exclusion was NOT enforced (treat nearby candidates with care)."
+            )
+            continue
+        _ne_mask = np.array([
+            scoring.haversine_m(h.lat, h.lng, _pt[0], _pt[1]) <= _ne_buf for h in hexes
+        ], dtype=bool)
+        _n_ne = int(_ne_mask.sum())
+        excluded |= _ne_mask
+        mask_stats[f"namedExclusion:{_ne_name}"] = _n_ne
+        notes.append(
+            f"Excluded your existing site area '{_ne_name}' "
+            f"({_pt[0]:.4f}, {_pt[1]:.4f}) — {_n_ne} cell(s) within "
+            f"{int(_ne_buf)} m removed from consideration."
+        )
 
     # ── 4e (apply phase). Buildability / no-construction masks (v1.0.3) ──
     # Hard-exclude obvious no-build land for waterfront + commercial briefs:
@@ -1914,6 +1998,36 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # v1.6.8 — when the user never asked for a count, say the default was
     # applied and point at the grid ranks (user-reported: "I didn't ask for
     # top X — why am I seeing ranked candidates?").
+    # v1.7.1 — feasibility honesty for numeric unvalidatable constraints
+    # (canonical stress test #3: "primary arterial + rent ≤ ₹20/sq ft" in
+    # Sector V). Declaring the filters "mutually exclusive" would require
+    # rent-market data the system does not hold — that would be fabrication.
+    # The honest posture: verify what is verifiable, and say EXPLICITLY that
+    # the system cannot judge the rent/size cap's feasibility, so the
+    # shortlist is zones to TEST against it, never zones known to meet it.
+    _raw_prompt_text = (
+        getattr(getattr(spec, "rawIntent", None), "rawPrompt", "") or ""
+    ) + " " + (spec.objective or "")
+    if _RENT_NOTE_RE.search(_raw_prompt_text) or _FLOOR_NOTE_RE.search(_raw_prompt_text):
+        notes.append(
+            "Feasibility note: this analysis holds no rent/lease-market or "
+            "parcel-size data, so it CANNOT judge whether your stated "
+            "rent/floor-area requirements are achievable in this area — nor "
+            "rule them out. The ranked zones satisfy the VERIFIABLE "
+            "constraints only; treat them as a shortlist to test against your "
+            "commercial requirements in the field."
+        )
+    if getattr(spec, "weightsAdjustedByUser", False):
+        notes.append(
+            "Factor weights were set from your prompt/adjustments (see the "
+            "Factor Weight Audit — defaults vs applied)."
+        )
+    for _uw in (getattr(spec, "promptWeightUnmatched", None) or []):
+        notes.append(
+            f"Weight request '{_uw}' could not be applied: it does not match "
+            "any scoreable factor in this framework (rent/price, for example, "
+            "has no spatial data source and is never scored — only disclosed)."
+        )
     if getattr(spec, "searchRadiusOverrideM", None):
         notes.append(
             f"Search radius set to {spec.searchRadiusOverrideM} m from your prompt "
@@ -2243,9 +2357,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     recommendation_withheld = analysis_status in ("unreliable", "insufficient_viable_land")
     suggestions = _viability_suggestions(spec) if analysis_status == "insufficient_viable_land" else []
     if analysis_status == "insufficient_viable_land":
+        _gate_ctx = ("inside the strict riverfront corridor"
+                     if (spec.waterfront and spec.waterfront.isWaterfront)
+                     else "under the applied constraints and land masks")
         notes.append(
             f"Viability gate: only {n_viable}/{topN} site(s) cleared the {min_score}/10 "
-            "minimum inside the strict riverfront corridor — recommendation withheld; see suggestions."
+            f"minimum {_gate_ctx} — recommendation withheld; see suggestions."
         )
     mask_stats["minViableScore"] = min_score
     mask_stats["viableCandidates"] = n_viable

@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.7.0 — Scoring Standard v1 (log-space normalization)**
+**Current version: v1.7.2 — Bengaluru Run Fixes (custom weights, coordinate exclusions, baseline land-cover mask)**
 
 ---
 
@@ -20,6 +20,16 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
 - **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
 - **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+
+---
+
+## v1.7.2 Highlights
+
+- **Custom MCDA weights are honored, even in bare form** — "Residential Affluence (0.5), Competitor Proximity (0.3), Parking Availability (0.2)" now drives the scoring (parsed only when the prompt frames them as weights and they sum to ~1), matched to factors by word-stem + synonyms; an unscoreable criterion (parking) is disclosed, not silently dropped.
+- **Coordinate exclusions** — "exclude anything within 3 km of lat: 12.9067, long: 77.5818" is used verbatim (never geocoded) and fenced off from the search-radius override.
+- **Always-on baseline land-cover mask** — every run masks cells sitting in water, wetland, forest, military land, airfields, or bare rock, regardless of prompt wording (a lake-dotted run was scoring cells in lakes); degrades gracefully with disclosed lower confidence.
+- **No more phantom riverfront** — a water corridor carried over from an earlier riverside turn is stripped for landlocked briefs, and the "no viable site" message is truthful for every brief.
+- **Reinstates v1.7.1** (traffic-aware drive catchments, prompt weights, named exclusions), which was briefly reverted before this cumulative fix.
 
 ---
 
@@ -237,7 +247,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (621 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (636 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -403,7 +413,9 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.7.0** *(current)* | Scoring Standard v1 — log-space (log_percentile) normalization is now the default for count factors, spreading the mid-range and removing linear-scale exaggeration; ordering preserved, test-locked, disclosed automatically |
+| **v1.7.2** *(current)* | Bengaluru Run Fixes — custom MCDA weights (bare-pair + synonym matching), coordinate-anchored exclusions, always-on baseline unbuildable-land mask, corridor-contamination guard + truthful zero-viable message; reinstates the v1.7.1 stress-battery work |
+| **v1.7.1** *(reverted → reinstated in 1.7.2)* | Stress-Test Battery — traffic-aware drive catchments by default (+ free-flow honesty label), prompt-stated factor weights, named-place exclusions, rent/floor-area feasibility note. Shipped, reverted per an operator request, then reinstated as part of 1.7.2; the release commit is preserved at tag `v1.7.1` |
+| **v1.7.0** | Scoring Standard v1 — log-space (log_percentile) normalization is now the default for count factors, spreading the mid-range and removing linear-scale exaggeration; ordering preserved, test-locked, disclosed automatically |
 | **v1.6.8** | Pune Run Fixes & Professional Report — city-extent study areas, prompt radius override, Places-New 400 guards, n=1 screening-basis scoring, basemap+north-arrow+legend in the PDF map, Latin-1-safe report text, placeholder/stale sections removed |
 | **v1.6.7** | Report Map & Weight-Responsive Grid Ranks — self-rendered map figure in the PDF, Google Maps links per zone, live grid ranks on hover, weight-sliders re-select a screening-basis top-X (explicitly unverified), relative-score transparency + spread-aware refit, shortfall notes name the responsible filter |
 | **v1.6.4** | Map Coherence & Coordinate Fidelity — candidate cells recoloured with final refined scores, grey context-only surface when the recommendation is withheld, prompt coordinates used verbatim + country-level geocode matches rejected, candidate-shortfall notes |
