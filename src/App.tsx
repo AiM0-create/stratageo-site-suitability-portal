@@ -10,6 +10,7 @@ import { normalizeAnalysisResult } from './services/resultNormalizer';
 import type { SpecV2, AnalysisPhase } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights, reweightHexGrid, weightsDiffer, computeGridRanks, selectTopCellsFromGrid, type ScreeningCell } from './services/mcdaEngine';
+import { buildMethodologyComparison, buildExecutiveSummary } from './services/screeningPresentation';
 import { renderMapFigure } from './services/mapFigure';
 import { parseCSV } from './services/csvParser';
 import { resolveContext } from './services/contextResolver';
@@ -207,7 +208,18 @@ const App: React.FC = () => {
     setError(null);
     setHeatmapType(null);
     prevSessionIdRef.current = currentSession.id;
+    // vNext (v1.8.0) — the micro↔macro methodology comparison only compares
+    // runs within one session; never across sessions.
+    prevResultRef.current = null;
   }, [currentSession.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // vNext (v1.8.0) — previous completed result in THIS session, for the
+  // methodology-comparison block when the user expands/narrows the study area.
+  const prevResultRef = useRef<AnalysisResult | null>(null);
+  const methodologyComparison = useMemo(
+    () => (result ? buildMethodologyComparison(prevResultRef.current, result) : null),
+    [result],
+  );
 
   // Derive messages from session for display
   const messages = useMemo(() =>
@@ -464,6 +476,9 @@ const App: React.FC = () => {
     setError(null);
     setAnalysisPhase('executing');
     console.debug('[executing spec]', specToUse);
+    // vNext (v1.8.0) — remember the outgoing result so the next result can
+    // show a methodology comparison (micro↔macro follow-ups, same session).
+    if (result) prevResultRef.current = result;
     // Phase 11 — clear previous analysis state before starting a new job
     setResult(null);
     setSelectedLocations([]);
@@ -639,13 +654,37 @@ const App: React.FC = () => {
       // returned/threw, so the NEXT click is never permanently blocked.
       isStartingRef.current = false;
     }
-  }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch, analysisPhase]);
+  }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch, analysisPhase, result]);
 
   // v1.4.2 — retry the last failed analysis with the same spec, no re-typing needed.
   const handleRetryAnalysis = useCallback(() => {
     if (!lastSpecWithPointsRef.current) return;
     handleConfirmExecute(lastSpecWithPointsRef.current);
   }, [handleConfirmExecute]);
+
+  // vNext (v1.8.0) — §8.2 Option A: verify the reweight-adjusted shortlist.
+  // Client-side reweighting is instant but screening-basis only; this re-runs
+  // the SAME spec with the customer's current weights baked in (audited via
+  // weightsAdjustedByUser), so the newly promoted zones get real Pass-B
+  // verification instead of inheriting the old shortlist's evidence.
+  const handleVerifyAdjustedShortlist = useCallback(() => {
+    const base: any = lastSpecWithPointsRef.current || chatSpec;
+    if (!base || !Array.isArray(base.layers) || base.layers.length === 0) {
+      setError('The original analysis spec is no longer available — please re-run the analysis.');
+      return;
+    }
+    const layers = base.layers.map((l: any) => ({
+      ...l,
+      weight: typeof customWeights[l.name] === 'number'
+        ? Math.max(0.01, customWeights[l.name])
+        : l.weight,
+    }));
+    const specWithWeights = { ...base, layers, weightsAdjustedByUser: true };
+    addMessage('assistant',
+      'Re-running the analysis with your adjusted weights so the re-selected zones get full '
+      + 'route/travel-time/Places verification (this uses one analysis credit).');
+    handleConfirmExecute(specWithWeights);
+  }, [chatSpec, customWeights, handleConfirmExecute, addMessage]);
 
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
     // ─── Conversational mode: route to multi-turn chat, no immediate execution ───
@@ -1139,6 +1178,30 @@ const App: React.FC = () => {
       pdf.text([appVer, recMode, siteClm, 'Preliminary screening — not legal/parcel/field due diligence'].filter(Boolean).join('   |   '), ml, y);
       y += 5;
 
+      // ── vNext (v1.8.0): screening verdict strip — top-zone verdict,
+      // headline confidence, spatial scale, and the single most important
+      // unresolved check (all computed values, mirroring the live UI). ──
+      const execPdf = buildExecutiveSummary(result, ranked);
+      {
+        const bits = [
+          execPdf.topZoneVerdict ? `Top zone verdict: ${execPdf.topZoneVerdict}` : '',
+          execPdf.confidenceLevel ? `Screening confidence: ${execPdf.confidenceLevel}` : '',
+          execPdf.spatialScale ? `Scale: ${humanize(execPdf.spatialScale)}` : '',
+          execPdf.eligibleCells !== null ? `${execPdf.eligibleCells} eligible cells screened` : '',
+        ].filter(Boolean);
+        if (bits.length > 0) {
+          pdf.setFontSize(7.5); pdf.setFont('helvetica','bold'); T(C.navy);
+          pdf.text(bits.join('   |   '), ml, y);
+          y += 4.5;
+        }
+        if (execPdf.criticalNextCheck) {
+          pdf.setFontSize(7); pdf.setFont('helvetica','normal'); T(C.amber);
+          const cLines = pdf.splitTextToSize(`Critical next check: ${asciiSafe(execPdf.criticalNextCheck)}`, cw);
+          pdf.text(cLines.slice(0, 2), ml, y);
+          y += cLines.slice(0, 2).length * 3.8 + 1;
+        }
+      }
+
       // ── Constraint tags (ASCII safe) ──
       if (spec && spec.constraints.length > 0) {
         let cx = ml;
@@ -1231,13 +1294,17 @@ const App: React.FC = () => {
         const bx = ml + 85; const bw = cw - 85 - 20;
         bar(loc.mcda_score, bx, bw, y + 3.5, 3, rc);
 
-        // Status badge
+        // Status badge — vNext (v1.8.0): the honesty-gated screening verdict
+        // when present; score-band words only for older payloads.
         const status = loc.excluded ? 'EXCLUDED'
-          : loc.mcda_score >= 7.5 ? 'STRONG'
-          : loc.mcda_score >= 5   ? 'VIABLE' : 'WEAK';
-        F(rc); pdf.roundedRect(pw-mr-17, y+2.5, 15, 5, 1, 1, 'F');
+          : ((loc as any).screeningVerdict
+              ? String((loc as any).screeningVerdict).toUpperCase().substring(0, 12)
+              : loc.mcda_score >= 7.5 ? 'STRONG'
+              : loc.mcda_score >= 5   ? 'VIABLE' : 'WEAK');
+        const stW = Math.max(15, pdf.getTextWidth(status) + 4);
+        F(rc); pdf.roundedRect(pw-mr-2-stW, y+2.5, stW, 5, 1, 1, 'F');
         pdf.setFontSize(6.5); pdf.setFont('helvetica','bold'); T(C.white);
-        pdf.text(status, pw-mr-9.5 - pdf.getTextWidth(status)/2, y+5.8);
+        pdf.text(status, pw-mr-2-stW/2 - pdf.getTextWidth(status)/2, y+5.8);
 
         D(C.s2); pdf.setLineWidth(0.2); pdf.line(ml, y+rh, pw-mr, y+rh);
         y += rh;
@@ -1270,9 +1337,11 @@ const App: React.FC = () => {
           // Name
           pdf.setFontSize(7.5); pdf.setFont('helvetica','normal'); T(C.s7);
           pdf.text(cr.name.substring(0, 42), ml + 18, y + 4.5);
-          // Type text
+          // Type text — vNext (v1.8.0): a target-band factor is not monotonic
           pdf.setFontSize(6.5); T(dcol);
-          pdf.text(cr.direction === 'negative' ? 'Less is better' : 'More is better', ml + 100, y + 4.5);
+          pdf.text((cr as any).scoringCurve === 'target_band'
+            ? 'Target band (moderate best)'
+            : cr.direction === 'negative' ? 'Less is better' : 'More is better', ml + 100, y + 4.5);
           // Weight
           T(C.s5);
           pdf.text(`${Math.round(cr.weight * 100)}%`, ml + 148, y + 4.5);
@@ -1483,6 +1552,24 @@ const App: React.FC = () => {
           });
           y += 16;
         }
+
+        // ── vNext (v1.8.0): zone-specific next-stage validation ──
+        // Generated by the engine from the ACTUAL unmet / screening-stage
+        // requirements of this run — never generic boilerplate.
+        const nextActs = ((loc as any).nextValidation as string[] | undefined) ?? [];
+        if (nextActs.length > 0) {
+          const actLines = nextActs.slice(0, 6).map(a => pdf.splitTextToSize(`- ${asciiSafe(a)}`, cw - 10).slice(0, 2));
+          const actCount = actLines.reduce((s, l) => s + l.length, 0);
+          const actH = actCount * 4 + 9;
+          need(actH + 8);
+          gap(2);
+          sectionHead('Next-Stage Validation for This Zone');
+          cardBg(actH, [240, 249, 255] as [number, number, number], C.blue);
+          pdf.setFontSize(7.5); pdf.setFont('helvetica','normal'); T(C.s7);
+          let ay = y + 5;
+          actLines.forEach(lines => { pdf.text(lines, ml + 5, ay); ay += lines.length * 4; });
+          y += actH + 4;
+        }
       }
 
       // ══════════════════════════════════════════════════════════════════════════
@@ -1550,6 +1637,26 @@ const App: React.FC = () => {
           body: (result as any).unifiedConfidence.reason,
           warn: (result as any).unifiedConfidence.level !== 'High',
         }] : []),
+        // ── vNext (v1.8.0): constraint-status table — every requested hard
+        // constraint and how (whether) it was verified, in the same
+        // vocabulary the live UI uses. ──
+        ...(() => {
+          const hcvP = (result as any).hardConstraintVerification;
+          if (!hcvP || !Array.isArray(hcvP.constraints) || hcvP.constraints.length === 0) return [];
+          const stTxt: Record<string, string> = {
+            verified: 'VERIFIED', proxy_verified: 'PROXY VERIFIED',
+            not_verifiable: 'NOT VERIFIABLE FROM DATA',
+            requested_not_enforced: 'REQUESTED - NOT ENFORCED',
+            failed: 'FAILED', not_required: 'not required',
+          };
+          const rows = hcvP.constraints.map((c: any) =>
+            `${c.label}: ${stTxt[c.status] || c.status}${c.reason ? ` - ${c.reason}` : ''}`);
+          return [{
+            title: `Constraint Verification Status (${hcvP.verifiedCount ?? 0} verified / ${hcvP.unknownCount ?? 0} not verifiable / ${hcvP.failedCount ?? 0} failed)`,
+            body: rows.join('\n'),
+            warn: (hcvP.unknownCount ?? 0) > 0 || (hcvP.failedCount ?? 0) > 0 || (hcvP.unenforcedCount ?? 0) > 0,
+          }];
+        })(),
         ...(() => {
           const wa = (result as any).weightAudit;
           const adjusted = weightsAdjusted || wa?.adjustedByUser === true;
@@ -1643,6 +1750,31 @@ const App: React.FC = () => {
         pdf.text(mLines, ml + 5, y + 11);
         y += mH + 3;
       });
+
+      // ── vNext (v1.8.0): professional next-step CTA — screening leads to
+      // detailed paid validation (§6.7/§7). No fake checkout; just the
+      // contact route and what the next stage covers. ──
+      {
+        const ctaBody =
+          'This report is a spatial SCREENING: it identifies and ranks investigation '
+          + 'zones with the evidence behind each. The next stage - a detailed site study - '
+          + 'validates actual properties in these zones: current rent and availability, '
+          + 'frontage and loading, footfall observation, zoning confirmation, and '
+          + 'parcel-level access analysis. Contact Stratageo to commission a detailed '
+          + 'site validation for this shortlist: stratageo.in/contact.php'
+          + ((result as any).jobRef ? `  (reference: ${(result as any).jobRef})` : '');
+        const cLines = pdf.splitTextToSize(asciiSafe(ctaBody), cw - 10);
+        const cH = cLines.length * 4 + 12;
+        need(cH + 4);
+        cardBg(cH, [240, 253, 244] as [number, number, number], C.green);
+        pdf.setFontSize(9); pdf.setFont('helvetica','bold'); T(C.green);
+        pdf.text('NEXT STAGE: REQUEST DETAILED SITE VALIDATION', ml + 5, y + 6.5);
+        pdf.setFontSize(7.5); pdf.setFont('helvetica','normal'); T(C.s7);
+        pdf.text(cLines, ml + 5, y + 12);
+        pdf.setTextColor(29, 78, 216);
+        pdf.textWithLink('stratageo.in/contact.php', pw - mr - 5 - pdf.getTextWidth('stratageo.in/contact.php'), y + 6.5, { url: config.contactUrl });
+        y += cH + 3;
+      }
 
       allFooters();
 
@@ -1835,6 +1967,8 @@ const App: React.FC = () => {
             weightsAdjusted={weightsAdjusted}
             screeningCandidates={screeningCandidates}
             routeConstraintPresent={Boolean((spec as any)?.routeConstraint)}
+            onVerifyAdjustedShortlist={handleVerifyAdjustedShortlist}
+            methodologyComparison={methodologyComparison}
             onWeightsReset={handleWeightsReset}
             heatmapType={heatmapType}
             onHeatmapChange={setHeatmapType}

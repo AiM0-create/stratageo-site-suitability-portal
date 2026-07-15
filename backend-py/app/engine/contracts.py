@@ -101,8 +101,15 @@ def normalize_0_1(
     *,
     label: str = "score",
     warnings: list[str] | None = None,
+    curve: str = "monotonic",
 ) -> float:
-    """Normalize to a guaranteed-finite float in [0, 1]. Never raises."""
+    """Normalize to a guaranteed-finite float in [0, 1]. Never raises.
+
+    curve="target_band" (vNext v1.8.0) applies an inverted-U over the
+    normalized position (peak at 0.35 of the observed range) instead of the
+    monotonic direction mapping — "moderate is best" scoring for competition
+    factors. Validation/degradation policy is identical either way.
+    """
     v = to_finite_float(value, default=None, label=label, warnings=warnings)
     lo_f = to_finite_float(lo, default=0.0, label=f"{label}.lo", warnings=warnings) or 0.0
     hi_f = to_finite_float(hi, default=lo_f + 1.0, label=f"{label}.hi", warnings=warnings)
@@ -112,6 +119,9 @@ def normalize_0_1(
         return 0.0
     x = (v - lo_f) / (hi_f - lo_f)
     x = min(1.0, max(0.0, x))
+    if curve == "target_band":
+        peak = 0.35
+        return 1.0 - abs(x - peak) / max(peak, 1.0 - peak)
     return 1.0 - x if direction == "negative" else x
 
 

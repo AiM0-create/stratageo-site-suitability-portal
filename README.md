@@ -1,25 +1,39 @@
 # StrataGeo — Site Suitability Intelligence Portal
 
-**Conversational site-suitability intelligence portal for India with deterministic spatial safeguards, MCDA scoring, confidence disclosure, and report export.**
+**Screens large geographies, identifies high-potential micro-markets and investigation zones, explains the spatial evidence behind each result, and shows where detailed commercial and parcel-level validation should begin.**
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.7.2 — Bengaluru Run Fixes (custom weights, coordinate exclusions, baseline land-cover mask)**
+**Current version: v1.8.0 — Screening & Investigation-Zone Product Contract**
 
 ---
 
 ## What It Does
 
-Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari but outside 1 km of any metro"* or *"Find a premium riverside restaurant strictly between Howrah Bridge and Vidyasagar Setu"*. The portal holds a short consultative conversation to frame the problem, then runs a full spatial analysis and returns:
+Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari but outside 1 km of any metro"* or *"Find a premium riverside restaurant strictly between Howrah Bridge and Vidyasagar Setu"*. The portal holds a short consultative conversation to frame the problem, then runs a full spatial **screening** and returns:
 
-- **A ranked shortlist** of the strongest candidate zones, each named and explained
-- **Per-factor scores** with the evidence behind them (OSM / Google Places / ORS)
-- **Hard constraints enforced** — waterfront corridors, exclusions, route constraints — as real pass/fail gates
-- **Multi-dimensional scores** — relative rank, absolute viability, and confidence — not a single opaque composite
-- **Critic enabled/disabled disclosure** — the post-execution self-critique runs in `balanced`/`high` cost mode; its status is always visible
-- **Uploaded-candidates-only gate** — if you say "only rank my uploaded points", the engine restricts to those points and blocks if none are provided
-- **An interactive map** — per-factor suitability heatmaps, AOI boundary, raw/withheld markers
-- **PDF export** — screening-level report with version, disclaimer, and recommendation mode disclosure
+- **Priority investigation zones** — a ranked, evidence-backed shortlist of the strongest zones, each with a restrained screening verdict (Priority / Promising / Conditional / Low priority / Withheld), the evidence-backed reasons it stands out, its key risk, and the concrete next-stage validation it needs
+- **Per-factor scores** with the evidence behind them (OSM / Google Places / ORS), including whether each factor was observed, observed-as-zero, or provider-unavailable
+- **Hard constraints enforced** — waterfront corridors, exclusions, route constraints — as real pass/fail gates, with a per-constraint verification status (verified / proxy / not verifiable / failed)
+- **Screening-stage vs detailed-validation staging** — rent, floor area, availability, zoning and ownership requirements are disclosed and converted into next-validation actions, never claimed as satisfied
+- **One headline confidence verdict** — the conservative merge of data sufficiency and the reliability critic, with disagreement explained
+- **An interactive map** — per-factor suitability heatmaps, AOI boundary, investigation-zone centroids (never "exact sites"), reweight-provisional pins
+- **PDF export** — client-ready screening report with basemap figure, verdict strip, constraint-status table, per-zone next validation, and a clear path to a detailed site study
+
+The product journey: **broad geography → spatial screening → priority investigation zones → detailed site/parcel validation → field and commercial due diligence.** The portal delivers the first three stages; [contact Stratageo](https://stratageo.in/contact.php) to commission the rest.
+
+---
+
+## v1.8.0 Highlights
+
+- **The result is an investigation zone, and now says so end to end** — per-zone screening verdicts (Priority/Promising/Conditional/Low priority/Withheld) projected from the honesty-gated label taxonomy, a run-level claim level (`investigation_zone`), zone-centroid wording on maps/cards/PDF, and an executive header answering *what screened, what's the top zone, why, how confident, what's unresolved*.
+- **Every limitation leads to an action** — each zone carries `nextValidation`: concrete next-stage checks generated from that run's ACTUAL unmet or screening-stage requirements (broker rent verification, unit-inventory survey, competitor field recon where coverage is sparse, on-site land checks where automated ones degraded), never boilerplate.
+- **Target-band competition** — "less competition but not zero" now scores an inverted-U: moderate presence peaks, zero observed competitors is *not* ideal, saturation is worst. Deterministically detected, disclosed everywhere the factor appears.
+- **Observed absence ≠ missing data** — a successful query returning zero features is a real observation (disclosed as such, validate locally); a provider failure is unknown (rerun). Distinct wording and machine-readable status per factor.
+- **Reweighting is provisional until verified** — reweight-promoted zones are badged NEW — UNVERIFIED with rank deltas vs the verified shortlist, and a one-click **Verify adjusted shortlist** re-runs the analysis with your weights for full route/isochrone/Places verification.
+- **Micro↔macro methodology comparison** — expanding "JP Nagar 2nd Phase" to "South Bengaluru region" now discloses the classified spatial scale and exactly which criteria were retained, added, or operationally changed.
+- **Follow-up hardening** — imperative refinements ("reverse the weights", "exclude Lower Parel", "expand to…") are recognized deterministically and keep context; an explicit "start a new analysis in Pune" strips stale corridors/exclusions/weights/study area while keeping the business.
+- **Professional conversion path** — "Request Detailed Site Validation" in the drawer and PDF, plus a copyable, prompt-free analysis summary. No trackers, no fake checkout.
 
 ---
 
@@ -247,7 +261,7 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (636 backend tests) · Vitest (75 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (679 backend tests) · Vitest (90 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -413,7 +427,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.7.2** *(current)* | Bengaluru Run Fixes — custom MCDA weights (bare-pair + synonym matching), coordinate-anchored exclusions, always-on baseline unbuildable-land mask, corridor-contamination guard + truthful zero-viable message; reinstates the v1.7.1 stress-battery work |
+| **v1.8.0** *(current)* | Screening & Investigation-Zone Product Contract — per-zone screening verdicts + claim level + generated next-validation actions, target-band competition curve, observed-zero vs provider-unavailable data status, spatial-scale classification + micro↔macro methodology comparison, provisional-reweight rank deltas + Verify adjusted shortlist, executive result header, zone-centroid map semantics, PDF verdict strip/constraint table/CTA, deterministic follow-up modification signals + new-brief context strip |
+| **v1.7.2** | Bengaluru Run Fixes — custom MCDA weights (bare-pair + synonym matching), coordinate-anchored exclusions, always-on baseline unbuildable-land mask, corridor-contamination guard + truthful zero-viable message; reinstates the v1.7.1 stress-battery work |
 | **v1.7.1** *(reverted → reinstated in 1.7.2)* | Stress-Test Battery — traffic-aware drive catchments by default (+ free-flow honesty label), prompt-stated factor weights, named-place exclusions, rent/floor-area feasibility note. Shipped, reverted per an operator request, then reinstated as part of 1.7.2; the release commit is preserved at tag `v1.7.1` |
 | **v1.7.0** | Scoring Standard v1 — log-space (log_percentile) normalization is now the default for count factors, spreading the mid-range and removing linear-scale exaggeration; ordering preserved, test-locked, disclosed automatically |
 | **v1.6.8** | Pune Run Fixes & Professional Report — city-extent study areas, prompt radius override, Places-New 400 guards, n=1 screening-basis scoring, basemap+north-arrow+legend in the PDF map, Latin-1-safe report text, placeholder/stale sections removed |

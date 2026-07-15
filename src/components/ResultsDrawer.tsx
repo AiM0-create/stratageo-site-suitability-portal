@@ -2,6 +2,11 @@ import React, { useState, useMemo } from 'react';
 import type { LocationData, AnalysisResult, AnalysisSpec, HeatmapType, EvidenceTrail } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { compareToBenchmark } from '../services/benchmarks';
+import {
+  buildExecutiveSummary, topEvidenceReasons, keyRisk, computeRankDeltas,
+  buildCopySummary, type MethodologyComparison,
+} from '../services/screeningPresentation';
+import { config } from '../config';
 
 interface ResultsDrawerProps {
   open: boolean;
@@ -22,6 +27,12 @@ interface ResultsDrawerProps {
   screeningCandidates?: { h3: string; lat: number; lng: number; score: number; rank: number }[];
   /** v1.6.7 — the analysis includes a travel-time route constraint. */
   routeConstraintPresent?: boolean;
+  /** vNext (v1.8.0) — re-run the analysis with the current custom weights so
+   * reweight-promoted zones get real Pass-B verification (§8.2 Option A). */
+  onVerifyAdjustedShortlist?: () => void;
+  /** vNext (v1.8.0) — micro↔macro methodology comparison vs the previous run
+   * of the same business in this session (§9). */
+  methodologyComparison?: MethodologyComparison | null;
   onWeightChange: (name: string, weight: number) => void;
   heatmapType: HeatmapType;
   onHeatmapChange: (type: HeatmapType) => void;
@@ -210,6 +221,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   onWeightsReset,
   screeningCandidates = [],
   routeConstraintPresent = false,
+  onVerifyAdjustedShortlist,
+  methodologyComparison = null,
   onWeightChange,
   heatmapType,
   onHeatmapChange,
@@ -327,6 +340,27 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
     return b.mcda_score - a.mcda_score;
   }), [locations]);
 
+  // ── vNext (v1.8.0) — screening product surface ──
+  // Executive summary computed from actual payload values (never fabricated).
+  const execSummary = useMemo(
+    () => buildExecutiveSummary(result, ranked),
+    [result, ranked],
+  );
+  // Rank deltas vs the backend-verified original shortlist (only meaningful
+  // under adjusted weights — otherwise the orders are identical by definition).
+  const rankDeltas = useMemo(
+    () => (weightsAdjusted ? computeRankDeltas(result.locations ?? [], ranked) : {}),
+    [weightsAdjusted, result.locations, ranked],
+  );
+  const [copiedSummary, setCopiedSummary] = useState(false);
+  const handleCopySummary = () => {
+    const text = buildCopySummary(result, ranked);
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2000);
+    }).catch(() => {});
+  };
+
   // Collect unique POI types from locations for heatmap toggles
   // Factor names that have a real (non-null) score — each becomes a per-hex
   // suitability choropleth (green = favorable for that factor, direction applied).
@@ -342,7 +376,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
     <div className={`drawer ${open ? 'drawer-open' : 'drawer-closed'}`}>
       <div className="drawer-header">
         <div>
-          <div className="drawer-title">Ranked Candidate Zones</div>
+          <div className="drawer-title">
+            {withheld ? 'Screening Result' : 'Priority Investigation Zones'}
+          </div>
           <div className="drawer-subtitle">{result.business_type} — {result.target_location}</div>
         </div>
         <button onClick={onClose} className="drawer-close" aria-label="Close">
@@ -353,6 +389,88 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
       </div>
 
       <div className="drawer-body">
+        {/* vNext (v1.8.0) — executive result header (§6.1): what was screened,
+            what kind of output this is, the strongest zone and why, the
+            headline confidence, and the single most important unresolved
+            check. Every value is computed from the payload — never invented. */}
+        {!withheld && execSummary.topZoneName && (
+          <div style={{
+            background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8,
+            padding: '10px 12px', marginBottom: 10, fontSize: '12.5px',
+            color: '#0c4a6e', lineHeight: 1.5,
+          }}>
+            <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: 3 }}>
+              {execSummary.eligibleCells !== null
+                ? <>Screened {execSummary.screenedCells} grid cells ({execSummary.eligibleCells} eligible) </>
+                : <>Screened the study area </>}
+              for {execSummary.businessType || 'this brief'}
+              {execSummary.targetLocation ? <> in {execSummary.targetLocation}</> : null}.
+            </div>
+            <div style={{ marginBottom: 2 }}>
+              <b>Top zone:</b> {execSummary.topZoneName}
+              {execSummary.topZoneVerdict && (
+                <span style={{
+                  marginLeft: 6, padding: '1px 7px', borderRadius: 9, fontSize: '10.5px',
+                  fontWeight: 700, background: execSummary.topZoneVerdict === 'Priority' ? '#dcfce7' : '#fef3c7',
+                  color: execSummary.topZoneVerdict === 'Priority' ? '#166534' : '#92400e',
+                }}>{execSummary.topZoneVerdict}</span>
+              )}
+              {execSummary.topZoneScore !== null && (
+                <span style={{ marginLeft: 6, color: '#0369a1' }}>
+                  screening fit {execSummary.topZoneScore.toFixed(1)}/10
+                </span>
+              )}
+              {execSummary.confidenceLevel && (
+                <span style={{ marginLeft: 6, color: '#475569' }}>
+                  · confidence {execSummary.confidenceLevel}
+                </span>
+              )}
+            </div>
+            {execSummary.reasons.length > 0 && (
+              <div style={{ marginBottom: 2 }}>
+                <b>Why it stands out:</b> {execSummary.reasons.join(' · ')}
+              </div>
+            )}
+            {execSummary.criticalNextCheck && (
+              <div style={{ color: '#92400e' }}>
+                <b>Critical next check:</b> {execSummary.criticalNextCheck}
+              </div>
+            )}
+            <div style={{ marginTop: 3, fontSize: '11px', color: '#64748b' }}>
+              Output type: {execSummary.claimLevel.replace(/_/g, ' ')}
+              {execSummary.spatialScale ? <> · scale: {execSummary.spatialScale.replace(/_/g, ' ')}</> : null}
+              {' '}— screening result, not a verified property.
+            </div>
+          </div>
+        )}
+
+        {/* vNext (v1.8.0) — micro↔macro methodology comparison (§9): what was
+            retained / operationally changed / added when the study area scale
+            changed vs the previous run of this business. */}
+        {methodologyComparison && (
+          <div style={{
+            background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 6,
+            padding: '8px 11px', marginBottom: 8, fontSize: '11.5px', color: '#581c87', lineHeight: 1.5,
+          }}>
+            <b>Methodology change vs your previous run</b>
+            {methodologyComparison.scaleChange && (
+              <div>Scale: {methodologyComparison.scaleChange.from.replace(/_/g, ' ')} → {methodologyComparison.scaleChange.to.replace(/_/g, ' ')}</div>
+            )}
+            {methodologyComparison.radiusChange && (
+              <div>Factor catchment radius: {methodologyComparison.radiusChange.fromM} m → {methodologyComparison.radiusChange.toM} m</div>
+            )}
+            {methodologyComparison.retained.length > 0 && (
+              <div>Criteria retained: {methodologyComparison.retained.join(', ')}</div>
+            )}
+            {methodologyComparison.added.length > 0 && (
+              <div>Criteria added: {methodologyComparison.added.join(', ')}</div>
+            )}
+            {methodologyComparison.removed.length > 0 && (
+              <div>Criteria no longer used: {methodologyComparison.removed.join(', ')}</div>
+            )}
+          </div>
+        )}
+
         {/* v1.5-Lite — analysis-level investigation verdict badge */}
         {analysisRecoMeta && (
           <div style={{
@@ -1063,13 +1181,24 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
               </div>
             ))}
             <div style={{ marginTop: 5, fontSize: '11px', color: '#92400e' }}>
-              These are selected from every eligible cell using your weights, but have <b>not</b> been
-              verified with real travel-time, routing or Google Places data — only the original
-              candidates were.{routeConstraintPresent && (
+              These are <b>provisional screening results</b>: selected from every eligible cell using
+              your weights, but <b>not</b> verified with real travel-time, routing or Google Places
+              data — only the original candidates were, and these zones do not inherit that
+              evidence.{routeConstraintPresent && (
                 <> In particular, this analysis includes a <b>travel-time route constraint</b> that has
                 NOT been checked for these zones.</>
-              )} To fully verify them, re-run the analysis with these weights.
+              )}
             </div>
+            {onVerifyAdjustedShortlist && (
+              <button
+                className="assumptions-toggle"
+                onClick={onVerifyAdjustedShortlist}
+                style={{ marginTop: 6, background: '#fef3c7', border: '1px solid #d97706', color: '#92400e', fontWeight: 700 }}
+                title="Runs a new analysis with your adjusted weights so these zones get full route/isochrone/Places verification (uses one analysis credit)"
+              >
+                <span>✓ Verify adjusted shortlist (re-runs the analysis with your weights)</span>
+              </button>
+            )}
           </div>
         )}
         {/* Comparison chart */}
@@ -1095,6 +1224,34 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   <div className="drawer-loc-info">
                     <div className="drawer-loc-name">
                       {loc.name}
+                      {/* vNext (v1.8.0) — restrained screening verdict chip */}
+                      {!loc.excluded && !raw && loc.screeningVerdict && (
+                        <span className="excluded-badge" style={{
+                          background: loc.screeningVerdict === 'Priority' ? '#dcfce7'
+                            : loc.screeningVerdict === 'Promising' ? '#e0f2fe'
+                            : loc.screeningVerdict === 'Conditional' ? '#fef3c7' : '#f1f5f9',
+                          color: loc.screeningVerdict === 'Priority' ? '#166534'
+                            : loc.screeningVerdict === 'Promising' ? '#075985'
+                            : loc.screeningVerdict === 'Conditional' ? '#92400e' : '#475569',
+                        }}>
+                          {loc.screeningVerdict.toUpperCase()}
+                        </span>
+                      )}
+                      {/* vNext (v1.8.0) — rank movement under adjusted weights (§8.3) */}
+                      {weightsAdjusted && rankDeltas[loc.name] && !loc.excluded && (
+                        rankDeltas[loc.name].prevRank === null ? (
+                          <span className="excluded-badge" style={{ background: '#fffbeb', color: '#92400e' }}
+                                title="This zone was not in the verified shortlist — screening basis only under your weights">
+                            NEW — UNVERIFIED
+                          </span>
+                        ) : rankDeltas[loc.name].moved !== 0 && (
+                          <span style={{ fontSize: '10.5px', fontWeight: 700,
+                                         color: (rankDeltas[loc.name].moved ?? 0) > 0 ? '#059669' : '#dc2626' }}
+                                title={`Was #${rankDeltas[loc.name].prevRank} under default weights`}>
+                            {(rankDeltas[loc.name].moved ?? 0) > 0 ? '▲' : '▼'} was #{rankDeltas[loc.name].prevRank}
+                          </span>
+                        )
+                      )}
                       {loc.excluded && <span className="excluded-badge">EXCLUDED</span>}
                       {raw && <span className="excluded-badge" style={{ background: '#e2e8f0', color: '#475569' }}>RAW — NOT RECOMMENDED</span>}
                       {!loc.excluded && !raw && (loc as any).provisionalBadge && (
@@ -1103,8 +1260,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className="drawer-loc-coords">
-                      {typeof loc.lat === 'number' ? loc.lat.toFixed(4) : '—'}, {typeof loc.lng === 'number' ? loc.lng.toFixed(4) : '—'}
+                    <div className="drawer-loc-coords" title="Representative point of the investigation zone (H3 cell centroid) — not an exact site or address">
+                      Zone centroid: {typeof loc.lat === 'number' ? loc.lat.toFixed(4) : '—'}, {typeof loc.lng === 'number' ? loc.lng.toFixed(4) : '—'}
                     </div>
                   </div>
                   <div className={`drawer-loc-score ${scoreClass}`}>
@@ -1224,10 +1381,42 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                   </div>
                 )}
 
+                {/* vNext (v1.8.0) — decision hierarchy (§6.2): evidence-backed
+                    reasons, key risk, and the required next validation lead;
+                    the factor wall stays in the expander. */}
+                {!loc.excluded && !raw && (() => {
+                  const reasons = topEvidenceReasons(loc, 3);
+                  const risk = keyRisk(loc);
+                  const nextCheck = loc.nextValidation?.[0];
+                  if (reasons.length === 0 && !risk && !nextCheck) return null;
+                  return (
+                    <div style={{ margin: '4px 12px 0', fontSize: '11.5px', color: '#334155', lineHeight: 1.5 }}>
+                      {reasons.length > 0 && (
+                        <div><b style={{ color: '#166534' }}>Why:</b> {reasons.join(' · ')}</div>
+                      )}
+                      {risk && (
+                        <div><b style={{ color: '#92400e' }}>Key risk:</b> {risk}</div>
+                      )}
+                      {nextCheck && (
+                        <div><b style={{ color: '#0369a1' }}>Next validation:</b> {nextCheck}</div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <p className="drawer-loc-reasoning">{loc.reasoning}</p>
 
                 {isExpanded && (
                   <div className="drawer-loc-detail">
+                    {/* vNext (v1.8.0) — full next-stage validation list */}
+                    {(loc.nextValidation ?? []).length > 1 && (
+                      <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#0c4a6e', marginBottom: 6 }}>
+                        <b>Next-stage validation for this zone</b>
+                        <ul style={{ margin: '3px 0 0', paddingLeft: 16 }}>
+                          {(loc.nextValidation ?? []).map((a, i) => <li key={i}>{a}</li>)}
+                        </ul>
+                      </div>
+                    )}
                     {/* Traffic context (typical-peak congestion — low confidence) */}
                     {loc.trafficContext && (
                       <div className={`traffic-context traffic-${loc.trafficContext.label}`} title={loc.trafficContext.note}>
@@ -1578,6 +1767,46 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
               )}
             </div>
           )}
+        </div>
+
+        {/* vNext (v1.8.0) — conversion path (§7): screening → detailed paid
+            validation. Uses the existing company contact page; no third-party
+            trackers, no fake checkout. The copied summary contains only
+            computed values (never the raw prompt). */}
+        <div style={{
+          marginTop: 14, padding: '12px 14px', borderRadius: 8,
+          background: '#f0fdf4', border: '1px solid #86efac',
+        }}>
+          <div style={{ fontWeight: 700, fontSize: '13px', color: '#14532d', marginBottom: 4 }}>
+            Ready for the next stage?
+          </div>
+          <div style={{ fontSize: '11.5px', color: '#166534', lineHeight: 1.5, marginBottom: 8 }}>
+            This screening identified where to investigate. A detailed site study validates
+            actual properties in these zones: rent and availability, frontage, footfall,
+            zoning, and parcel-level access analysis.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <a
+              href={config.contactUrl}
+              target="_blank" rel="noopener noreferrer"
+              style={{
+                padding: '6px 14px', borderRadius: 6, background: '#166534', color: '#fff',
+                fontSize: '12px', fontWeight: 700, textDecoration: 'none',
+              }}
+            >
+              Request Detailed Site Validation
+            </a>
+            <button
+              onClick={handleCopySummary}
+              style={{
+                padding: '6px 14px', borderRadius: 6, background: '#fff', color: '#166534',
+                fontSize: '12px', fontWeight: 600, border: '1px solid #86efac', cursor: 'pointer',
+              }}
+              title="Copies a plain-text screening summary (zones, verdicts, outstanding validation) to paste into an email or the contact form"
+            >
+              {copiedSummary ? '✓ Copied' : 'Copy analysis summary'}
+            </button>
+          </div>
         </div>
 
       </div>

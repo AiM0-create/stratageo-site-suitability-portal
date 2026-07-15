@@ -42,6 +42,15 @@ class LayerScores:
     # v1.4.8 — which provider produced the refined values (evidence labels):
     # "isochrone" (ORS), "google_places_aggregate", "google_routes_traffic".
     refined_source: str = "isochrone"
+    # vNext (v1.8.0) — observed absence is not missing data. Three states:
+    #   "observed"      — the source query succeeded and returned features.
+    #   "observed_zero" — the source query succeeded but found ZERO features
+    #                     in this study area (a real observation of absence;
+    #                     still excluded from scoring, but disclosed as such).
+    #   "unavailable"   — the provider failed/timed out; nothing was observed.
+    # has_data stays the single scoring gate; this field only disambiguates
+    # WHY a layer has no data, for evidence and next-validation wording.
+    data_status: str = "observed"
 
 
 def proxy_radius_m(layer: Layer) -> float:
@@ -108,6 +117,29 @@ def normalize(value: float | np.ndarray, lo: float, hi: float, direction: str):
     return 1.0 - x if direction == "negative" else x
 
 
+# vNext (v1.8.0) — target-band curve peak, as a POSITION in the normalized
+# [0,1] range of observed values (never an absolute count). 0.35 = the best
+# score goes to cells in the lower-middle of the observed competition range:
+# enough presence to validate the market, well short of saturation.
+TARGET_BAND_PEAK = 0.35
+
+
+def curve_score(layer: Layer, value, lo: float, hi: float):
+    """Direction- AND curve-aware normalized score in [0, 1].
+
+    monotonic  → identical to normalize() (existing behaviour, the default).
+    target_band → inverted-U: peak score at TARGET_BAND_PEAK of the observed
+    range; zero observed scores mid-low (~0.46), saturation scores 0. The
+    curve operates on the SAME normalized position the monotonic path uses
+    (so log-space Scoring Standard v1 is inherited from the caller's tx()),
+    and ignores direction — "moderate is best" has no monotonic direction.
+    """
+    if getattr(layer, "scoringCurve", "monotonic") != "target_band":
+        return normalize(value, lo, hi, layer.direction)
+    x = np.clip((value - lo) / (hi - lo), 0.0, 1.0)
+    return 1.0 - np.abs(x - TARGET_BAND_PEAK) / max(TARGET_BAND_PEAK, 1.0 - TARGET_BAND_PEAK)
+
+
 def present_weight(scores: dict[str, "LayerScores"]) -> float:
     """Sum of weights of layers that actually have data (used to renormalize the
     composite so missing layers neither drag it to 0 nor inflate it via a fake 10)."""
@@ -143,7 +175,7 @@ def pass_a(
     if pw > 0:
         for ls in scores.values():
             if ls.has_data:
-                composite += ls.layer.weight * normalize(tx(ls.layer, ls.raw), ls.norm_low, ls.norm_high, ls.layer.direction)
+                composite += ls.layer.weight * curve_score(ls.layer, tx(ls.layer, ls.raw), ls.norm_low, ls.norm_high)
         composite /= pw
 
     return composite, scores
@@ -238,15 +270,16 @@ def _layer_norm_for_hex(ls: "LayerScores", hex_index: int) -> float:
     refined values are scalar-coerced so a provider that handed back a list or
     NaN degrades this hex's factor to 0.0 instead of crashing the composite."""
     from .contracts import normalize_0_1
+    _curve = getattr(ls.layer, "scoringCurve", "monotonic")
     if hex_index in ls.refined:
         if not ls.discriminating:
             return 0.5
         lo = ls.refined_low if ls.refined_low is not None else ls.norm_low
         hi = ls.refined_high if ls.refined_high is not None else ls.norm_high
         return normalize_0_1(tx(ls.layer, ls.refined[hex_index]), lo, hi, ls.layer.direction,
-                             label=f"{ls.layer.id}.refined[{hex_index}]")
+                             label=f"{ls.layer.id}.refined[{hex_index}]", curve=_curve)
     return normalize_0_1(tx(ls.layer, ls.raw[hex_index]), ls.norm_low, ls.norm_high, ls.layer.direction,
-                         label=f"{ls.layer.id}.raw[{hex_index}]")
+                         label=f"{ls.layer.id}.raw[{hex_index}]", curve=_curve)
 
 
 def composite_for_hex(

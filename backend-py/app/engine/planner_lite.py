@@ -396,6 +396,51 @@ def _business_archetype(spec, text: str) -> str:
     return "generic"
 
 
+# ── vNext (v1.8.0): spatial-scale classification ──────────────────────────────
+# Deterministic text/spec rules — same spec → same class. Scale drives
+# methodology DISCLOSURE (and the frontend's micro↔macro comparison block);
+# it never silently replaces canonical factors (brief §9: stable business
+# logic vs scale-adjusted operational definitions are disclosed, not swapped).
+
+_SCALE_BLOCK_RE = re.compile(
+    r"\bintersection|\bblock\b|\bcrossing\b|\bjunction\b|\bcorner\b|\bstreet[-\s]level",
+    re.I,
+)
+_SCALE_MICRO_RE = re.compile(
+    r"\bmicro[-\s]?(?:market|zone|area)|\b(?:\d+(?:st|nd|rd|th)\s+)?phase\b|\bsector\s+\w+\b"
+    r"|\bstage\s+\d|\bward\b",
+    re.I,
+)
+_SCALE_REGION_RE = re.compile(
+    r"\bregion\b|\bentire\b|\bwhole\b|\bacross\b|\boutskirts\b|\bmetro(?:politan)?\s+area"
+    r"|\bdistrict\b|\bgreater\s+\w+|\bmacro\b",
+    re.I,
+)
+
+
+def _spatial_scale(spec, text: str, *, corridor: bool) -> str:
+    """One of: site_or_block, micro_market, locality, city, metro_region,
+    corridor. Ordered rules; the most specific signal wins."""
+    if corridor:
+        return "corridor"
+    if _SCALE_BLOCK_RE.search(text):
+        return "site_or_block"
+    if _SCALE_REGION_RE.search(text):
+        return "metro_region"
+    sa = getattr(spec, "studyArea", None)
+    places = list(getattr(sa, "places", None) or []) if sa is not None else []
+    if len(places) >= 4:
+        return "metro_region"
+    if _SCALE_MICRO_RE.search(text):
+        return "micro_market"
+    if len(places) >= 2:
+        return "locality"
+    if len(places) == 1:
+        # "JP Nagar 2nd Phase, Bengaluru" → micro qualifiers in the place name
+        return "micro_market" if _SCALE_MICRO_RE.search(places[0]) else "locality"
+    return "city"
+
+
 def _location_intent(spec, text: str, *, water: bool, routing: bool) -> str:
     if water:
         return "riverfront_or_waterfront"
@@ -499,6 +544,13 @@ def _classify_intelligence(
     return {
         "businessArchetype": archetype,
         "locationIntent": _location_intent(spec, text, water=water, routing=routing),
+        # vNext (v1.8.0) — spatial-scale class (site_or_block … metro_region /
+        # corridor). Drives methodology disclosure + the micro↔macro
+        # comparison block; never silently swaps canonical factors.
+        "spatialScale": _spatial_scale(
+            spec, text,
+            corridor=bool(getattr(spec, "corridors", None)) or bool(_ALONG_RE.search(text)),
+        ),
         "analysisMode": mode,
         "riskTriggers": risk,
         "hardGates": gates,

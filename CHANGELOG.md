@@ -4,6 +4,121 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.8.0] — 2026-07-13 — Screening & Investigation-Zone Product Contract (vNext)
+
+Minor release: the result payload gains the customer-facing **screening
+vocabulary** as a pure projection of the existing honesty gates, the results
+presentation is reorganized around the investigation-zone product journey
+(broad geography → screening → priority zones → detailed validation), and two
+analytical gaps are closed (target-band competition, observed-absence
+semantics). All payload additions are optional keys — saved/shared analyses
+from ≤1.7.2 render unchanged. Audit + gap matrix:
+`docs/VNEXT_SCREENING_AND_INVESTIGATION_ZONE_AUDIT.md`.
+
+### Added — analytical
+- **Target-band competition curve** — `Layer.scoringCurve: "target_band"`
+  scores an inverted-U over the observed range (peak at 0.35): moderate
+  competitive presence scores highest, **zero observed competitors is no
+  longer treated as ideal**, saturation scores lowest. Applied
+  deterministically when the prompt asks for "less competition but not zero"
+  (`detect_competition_band`), disclosed in the factor justification, the
+  criteria payload, the explanation-pass prompt, the PDF criteria table, and
+  the per-cell map layer scores. Direction stays "negative" for older
+  consumers; the curve is additive (default "monotonic" = exact old
+  behaviour, test-locked).
+- **Observed absence ≠ missing data** — `LayerScores.data_status`
+  distinguishes `observed_zero` (source queried successfully, zero features:
+  a real, disclosable observation — "validate locally") from `unavailable`
+  (provider failed: unknown, not absent — "rerun / treat as unverified").
+  Surfaced per factor as `criteria.dataStatus` + a distinct `observed-zero`
+  evidence basis, and in `dataQuality[].dataStatus`. Scoring semantics are
+  unchanged (no-data layers were already excluded, never fabricated).
+- **Spatial-scale classification** — `analysisIntelligence.spatialScale ∈
+  {site_or_block, micro_market, locality, city, metro_region, corridor}`,
+  deterministic over the study area + prompt. Disclosed in the run notes; the
+  UI shows a **methodology-comparison block** (criteria retained / added /
+  removed, scale + catchment changes) when a follow-up expands or narrows the
+  same business's study area in one session.
+
+### Added — product contract (engine/screening_contract.py)
+- **`screeningVerdict` per zone** — Priority / Promising / Conditional /
+  Low priority / Withheld, mapped rank-aware from the honesty-gated
+  `investigationLabel`. A projection only: it can never upgrade a verdict.
+- **`claimLevel` per run** — investigation_zone / uploaded_candidate (brief
+  vocabulary alias of `siteClaimLevel`; the public result is an investigation
+  zone, never a property).
+- **`nextValidation` per zone** — concrete, action-phrased next-stage
+  validation generated from the ACTUAL unmet or screening-stage requirements
+  of this run (rent/floor-area/zoning/availability/ownership unsupported
+  constraints, uncomputed route checks, sparse competition coverage, degraded
+  land checks) plus the standing zone→parcel step. Never generic boilerplate;
+  capped at 6, deduped.
+
+### Added — conversation & reweighting
+- **Deterministic modification-intent recognition** (`MODIFY_SIGNAL` in
+  llm.py): recalculate / rerank / reweight / reverse / penalize / exclude /
+  expand / compare / cap-at… keeps imperative refinements at the framework
+  stage with the spec carried forward (interrogatives no longer required).
+- **Explicit new-brief context strip** — "start a new analysis in Pune"
+  removes carried corridors, exclusions, adjusted weights, route gates,
+  radius overrides and the previous study area while keeping the business
+  type (complements the existing business-type staleness guard and the
+  v1.7.2 corridor-contamination guard).
+- **Reweight verification (§8.2 Option A)** — the reweighted shortlist is
+  explicitly a *provisional screening result*: zones promoted only by
+  client-side reweighting are badged **NEW — UNVERIFIED** and inherit no
+  verification evidence; every card shows its **rank delta vs the verified
+  original** (▲/▼ was #N). A new **"Verify adjusted shortlist"** action
+  re-runs the analysis with the user's weights baked into the spec (audited
+  via `weightsAdjustedByUser`), so promoted zones get real Pass-B
+  verification.
+
+### Changed — presentation (drawer / map / PDF)
+- **Executive result header** — screened/eligible cell counts, top zone +
+  verdict + screening fit, headline confidence, why-it-stands-out
+  (evidence-backed factor reasons), the critical next check, and the output
+  type/scale — all computed from the payload.
+- **Zone cards** lead with verdict chip, 2–3 evidence-backed reasons
+  (direction-aware phrasing — a high inverted competition score reads "low
+  competitor saturation", a target-band score reads "balanced"), key risk,
+  and the first next-validation action; the factor table stays in the
+  expander, which also gains the full per-zone validation list.
+- **Map/coordinate semantics** — ranked-pin tooltips and card coordinates now
+  say "Investigation-zone centroid (approximate)" / "Zone centroid" — never
+  implying parcel precision.
+- **PDF report** — page-1 screening-verdict strip (verdict, confidence,
+  scale, eligible cells, critical next check), verdict-aware status badges in
+  the ranked table, "Target band (moderate best)" in the criteria table, a
+  per-zone Next-Stage Validation card on each detail page, a
+  constraint-verification status table (from `hardConstraintVerification`),
+  and a professional **Request Detailed Site Validation** CTA card.
+- **Conversion path (§7)** — the results drawer gains the same CTA
+  (contact page link + "Copy analysis summary": a deterministic, prompt-free
+  plain-text summary of zones, verdicts, confidence and outstanding
+  validation). No third-party trackers; no fake checkout.
+
+### Tests
+- New `backend-py/tests/test_vnext_contract.py` — 43 tests: target-band
+  detection/curve/planner application, observed-absence wording, verdict
+  mapping, next-validation generation, spatial-scale classes, follow-up
+  signals, and a **9-prompt canonical battery** locking archetype +
+  planning-fingerprint stability, waterfront/dry detection, strict-route
+  phrasing, prompt-weight parsing and scale classes for the regression
+  prompts (brief §13/§14).
+- New `src/__tests__/screeningPresentation.test.ts` — 15 tests: evidence
+  reasons (direction/target-band phrasing), key risk, rank deltas
+  (newly-introduced = unverified), executive summary (computed + degrades on
+  old payloads), methodology comparison, CTA copy summary.
+
+### Verification
+- Backend: **679 passed** (636 + 43 new). Frontend: **90 passed** (75 + 15
+  new). `tsc --noEmit` clean; production build clean.
+- Versions: `1.8.0` / `stratageo-engine-00070`. `SPEC_VERSION` stays 2.3
+  (Layer.scoringCurve is additive-with-default, same precedent as
+  `trafficAware` in v1.7.1).
+
+---
+
 ## [1.7.2] — 2026-07-09 — Bengaluru Run Fixes (custom weights, coordinate exclusions, baseline land-cover mask)
 
 Backend + one frontend string. Applied from the boss's v172 patch, which

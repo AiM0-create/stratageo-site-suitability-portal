@@ -82,6 +82,12 @@ export interface MCDACriteria {
   required?: boolean;          // hard-constraint layer
   justification: string;
   evidenceBasis: EvidenceBasis;
+  /** vNext (v1.8.0) — inverted-U competition curve: moderate presence scores
+   * highest; zero and saturation both score low. Absent = monotonic. */
+  scoringCurve?: 'target_band';
+  /** vNext (v1.8.0) — why a no-data factor has no data:
+   * observed_zero (query OK, zero features) vs unavailable (provider failed). */
+  dataStatus?: 'observed' | 'observed_zero' | 'unavailable' | string;
   osmQuery?: string;
 }
 
@@ -160,6 +166,14 @@ export interface LocationData {
   /** v1.5.1 — analysis-wide unresolved hard constraints broadcast onto each
    * non-excluded candidate (normalizer-guaranteed shape when present). */
   hardConstraintWarnings?: HardConstraintWarning[];
+  // ── vNext (v1.8.0) — screening product contract (all optional) ──
+  /** Restrained per-zone verdict: Priority | Promising | Conditional |
+   * Low priority | Withheld. Projection of investigationLabel — never a
+   * business-viability or property-availability claim. */
+  screeningVerdict?: string;
+  /** Concrete next-stage validation actions generated from ACTUAL unmet or
+   * screening-stage requirements for this zone. */
+  nextValidation?: string[];
 }
 
 /** v1.5.1 — compact per-candidate hard-constraint warning. */
@@ -261,6 +275,9 @@ export interface FactorDataQuality {
   featureCount: number;
   lowCoverage: boolean;
   nonDiscriminating: boolean;
+  /** vNext (v1.8.0) — observed | observed_zero (query OK, zero features) |
+   * unavailable (provider failed). Absent on older payloads. */
+  dataStatus?: string;
 }
 
 /** v1.5-Lite — granular per-domain data sufficiency. Every status is one of
@@ -365,6 +382,10 @@ export interface AnalysisResult {
   // v1.1.0 universal suitability fields
   recommendationMode?: 'recommended_sites' | 'candidate_zones' | 'raw_diagnostic' | 'no_reliable_recommendation';
   siteClaimLevel?: 'parcel_site' | 'point_candidate' | 'micro_market_zone' | 'broad_area';
+  /** vNext (v1.8.0) — brief-vocabulary claim level for this run's output:
+   * investigation_zone | uploaded_candidate | … The default public result is
+   * an investigation zone, never a property. */
+  claimLevel?: string;
   archetypeKey?: string;
   outputCount?: {
     requestedTopNRaw?: number | null;

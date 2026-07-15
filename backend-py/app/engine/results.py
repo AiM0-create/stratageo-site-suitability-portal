@@ -112,8 +112,25 @@ def build_location(
         # ── Missing-data layer: never fabricate a 0 or 10 score ──
         if not d.get("hasData", True):
             req = getattr(layer, "required", False)
-            msg = ("Insufficient data to evaluate this required constraint."
-                   if req else "No data available for this factor — excluded from the score.")
+            # vNext (v1.8.0) — observed absence is not missing data. Say WHY
+            # there is no usable data: a successful query that found zero
+            # features is a real observation (validate locally); a failed
+            # provider observed nothing at all (rerun / treat as unknown).
+            _ls_ds = scores.get(layer.id)
+            _dstat = getattr(_ls_ds, "data_status", "observed") if _ls_ds else "observed"
+            if req:
+                msg = "Insufficient data to evaluate this required constraint."
+            elif _dstat == "observed_zero":
+                msg = ("The data source was queried successfully but found ZERO "
+                       "features of this type in the study area — excluded from the "
+                       "score (never treated as an ideal score). Provider coverage "
+                       "here may be sparse; validate locally before relying on it.")
+            elif _dstat == "unavailable":
+                msg = ("The data provider for this factor failed or timed out — "
+                       "nothing was observed. Excluded from the score; treat this "
+                       "factor as unknown, not as absent.")
+            else:
+                msg = "No data available for this factor — excluded from the score."
             criteria.append({
                 "name": layer.name,
                 "weight": layer.weight,
@@ -122,7 +139,9 @@ def build_location(
                 "direction": layer.direction,
                 "required": req,
                 "justification": msg,
-                "evidenceBasis": "insufficient-data",
+                "evidenceBasis": ("observed-zero" if _dstat == "observed_zero"
+                                  else "insufficient-data"),
+                "dataStatus": _dstat,
                 "osmQuery": ", ".join(layer.source.tags) if layer.source.provider == "osm" else None,
             })
             osm_signals[_signal_key(layer.name)] = 0
@@ -142,6 +161,13 @@ def build_location(
             else (f" (Euclidean proxy ≈{int(d['proxyRadiusM'])}m)" if layer.catchment.type in ("walk", "drive") else "")
         )
         just = f"{int(raw)} features within {_catchment_label(layer)}{refinement_note}."
+        # vNext (v1.8.0) — target-band curve disclosure: the score is not
+        # monotonic, so "low score = lots of competition" no longer holds.
+        _is_band = getattr(layer, "scoringCurve", "monotonic") == "target_band"
+        if _is_band:
+            just += (" Scored on a target-band curve per your brief: a MODERATE "
+                     "competitive presence scores highest; zero nearby competitors "
+                     "is NOT treated as ideal, and saturation scores lowest.")
         if d.get("refined") and not d.get("discriminating", True):
             just += " This factor was effectively constant across the shortlisted sites, so it did not differentiate them (scored neutral)."
         if layer.whyItMatters:
@@ -190,6 +216,7 @@ def build_location(
                 layer.confidence == "low" or layer.source.provider == "custom"
             ),
             **({"comparative": comparative} if comparative else {}),
+            **({"scoringCurve": "target_band"} if _is_band else {}),
             "osmQuery": ", ".join(layer.source.tags) if layer.source.provider == "osm" else None,
         })
         osm_signals[_signal_key(layer.name)] = int(raw)
@@ -240,7 +267,7 @@ def build_hex_grid(hexes: list[HexCell], composite, excluded, scores=None) -> li
     use one green=good ramp for all factors, removing the 'red competition looks
     good' ambiguity. Excluded hexes carry excluded=True for hatching/greying."""
     from .grid import cell_boundary
-    from .scoring import normalize
+    from .scoring import curve_score
 
     order = range(len(hexes))
     if len(hexes) > MAX_HEX_GRID_CELLS:
@@ -259,9 +286,11 @@ def build_hex_grid(hexes: list[HexCell], composite, excluded, scores=None) -> li
             "boundary": cell_boundary(hexes[i].h3_id),
         }
         if layer_list:
+            # vNext (v1.8.0) — curve-aware: a target-band competition factor's
+            # per-cell colour peaks at moderate presence, matching the composite.
             cell["layerScores"] = {
                 ls.layer.name: round(float(
-                    normalize(float(scoring_tx(ls.layer, ls.raw[i])), ls.norm_low, ls.norm_high, ls.layer.direction)
+                    curve_score(ls.layer, float(scoring_tx(ls.layer, ls.raw[i])), ls.norm_low, ls.norm_high)
                 ) * 10, 1)
                 for ls in layer_list
             }
@@ -376,8 +405,13 @@ async def write_explanations(
     def crit_str(c: dict) -> str:
         if c.get("score") is None or c.get("rawValue") is None:
             return f"{c['name']}: NO DATA (excluded — {c.get('justification', 'insufficient data')})"
-        dir_note = (" [less-is-better, score PRE-INVERTED: a LOW score = MORE of it nearby = worse]"
-                    if c.get("direction") == "negative" else "")
+        if c.get("scoringCurve") == "target_band":
+            dir_note = (" [TARGET-BAND: moderate presence scores highest; zero and "
+                        "saturation both score low — never describe a low score here "
+                        "as 'no competition']")
+        else:
+            dir_note = (" [less-is-better, score PRE-INVERTED: a LOW score = MORE of it nearby = worse]"
+                        if c.get("direction") == "negative" else "")
         return f"{c['name']}: {c['score']}/10{dir_note} ({int(c['rawValue'])} observed, weight {c['weight']:.0%})"
 
     loc_lines = []

@@ -229,6 +229,14 @@ class Layer(BaseModel):
     name: str
     weight: float = Field(gt=0)                   # any positive scale; renormalized at spec level
     direction: Literal["positive", "negative"] = "positive"
+    # vNext (v1.8.0) — scoring curve shape. "monotonic" keeps the existing
+    # direction-based behaviour. "target_band" scores an inverted-U over the
+    # normalized value: a MODERATE presence scores highest, zero scores
+    # mid-low (some market validation is wanted), saturation scores lowest.
+    # Used for competition factors when the brief says "less competition but
+    # not zero". Band peak is relative to the observed distribution — never
+    # an absolute count. Direction is ignored when the curve is target_band.
+    scoringCurve: Literal["monotonic", "target_band"] = "monotonic"
     source: OsmSource | PlacesSource | CustomSource = Field(discriminator="provider")
     catchment: Catchment
     normalization: Normalization = Normalization()

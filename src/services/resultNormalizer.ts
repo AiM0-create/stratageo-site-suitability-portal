@@ -127,6 +127,14 @@ function normalizeLocation(raw: unknown, index: number, warnings: string[]): Loc
       }));
     out.hardConstraintWarnings = warns.length > 0 ? warns : undefined;
   }
+  // vNext (v1.8.0) — screening contract fields: strings/string-arrays or absent.
+  if (raw.screeningVerdict !== undefined) {
+    out.screeningVerdict = typeof raw.screeningVerdict === 'string' ? raw.screeningVerdict : undefined;
+  }
+  if (raw.nextValidation !== undefined) {
+    const acts = asArr(raw.nextValidation).filter((a: unknown) => typeof a === 'string' && a);
+    out.nextValidation = acts.length > 0 ? acts : undefined;
+  }
   return out as LocationData;
 }
 

@@ -68,6 +68,12 @@ from ..engine.hard_constraints import (
     candidate_warnings,
     demotes_strong_recommendation,
 )
+from ..engine.screening_contract import (
+    apply_screening_verdicts,
+    build_zone_next_validation,
+    claim_level,
+    sparse_competition_factor_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -784,6 +790,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "uploadedCandidateWarnings": [r["reason"] for r in invalid_records],
             "analysisMode": "uploaded_candidate_ranking",
             "siteClaimLevel": "point_candidate",
+            "claimLevel": claim_level("point_candidate"),
         }
         job.status = "done"; job.progress = 100; job.phase = "done"
         job.message = f"Uploaded-candidates-only complete — {n_ranked} ranked, {n_excl} excluded"
@@ -807,6 +814,15 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # resource-saving decision recorded honestly in notes + the
     # analysisCompleteness payload — never a failure or a degradation.
     _plan = create_analysis_plan(spec)
+    # vNext (v1.8.0) — disclose the classified spatial scale so a micro-market
+    # run and a metro-region run are visibly different methodologies.
+    _scale_class = (_plan.intelligence or {}).get("spatialScale")
+    if _scale_class:
+        notes.append(
+            f"Spatial scale: {_scale_class.replace('_', ' ')} — factor catchments "
+            "and grid resolution follow the archetype defaults for this scale; "
+            "see the methodology comparison when expanding or narrowing the area."
+        )
     for _sk in _plan.skipped_stages:
         notes.append(f"Planner: {_sk.reason} (cost saved: {_sk.saved_cost})")
     for _uc in _plan.unsupported_constraints:
@@ -839,6 +855,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # kills the "competitor saturation: no data" failure regardless of which
     # source the consultant picked. Infra/land/water/transit stay single-source.
     layer_pois: dict[str, list[dict]] = {}
+    # vNext (v1.8.0) — per-layer data status ("observed" | "observed_zero" |
+    # "unavailable"), resolved from fetch outcomes and copied onto LayerScores
+    # after Pass A. Observed absence is not missing data (brief §3.2).
+    _layer_status: dict[str, str] = {}
     osm_tag_sets = {
         l.id: l.source.tags for l in spec.layers if l.source.provider == "osm"
     }
@@ -931,6 +951,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             else:
                 layer_pois[layer.id] = osm_pois
             if not layer_pois[layer.id]:
+                # vNext (v1.8.0) — observed absence vs missing data: a failed
+                # main fetch observed NOTHING; a successful fetch that found
+                # zero features is a real (disclosable) observation of absence.
+                _layer_status[layer.id] = "unavailable" if _osm_warn else "observed_zero"
                 fallbacks.append(f"No features found for layer '{layer.name}' in the study area.")
         elif layer.source.provider == "google_places":
             _update(job, 40, "fetch", f"Fetching Google Places for: {layer.name}...")
@@ -967,6 +991,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 notes.append(f"Layer '{layer.name}': merged {len(places_pois)} Places + {len(osm_sup)} OSM → {len(merged)} (deduped).")
             layer_pois[layer.id] = merged
             if not merged:
+                _layer_status[layer.id] = "unavailable" if _pp_src == "none" else "observed_zero"
                 fallbacks.append(f"No features found for layer '{layer.name}' in the study area.")
         else:  # custom — uses other layers' POIs; no fetch
             layer_pois[layer.id] = []
@@ -1035,6 +1060,12 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # from the composite (never scored 0/10 from absence). If a REQUIRED layer is
     # missing, no candidate can be truthfully validated → withhold the ranking.
     no_data_layers = [ls.layer.name for ls in scores.values() if not ls.has_data]
+    # vNext (v1.8.0) — copy the fetch-resolved data status onto each no-data
+    # layer's scores so evidence/next-validation wording can distinguish
+    # observed-zero from provider-unavailable. Layers WITH data stay "observed".
+    for _lid, _ls in scores.items():
+        if not _ls.has_data:
+            _ls.data_status = _layer_status.get(_lid, "observed_zero")
     required_missing = scoring.required_missing_layers(spec, scores)
     if no_data_layers:
         fallbacks.append(
@@ -2269,6 +2300,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "featureCount": n,
             "lowCoverage": n < 15 and layer.weight >= 0.20,
             "nonDiscriminating": bool(ls and not ls.discriminating),
+            # vNext (v1.8.0) — observed / observed_zero / unavailable
+            "dataStatus": getattr(ls, "data_status", "observed") if ls else "observed",
         })
 
     # ── Senior-consultant self-critique of the COMPUTED result ──────────────
@@ -2568,6 +2601,27 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         logger.warning("hard-constraint verification build failed (non-fatal): %s", _hcv_ex)
         _hcv = None
 
+    # ── vNext (v1.8.0): screening vocabulary + per-zone next validation ─────
+    # Pure projection of already-computed honesty state (investigationLabel,
+    # constraint policy, planner unsupported constraints, data status) into
+    # the customer-facing contract: screeningVerdict (Priority/Promising/
+    # Conditional/Low priority/Withheld) and action-phrased nextValidation.
+    # Runs AFTER the _hcv safety cap so demotions are final. Never breaks a run.
+    try:
+        apply_screening_verdicts(locations)
+        _unsup_keys = [uc.constraint for uc in _plan.unsupported_constraints]
+        _sparse_comp = sparse_competition_factor_names(spec.layers, data_quality, scores)
+        for _loc in locations:
+            _loc["nextValidation"] = build_zone_next_validation(
+                _loc,
+                unsupported_keys=_unsup_keys,
+                unverified_constraint_names=_policy.unverifiedHardConstraints,
+                sparse_competition_factors=_sparse_comp,
+                buildability_degraded=bool(_buildability_degraded),
+            )
+    except Exception as _sc_ex:    # presentation layer — never breaks the run
+        logger.warning("screening contract build failed (non-fatal): %s", _sc_ex)
+
     # ── Hex suitability surface for map choropleth ───────────────────
     # All Pass-A composite scores (the engine computed them anyway). Capped at
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
@@ -2723,6 +2777,9 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "dataCoverage": _data_coverage,
         # v1.4.0 — site claim level (never parcel)
         "siteClaimLevel": "micro_market_zone",
+        # vNext (v1.8.0) — brief-vocabulary claim level (§5.1). The default
+        # public-portal result is an investigation zone, never a property.
+        "claimLevel": claim_level("micro_market_zone"),
         "disclaimer": (
             "These are screening-level candidate zones (H3 hexagons), not exact "
             "parcels, building addresses, or investment recommendations. "

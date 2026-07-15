@@ -178,8 +178,10 @@ export const MapView: React.FC<MapViewProps> = ({
           ? ' <span style="color:#ef4444;font-size:9px">[EXCLUDED]</span>'
           : raw ? ' <span style="color:#64748b;font-size:9px">[RAW — NOT RECOMMENDED]</span>' : '';
         const headGlyph = loc.excluded ? '✕' : raw ? '?' : `#${displayRank}`;
+        // vNext (v1.8.0) — zone-centroid honesty: the pin marks the H3 cell's
+        // representative point, never an exact site or address (§6.5).
         marker.bindTooltip(
-          `<div class="sg-tooltip"><strong>${headGlyph}</strong> ${loc.name}${excludedLabel}<br/><span class="sg-tooltip-score">${loc.mcda_score}/10</span></div>`,
+          `<div class="sg-tooltip"><strong>${headGlyph}</strong> ${loc.name}${excludedLabel}<br/><span class="sg-tooltip-score">${loc.mcda_score}/10</span><br/><span style="font-size:9px;color:#64748b">Investigation-zone centroid (approximate)</span></div>`,
           { permanent: true, direction: 'top', className: 'sg-tooltip-container', offset: [0, -44] }
         );
         marker.on('click', (e: any) => {

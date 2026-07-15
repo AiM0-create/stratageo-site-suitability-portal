@@ -203,6 +203,46 @@ v1.7.2: Bengaluru supermarket run fixes (boss patch, supersedes v1.7.1).
   context-dependent checks (railway, ghats, heritage, road frontage) remain
   planner-gated. Roads/slope stated openly as parcel-level/DEM questions
   outside screening resolution.
+v1.8.0: Screening & Investigation-Zone Product Contract (vNext). The result
+  payload gains the customer-facing screening vocabulary as a pure PROJECTION
+  of the existing honesty gates (nothing can be upgraded by it):
+  (1) screeningVerdict per zone — Priority / Promising / Conditional /
+  Low priority / Withheld, mapped from investigationLabel with rank
+  awareness; claimLevel per run (investigation_zone / uploaded_candidate).
+  (2) nextValidation per zone — concrete next-stage validation actions
+  generated from the ACTUAL unmet or screening-stage requirements of the run
+  (unsupported constraints, unverified route checks, sparse competition
+  coverage, degraded land checks), never generic boilerplate
+  (engine/screening_contract.py). (3) Target-band competition curve —
+  Layer.scoringCurve="target_band" scores an inverted-U (peak at 0.35 of the
+  observed range) so "less competition but not zero" briefs stop treating
+  zero observed competitors as ideal; applied deterministically when the
+  prompt says so (detect_competition_band), disclosed in the factor
+  justification and the explanation-pass prompt. (4) Observed absence is not
+  missing data — LayerScores.data_status distinguishes observed_zero (query
+  succeeded, zero features: a real, disclosable observation) from
+  unavailable (provider failed: unknown, not absent); surfaced per factor in
+  criteria dataStatus/evidenceBasis and dataQuality. (5) Spatial-scale
+  classification (site_or_block / micro_market / locality / city /
+  metro_region / corridor) in analysisIntelligence.spatialScale, with a
+  frontend methodology-comparison block for micro↔macro follow-ups (criteria
+  retained / added / removed, scale + catchment changes). (6) Follow-up
+  hardening — deterministic MODIFY_SIGNAL (recalculate / reweight / reverse /
+  exclude / expand / compare …) keeps imperative refinements at the framework
+  stage with the spec carried forward; an explicit "start a new analysis"
+  strips carried spatial/strategy context (corridors, exclusions, adjusted
+  weights, route gates, study area) while keeping the business type. (7)
+  Reweight verification (§8.2 Option A) — client-reweighted shortlists stay
+  clearly provisional with rank deltas vs the verified original (newly
+  promoted zones marked NEW — UNVERIFIED, inheriting no evidence), plus a
+  "Verify adjusted shortlist" action that re-runs the analysis with the
+  user's weights baked in (audited via weightsAdjustedByUser). (8) Results
+  presentation — executive header (screened cells, top zone + verdict,
+  confidence, critical next check), zone cards lead with evidence-backed
+  reasons / key risk / next validation, zone-centroid wording on map and
+  cards, PDF gains the verdict strip, constraint-status table, per-zone
+  next-validation and a professional detailed-validation CTA; the results
+  drawer gains the same CTA with a copyable, prompt-free summary.
 """
 from functools import lru_cache
 from typing import Literal
@@ -210,18 +250,22 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.7.2"
+APP_VERSION     = "1.8.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00069"
+ENGINE_VERSION  = "stratageo-engine-00070"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
 # screeningScore / rankingBasis / canonicalWeights / weightsAdjustedByUser /
 # unifiedConfidence / gridResolutionAdjustedByUser are additive keys outside
-# these versioned contracts.
+# these versioned contracts. v1.8.0 likewise: Layer.scoringCurve defaults to
+# "monotonic" (same precedent as Catchment.trafficAware in v1.7.1), and
+# screeningVerdict / claimLevel / nextValidation / dataStatus / spatialScale
+# are additive result-payload keys — older saved/shared payloads render
+# unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Bengaluru Run Fixes (custom weights, coord exclusions, baseline mask)"
+RELEASE_NAME    = "Screening & Investigation-Zone Product Contract"
 
 
 class Settings(BaseSettings):

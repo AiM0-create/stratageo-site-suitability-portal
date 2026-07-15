@@ -81,6 +81,33 @@ NO_GO = re.compile(
     r"\b(don'?t|do not|never|not yet|stop|wait|hold|before (you )?(run|execut))\b",
     re.IGNORECASE,
 )
+# vNext (v1.8.0) — deterministic MODIFICATION intent (brief §8.1). An
+# imperative refinement of an existing analysis must be treated as a
+# follow-up that RETAINS context — never as a fresh conversational turn that
+# could drop the spec back to the chat stage. Interrogatives/question marks
+# are deliberately not required: "Reverse the weights." has neither.
+MODIFY_SIGNAL = re.compile(
+    r"\b(recalculat\w*|re.?rank\w*|re.?weight\w*|reverse\s+(the\s+)?weights?"
+    r"|increase|decrease|penali[sz]\w*|exclude|include|expand|narrow|widen|shrink"
+    r"|change\s+(the\s+)?(weight|criteri|radius|catchment|area|grid)"
+    r"|use\s+the\s+same|keep\s+(the\s+)?same|compare|cap(ped)?\s+at|adjust)\b",
+    re.IGNORECASE,
+)
+# A clearly NEW brief must start cleanly (no stale corridors / exclusions /
+# weights / study area). "Use the same business but start a new analysis in
+# Pune" keeps the business type (the staleness guard below won't fire) while
+# this strips carried spatial context.
+NEW_ANALYSIS_RE = re.compile(
+    r"\b(start|begin|run)\s+(a\s+)?(new|fresh)\s+analysis\b|\bnew\s+analysis\s+in\b",
+    re.IGNORECASE,
+)
+# Spec keys that are prompt-specific spatial/strategy context and must never
+# survive an explicit new-analysis request.
+_CONTEXT_KEYS_ON_NEW_BRIEF = (
+    "namedExclusions", "corridors", "waterfront", "searchRadiusOverrideM",
+    "weightsAdjustedByUser", "promptWeightUnmatched", "exclusions",
+    "routeConstraints", "studyArea", "gridResolutionAdjustedByUser",
+)
 
 
 def is_go_signal(text: str) -> bool:
@@ -89,6 +116,12 @@ def is_go_signal(text: str) -> bool:
 
 def is_framework_signal(text: str) -> bool:
     return (bool(FRAMEWORK_SIGNAL.search(text)) or bool(AFFIRMATION.match(text))) and not NO_GO.search(text)
+
+
+def is_modification_signal(text: str) -> bool:
+    """Deterministic follow-up refinement detection (reweight / exclude /
+    expand / compare / recalc …). Only meaningful when a spec already exists."""
+    return bool(MODIFY_SIGNAL.search(text)) and not NO_GO.search(text)
 
 
 def _backfill_plan(spec: dict) -> None:
@@ -159,7 +192,23 @@ async def chat_turn(
     _last_msg_preview = next(
         (m.content for m in reversed(messages) if m.role == "user"), ""
     )
+    # vNext (v1.8.0) — explicit new-brief request: strip prompt-specific
+    # spatial/strategy context from the carried spec so a fresh geography
+    # never inherits stale corridors, exclusions, adjusted weights, route
+    # gates or the previous study area. Business type/archetype survives
+    # ("use the same business but start a new analysis in Pune").
+    if spec and NEW_ANALYSIS_RE.search(_last_msg_preview):
+        _stripped = [k for k in _CONTEXT_KEYS_ON_NEW_BRIEF if k in spec]
+        if _stripped:
+            logger.info("New-analysis request: stripped carried context %s", _stripped)
+            spec = {k: v for k, v in spec.items() if k not in _CONTEXT_KEYS_ON_NEW_BRIEF}
     _is_short_affirmation = bool(AFFIRMATION.match(_last_msg_preview) or is_go_signal(_last_msg_preview))
+    # vNext (v1.8.0) — an imperative modification of an existing analysis is a
+    # follow-up: always carry the spec forward (same protection affirmations
+    # already get), even when the message names a place/business fragment that
+    # would otherwise look like a new brief to the staleness guard.
+    if spec and is_modification_signal(_last_msg_preview):
+        _is_short_affirmation = True
     if spec and not _is_short_affirmation:
         _cur_ri = parse_raw_intent(_last_msg_preview)
         _spec_ri = (spec or {}).get("rawIntent") or {}
@@ -304,6 +353,11 @@ async def chat_turn(
         stage = "framework"
     elif is_go_signal(last_user):
         stage = "framework"   # go-signal on an invalid/incomplete spec → show framework
+    elif new_spec and is_modification_signal(last_user):
+        # vNext (v1.8.0) — an imperative refinement of an existing plan stays
+        # at the framework stage (the plan card keeps showing), never drops
+        # back to open-ended chat.
+        stage = "framework"
     else:
         stage = model_stage
     # Never claim "ready" without readyToExecute actually set

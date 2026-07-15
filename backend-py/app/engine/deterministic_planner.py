@@ -448,6 +448,27 @@ def build_constraint_enforcement_records(
 
 # ── Deterministic spec override ────────────────────────────────────────────────
 
+# ── vNext (v1.8.0): target-band competition detection ─────────────────────────
+# "Prefer less competitive landscape but not zero competition" (canonical
+# Kolkata four-locality prompt) is NOT a monotonic less-is-better preference:
+# zero observed competitors must not receive the best score. Deterministic
+# regex over the raw prompt; applied to competition-family layers only.
+_TARGET_BAND_RE = re.compile(
+    r"(?:less|lower|limited|light|sparse|minimal|low)[\s-]+competit\w+[^.]{0,80}?not\s+(?:zero|none|no\s+competition)"
+    r"|not\s+zero\s+competition"
+    r"|some\s+competition\s+(?:is\s+)?(?:good|healthy|desired|wanted|preferred|validat)",
+    re.I,
+)
+_COMPETITION_NAME_RE = re.compile(r"compet|saturation|rival", re.I)
+
+
+def detect_competition_band(prompt: str) -> bool:
+    """True when the prompt asks for moderate competition — less than the
+    market norm but explicitly NOT zero. Deterministic; same prompt → same
+    answer."""
+    return bool(_TARGET_BAND_RE.search(prompt or ""))
+
+
 def apply_deterministic_plan(
     llm_spec: dict,
     intent: RawIntent,
@@ -527,6 +548,18 @@ def apply_deterministic_plan(
             spec["weightsSource"] = "user_prompt"
         if unmatched:
             spec["promptWeightUnmatched"] = unmatched
+
+    # 1-ter. vNext (v1.8.0) — target-band competition curve when the prompt
+    # asks for "less competition but not zero". Zero observed competitors
+    # must not score as ideal; moderate presence peaks instead.
+    if detect_competition_band(intent.rawPrompt or ""):
+        _band_names = []
+        for _l in merged_layers:
+            if _COMPETITION_NAME_RE.search(str(_l.get("name", ""))):
+                _l["scoringCurve"] = "target_band"
+                _band_names.append(_l.get("name"))
+        if _band_names:
+            spec["competitionCurve"] = "target_band"
 
     # 2. Lock output.topN to RawIntent value
     resolved_top_n = intent.topN.get("topNResolved", canonical.top_n_default)
