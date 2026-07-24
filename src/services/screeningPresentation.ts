@@ -219,7 +219,8 @@ export function buildCopySummary(
   lines.push(`Business: ${ex.businessType || 'n/a'}`);
   if (ex.targetLocation) lines.push(`Geography: ${ex.targetLocation}`);
   if (ex.screenedCells !== null) {
-    lines.push(`Screened: ${ex.screenedCells} grid cells (${ex.eligibleCells} eligible after exclusions)`);
+    const cellWord = ex.screenedCells === 1 ? 'grid cell' : 'grid cells';
+    lines.push(`Screened: ${ex.screenedCells} ${cellWord} (${ex.eligibleCells} eligible after exclusions)`);
   }
   lines.push(`Output type: ${ex.claimLevel.replace(/_/g, ' ')} (screening-level; not verified properties)`);
   if (ex.confidenceLevel) lines.push(`Screening confidence: ${ex.confidenceLevel}`);

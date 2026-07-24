@@ -4,6 +4,39 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.8.1] — 2026-07-15 — Hotfix: study-area minimum-extent floor + riverfront-button guard
+
+Patch found during live manual testing of the JP Nagar 2nd Phase grocery
+prompt (canonical smoke-test #6). No analytical-logic change.
+
+### Fixed
+- **False "no viable site" from a 1-hex grid** (P0). The `type:"places"`
+  study-area path already floored to a 2 km minimum buffer, but
+  `type:"point_radius"` and `type:"bbox"` used the LLM's value **verbatim
+  with no floor**. A "specific intersections or blocks" brief makes the model
+  pick a tiny study area; the deterministic planner then bumps the grid to
+  res 10 (block granularity), and `polyfill` collapsed to ~1 hex — a single
+  land-cover mask removed it and the run reported a false "No viable site
+  under the applied constraints". Proven offline: a normal 2 km locality
+  buffer yields **827** hexes at res 10; a 60 m polygon yields **1**. All
+  three study-area types now floor to `MIN_STUDY_AREA_RADIUS_M` (1.5 km) with
+  a disclosed note (`engine/study_area.py`).
+- **Riverfront "widen corridor" button on landlocked results.** The button
+  was gated only on `(waterfront?.corridorWidthM ?? 0) < 500`, which is
+  `0 < 500 = true` when `waterfront` is null, so "Try widening riverfront
+  corridor to 500 m" rendered on non-waterfront withheld results (e.g. a
+  Bengaluru grocery brief). Now also requires `waterfront.isWaterfront`
+  (`ResultsDrawer.tsx`). The backend's *text* suggestions were already correct.
+- **"1 grid cells" pluralization** in the executive header and copy summary.
+
+### Tests
+- New `tests/test_v181_study_area_floor.py` (5) — point_radius/bbox floor,
+  generous areas untouched, and the core invariant that no study-area type
+  can collapse to ~1 hex at res 10.
+- Versions: `1.8.1` / `stratageo-engine-00071`.
+
+---
+
 ## [1.8.0] — 2026-07-13 — Screening & Investigation-Zone Product Contract (vNext)
 
 Minor release: the result payload gains the customer-facing **screening

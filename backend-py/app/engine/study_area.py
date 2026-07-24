@@ -27,6 +27,18 @@ def _m_to_deg_lng(m: float, lat: float) -> float:
     return m / (111_320.0 * max(0.2, math.cos(math.radians(lat))))
 
 
+# v1.8.1 — minimum study-area extent floor. The type="places" path already
+# enforces a 2 km minimum buffer (below), but type="point_radius" and
+# type="bbox" used the LLM's value VERBATIM with no floor. A "specific
+# intersections or blocks" brief makes the model pick a tiny area, and when
+# the deterministic planner then bumps the grid to res 10 (block granularity),
+# polyfill produced ~1 hex — a single mask then removed it and the run
+# reported a false "no viable site" (observed live on the JP Nagar 2nd Phase
+# grocery prompt). 1.5 km radius still keeps a block-level analysis local
+# (~450 res-10 cells) while guaranteeing a usable grid.
+MIN_STUDY_AREA_RADIUS_M = 1500.0
+
+
 async def geocode_with_bbox(
     query: str,
 ) -> tuple[float, float, tuple[float, float, float, float] | None] | None:
@@ -196,11 +208,33 @@ async def resolve_study_area(area: StudyArea) -> tuple[object, list[str]]:
 
     if area.type == "bbox":
         west, south, east, north = area.bbox
-        return box(west, south, east, north), notes
+        # v1.8.1 — floor a degenerate/tiny bbox to a minimum extent around its
+        # centre so res-10 polyfill can't collapse to ~1 hex (see
+        # MIN_STUDY_AREA_RADIUS_M). Legitimately larger bboxes pass through.
+        clat = (south + north) / 2.0
+        min_half_lat = _m_to_deg_lat(MIN_STUDY_AREA_RADIUS_M)
+        min_half_lng = _m_to_deg_lng(MIN_STUDY_AREA_RADIUS_M, clat)
+        clng = (west + east) / 2.0
+        half_lat = max((north - south) / 2.0, min_half_lat)
+        half_lng = max((east - west) / 2.0, min_half_lng)
+        if half_lat > (north - south) / 2.0 or half_lng > (east - west) / 2.0:
+            notes.append(
+                "Study-area bounding box was smaller than the minimum viable "
+                f"screening extent — expanded to ~{2 * MIN_STUDY_AREA_RADIUS_M / 1000:.1f} km "
+                "around its centre so the grid isn't degenerate."
+            )
+        return box(clng - half_lng, clat - half_lat, clng + half_lng, clat + half_lat), notes
 
     if area.type == "point_radius":
         lat, lng = area.point["lat"], area.point["lng"]
-        r = area.radiusM or 3000
+        # v1.8.1 — floor the radius so a tiny LLM-chosen radius (a "specific
+        # blocks" brief) can't produce a ~1-hex grid at res 10.
+        r = max(area.radiusM or 3000, MIN_STUDY_AREA_RADIUS_M)
+        if r > (area.radiusM or 3000):
+            notes.append(
+                f"Study-area radius floored to {r / 1000:.1f} km (minimum viable "
+                "screening extent) so the grid isn't degenerate."
+            )
         poly = Point(lng, lat).buffer(max(_m_to_deg_lat(r), _m_to_deg_lng(r, lat)))
         return poly, notes
 

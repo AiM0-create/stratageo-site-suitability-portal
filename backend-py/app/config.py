@@ -243,6 +243,19 @@ v1.8.0: Screening & Investigation-Zone Product Contract (vNext). The result
   cards, PDF gains the verdict strip, constraint-status table, per-zone
   next-validation and a professional detailed-validation CTA; the results
   drawer gains the same CTA with a copyable, prompt-free summary.
+v1.8.1: Hotfix (live JP Nagar 2nd Phase grocery run). (1) Study-area
+  minimum-extent floor — the type="places" path already enforced a 2 km
+  minimum buffer, but type="point_radius" and type="bbox" used the LLM's
+  value VERBATIM with no floor. A "specific intersections or blocks" brief
+  makes the model pick a tiny study area; the deterministic planner then
+  bumps the grid to res 10, polyfill collapsed to ~1 hex, a single mask
+  removed it, and the run reported a FALSE "no viable site". All three
+  study-area types now floor to MIN_STUDY_AREA_RADIUS_M (1.5 km) with a
+  disclosed note (engine/study_area.py). (2) Frontend: the "Try widening
+  riverfront corridor to 500 m" button was gated only on
+  `(waterfront?.corridorWidthM ?? 0) < 500` — which is 0 < 500 = true when
+  waterfront is null — so it rendered on landlocked withheld results; now
+  gated on `waterfront.isWaterfront`. (3) "1 grid cells" pluralization.
 """
 from functools import lru_cache
 from typing import Literal
@@ -250,9 +263,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.8.0"
+APP_VERSION     = "1.8.1"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00070"
+ENGINE_VERSION  = "stratageo-engine-00071"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -265,7 +278,7 @@ ENGINE_VERSION  = "stratageo-engine-00070"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Screening & Investigation-Zone Product Contract"
+RELEASE_NAME    = "Screening & Investigation-Zone Product Contract (v1.8.1 study-area floor hotfix)"
 
 
 class Settings(BaseSettings):

@@ -401,7 +401,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           }}>
             <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: 3 }}>
               {execSummary.eligibleCells !== null
-                ? <>Screened {execSummary.screenedCells} grid cells ({execSummary.eligibleCells} eligible) </>
+                ? <>Screened {execSummary.screenedCells} {execSummary.screenedCells === 1 ? 'grid cell' : 'grid cells'} ({execSummary.eligibleCells} eligible) </>
                 : <>Screened the study area </>}
               for {execSummary.businessType || 'this brief'}
               {execSummary.targetLocation ? <> in {execSummary.targetLocation}</> : null}.
@@ -544,7 +544,14 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           <div className="withheld-suggestions">
             <div className="review-label">What to relax next</div>
             <ul>{suggestions.map((sug, i) => <li key={i}>{sug}</li>)}</ul>
-            {onWidenCorridor && ((result as any).waterfront?.corridorWidthM ?? 0) < 500 && (
+            {/* v1.8.1 — this relaxation only makes sense for an ACTUAL
+                waterfront brief. The previous guard used
+                `(waterfront?.corridorWidthM ?? 0) < 500`, which is 0 < 500 =
+                true when waterfront is null — so the riverfront button
+                rendered on landlocked withheld results (e.g. a Bengaluru
+                grocery brief). Gate on isWaterfront. */}
+            {onWidenCorridor && (result as any).waterfront?.isWaterfront
+              && ((result as any).waterfront?.corridorWidthM ?? 0) < 500 && (
               <button
                 className="assumptions-toggle"
                 onClick={onWidenCorridor}

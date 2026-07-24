@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.8.0 — Screening & Investigation-Zone Product Contract**
+**Current version: v1.8.1 — Screening & Investigation-Zone Product Contract (study-area floor hotfix)**
 
 ---
 
@@ -427,7 +427,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.8.0** *(current)* | Screening & Investigation-Zone Product Contract — per-zone screening verdicts + claim level + generated next-validation actions, target-band competition curve, observed-zero vs provider-unavailable data status, spatial-scale classification + micro↔macro methodology comparison, provisional-reweight rank deltas + Verify adjusted shortlist, executive result header, zone-centroid map semantics, PDF verdict strip/constraint table/CTA, deterministic follow-up modification signals + new-brief context strip |
+| **v1.8.1** *(current)* | Hotfix — study-area minimum-extent floor (a "specific blocks" brief + res-10 grid was collapsing to ~1 hex → false "no viable site"); riverfront "widen corridor" button no longer shows on landlocked results |
+| **v1.8.0** | Screening & Investigation-Zone Product Contract — per-zone screening verdicts + claim level + generated next-validation actions, target-band competition curve, observed-zero vs provider-unavailable data status, spatial-scale classification + micro↔macro methodology comparison, provisional-reweight rank deltas + Verify adjusted shortlist, executive result header, zone-centroid map semantics, PDF verdict strip/constraint table/CTA, deterministic follow-up modification signals + new-brief context strip |
 | **v1.7.2** | Bengaluru Run Fixes — custom MCDA weights (bare-pair + synonym matching), coordinate-anchored exclusions, always-on baseline unbuildable-land mask, corridor-contamination guard + truthful zero-viable message; reinstates the v1.7.1 stress-battery work |
 | **v1.7.1** *(reverted → reinstated in 1.7.2)* | Stress-Test Battery — traffic-aware drive catchments by default (+ free-flow honesty label), prompt-stated factor weights, named-place exclusions, rent/floor-area feasibility note. Shipped, reverted per an operator request, then reinstated as part of 1.7.2; the release commit is preserved at tag `v1.7.1` |
 | **v1.7.0** | Scoring Standard v1 — log-space (log_percentile) normalization is now the default for count factors, spreading the mid-range and removing linear-scale exaggeration; ordering preserved, test-locked, disclosed automatically |
