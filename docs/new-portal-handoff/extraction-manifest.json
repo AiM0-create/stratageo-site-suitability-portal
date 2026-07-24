@@ -1,0 +1,302 @@
+{
+  "source": {
+    "repository": "AiM0-create/stratageo-site-suitability-portal",
+    "branch": "master",
+    "head": "ecd4c581c49932c3d71246fbaf75d618ed6c244b",
+    "version": "1.8.0",
+    "engineVersion": "stratageo-engine-00070",
+    "workingTreeModified": false,
+    "generatedOn": "2026-07-15"
+  },
+  "modules": [
+    {
+      "path": "backend-py/app/engine/scoring.py",
+      "responsibility": "Two-pass MCDA: BallTree counts, normalization, curve_score, weighted composite, candidate selection, refined-layer refit",
+      "recommendation": "extract",
+      "dependencies": ["numpy", "sklearn.neighbors.BallTree", "models.spec.Layer", "engine.contracts", "engine.grid"],
+      "relevantTests": ["tests/test_scoring.py", "tests/test_vnext_contract.py"],
+      "notes": "Cleanest numeric core. Retarget the Layer type. Keep tx()/curve_score()/present-weight exclusion."
+    },
+    {
+      "path": "backend-py/app/engine/contracts.py",
+      "responsibility": "Numeric scoring contract: finite-float coercion, normalize_0_1 (with target_band curve), safe aggregation",
+      "recommendation": "extract",
+      "dependencies": ["stdlib"],
+      "relevantTests": ["tests/test_v147_contract.py"],
+      "notes": "Keep verbatim; prevents provider-shape drift from crashing scoring."
+    },
+    {
+      "path": "backend-py/app/engine/grid.py",
+      "responsibility": "H3 polyfill, cell boundary, ring-distance separation",
+      "recommendation": "extract",
+      "dependencies": ["h3-py", "shapely"],
+      "relevantTests": [],
+      "notes": "Small, pure."
+    },
+    {
+      "path": "backend-py/app/engine/water.py",
+      "responsibility": "Water masks: centroid-in-polygon and >30% area overlap",
+      "recommendation": "extract",
+      "dependencies": ["numpy", "shapely"],
+      "relevantTests": ["tests/test_water.py", "tests/test_water_tag_hotfix.py"],
+      "notes": "MVP-essential safeguard."
+    },
+    {
+      "path": "backend-py/app/engine/buildability.py",
+      "responsibility": "Land-cover masks (centroid/line/point buffers) + tag constants",
+      "recommendation": "extract",
+      "dependencies": ["numpy", "shapely"],
+      "relevantTests": ["tests/test_buildability.py", "tests/test_v162_smart_masks.py"],
+      "notes": "Use the baseline-unbuildable tag set for the always-on mask; gate the rest for later."
+    },
+    {
+      "path": "backend-py/app/engine/corridors.py",
+      "responsibility": "Distance-to-line corridor gates",
+      "recommendation": "extract",
+      "dependencies": ["numpy", "shapely"],
+      "relevantTests": ["tests/test_corridors.py"],
+      "notes": "Needed for waterfront/bridge bounds (later)."
+    },
+    {
+      "path": "backend-py/app/engine/data_osm.py",
+      "responsibility": "Overpass fetch: union query + area/line/named geometry, mirror failover",
+      "recommendation": "extract",
+      "dependencies": ["httpx", "overpass mirrors"],
+      "relevantTests": [],
+      "notes": "Rewire timeouts/config; keep the union-query pattern."
+    },
+    {
+      "path": "backend-py/app/engine/study_area.py",
+      "responsibility": "Geocode (Google->Nominatim), study-area polygon, reverse geocode, coarse-match rejection",
+      "recommendation": "extract",
+      "dependencies": ["httpx", "shapely", "Google Geocoding", "Nominatim"],
+      "relevantTests": [],
+      "notes": "Adapt keys; keep the country/state-level rejection guard."
+    },
+    {
+      "path": "backend-py/app/engine/catchments.py",
+      "responsibility": "ORS isochrone fetch + POI-in-polygon counts (Pass B)",
+      "recommendation": "extract",
+      "dependencies": ["httpx", "ORS", "shapely"],
+      "relevantTests": ["tests/test_routing.py"],
+      "notes": "Adapt to chosen catchment provider."
+    },
+    {
+      "path": "backend-py/app/engine/unified_confidence.py",
+      "responsibility": "Conservative-min merge of confidence signals",
+      "recommendation": "extract",
+      "dependencies": ["stdlib"],
+      "relevantTests": ["tests/test_v160_phase3.py"],
+      "notes": "Feed new sufficiency/critic inputs."
+    },
+    {
+      "path": "backend-py/app/engine/screening_contract.py",
+      "responsibility": "Screening verdict + claim level + per-zone next-validation projection (v1.8.0)",
+      "recommendation": "extract",
+      "dependencies": ["stdlib"],
+      "relevantTests": ["tests/test_vnext_contract.py"],
+      "notes": "Adapt verdict source (currently investigationLabel) to the new label/verdict field."
+    },
+    {
+      "path": "backend-py/app/providers/google_places_new.py",
+      "responsibility": "Google Places New client with legacy+OSM fallback",
+      "recommendation": "extract",
+      "dependencies": ["httpx", "providers.base (ProviderBudget, breaker)"],
+      "relevantTests": ["tests/test_v148_google_providers.py"],
+      "notes": "Take with providers/base.py budget+breaker; adapt key/config."
+    },
+    {
+      "path": "backend-py/app/engine/data_places.py",
+      "responsibility": "Legacy Places fetch + OSM/Places dedup merge (poi_merge)",
+      "recommendation": "extract",
+      "dependencies": ["httpx"],
+      "relevantTests": ["tests/test_poi_merge.py"],
+      "notes": "Merge/dedup logic is reusable."
+    },
+    {
+      "path": "src/services/screeningPresentation.ts",
+      "responsibility": "Pure presentation projections: exec summary, evidence reasons, key risk, rank deltas, methodology comparison, CTA copy",
+      "recommendation": "extract",
+      "dependencies": ["types only"],
+      "relevantTests": ["src/__tests__/screeningPresentation.test.ts"],
+      "notes": "Retarget the result type."
+    },
+    {
+      "path": "src/services/mcdaEngine.ts",
+      "responsibility": "Client-side reweight math + grid ranking + screening top-X selection",
+      "recommendation": "extract",
+      "dependencies": ["types only"],
+      "relevantTests": ["src/__tests__/reweighting.test.ts"],
+      "notes": "Reweight math only, if reweighting is kept."
+    },
+    {
+      "path": "src/services/chatService.ts",
+      "responsibility": "Backend HTTP client: chat, start, poll, cancel; typed errors; watchdog",
+      "recommendation": "reference",
+      "dependencies": ["fetch", "firebase (lazy)"],
+      "relevantTests": [],
+      "notes": "Drop firebase import; adapt to new API shape."
+    },
+    {
+      "path": "backend-py/app/services/jobs.py",
+      "responsibility": "The analysis orchestrator: job store, threaded runner, full pipeline, degradation, circuit breaker, result assembly",
+      "recommendation": "rewrite",
+      "dependencies": ["all engine modules", "providers"],
+      "relevantTests": ["tests/test_job_lifecycle.py", "tests/test_v146_degradation.py"],
+      "notes": "The pipeline SEQUENCE is the crown jewel; the 2760-line monolith is not. Rewrite cleanly around the extracted engine modules."
+    },
+    {
+      "path": "backend-py/app/services/llm.py",
+      "responsibility": "Chat planning turn: LLM call, deterministic override, waterfront/corridor guards, follow-up signals",
+      "recommendation": "reference",
+      "dependencies": ["openai", "deterministic_planner", "canonical_archetypes"],
+      "relevantTests": ["tests/test_waterfront_guard.py"],
+      "notes": "Keep the guard logic; the override call is what the new portal replaces with validated LLM methodology."
+    },
+    {
+      "path": "backend-py/app/engine/deterministic_planner.py",
+      "responsibility": "Registry override + prompt parsers (weights/coords/radius/exclusions/target-band) + fingerprints",
+      "recommendation": "reference",
+      "dependencies": ["canonical_archetypes", "intent_parser"],
+      "relevantTests": ["tests/test_v164_map_and_coords.py"],
+      "notes": "Parsers become VALIDATORS of LLM output; the override and fingerprints are excluded."
+    },
+    {
+      "path": "backend-py/app/engine/canonical_archetypes.py",
+      "responsibility": "Hardcoded factor/weight/catchment/curve registry per business type",
+      "recommendation": "exclude",
+      "dependencies": [],
+      "relevantTests": ["tests/test_archetypes_v110.py"],
+      "notes": "This is exactly what the LLM-led portal replaces. DO NOT COPY."
+    },
+    {
+      "path": "backend-py/app/engine/planner_lite.py",
+      "responsibility": "Per-prompt relevance gate + intelligence classification + spatial-scale classifier",
+      "recommendation": "reference",
+      "dependencies": ["constraint_policy", "models.spec"],
+      "relevantTests": ["tests/test_v149_planner_lite.py", "tests/test_vnext_contract.py"],
+      "notes": "Keep the spatial-scale classification idea; the relevance gate is tied to the registry."
+    },
+    {
+      "path": "backend-py/app/engine/results.py",
+      "responsibility": "Engine output -> frontend result mapping; evidence wording; methodology text; LLM explanation pass",
+      "recommendation": "rewrite",
+      "dependencies": ["openai", "scoring"],
+      "relevantTests": ["tests/test_results.py"],
+      "notes": "Rewrite around the new lean result contract."
+    },
+    {
+      "path": "src/services/resultNormalizer.ts",
+      "responsibility": "Defensive repair/sanitize of the legacy result payload",
+      "recommendation": "rewrite",
+      "dependencies": ["types"],
+      "relevantTests": ["src/__tests__/resultNormalizer.test.ts"],
+      "notes": "A clean typed contract needs far less repair; rewrite smaller."
+    },
+    {
+      "path": "backend-py/app/auth_quota.py",
+      "responsibility": "Firebase identity + Firestore quota enforcement",
+      "recommendation": "exclude",
+      "dependencies": ["firebase-admin", "firestore"],
+      "relevantTests": [],
+      "notes": "MVP omits auth/quota; do not copy Firebase coupling."
+    },
+    {
+      "path": "src/config/firebase.ts",
+      "responsibility": "Firebase init + admin allowlist",
+      "recommendation": "exclude",
+      "dependencies": ["firebase"],
+      "relevantTests": [],
+      "notes": "Do not copy."
+    },
+    {
+      "path": "backend-py/app/engine/sandbox.py",
+      "responsibility": "Custom-layer user-code execution",
+      "recommendation": "exclude",
+      "dependencies": [],
+      "relevantTests": [],
+      "notes": "Security surface; disabled; do not copy."
+    }
+  ],
+  "providers": [
+    {"name": "OpenAI", "env": "OPENAI_API_KEY", "purpose": "planning + explanations", "mvp": true},
+    {"name": "OSM/Overpass", "env": null, "purpose": "POIs + geometry", "mvp": true},
+    {"name": "Google Places New", "env": "GOOGLE_PLACES_API_KEY", "purpose": "competition/footfall corroboration", "mvp": true},
+    {"name": "Google Routes", "env": "GOOGLE_PLACES_API_KEY", "purpose": "traffic-aware catchments (shares Places key)", "mvp": false},
+    {"name": "Google Places Aggregate", "env": "GOOGLE_PLACES_API_KEY", "purpose": "authoritative count refinement", "mvp": false},
+    {"name": "OpenRouteService", "env": "ORS_API_KEY", "purpose": "isochrones + route directions", "mvp": true},
+    {"name": "Geocoding (Google/Nominatim)", "env": "GOOGLE_PLACES_API_KEY", "purpose": "study area + naming", "mvp": true},
+    {"name": "Carto basemap tiles", "env": null, "purpose": "map + PDF backdrop", "mvp": true},
+    {"name": "Firebase", "env": null, "purpose": "auth + persistence", "mvp": false},
+    {"name": "GCS", "env": null, "purpose": "job snapshot (disabled)", "mvp": false}
+  ],
+  "environmentVariables": [
+    "OPENAI_API_KEY", "GOOGLE_PLACES_API_KEY", "ORS_API_KEY", "APP_SHARED_TOKEN",
+    "FRONTEND_ORIGINS", "STRATAGEO_CHAT_MODEL", "STRATAGEO_REASONING_MODEL",
+    "STRATAGEO_CRITIC_MODEL", "STRATAGEO_REPORT_MODEL", "STRATAGEO_FAST_MODEL",
+    "STRATAGEO_MAX_LLM_COST_MODE", "STRATAGEO_DETERMINISTIC_PLANNING",
+    "REQUIRE_USER_AUTH", "MAX_PROMPTS_PER_USER", "QUOTA_ADMIN_EMAILS",
+    "CHAT_TURNS_PER_HOUR", "JOB_MAX_RUNTIME_SECONDS", "MAX_HEXES", "REFINE_TOP_K",
+    "K_REVISION",
+    "VITE_APP_MODE", "VITE_PY_BACKEND_URL", "VITE_AI_BACKEND_URL",
+    "VITE_CONVERSATIONAL_MODE", "VITE_APP_TOKEN"
+  ],
+  "apiEndpoints": [
+    {"method": "GET", "route": "/health", "auth": "none", "async": false, "mvp": true},
+    {"method": "POST", "route": "/api/v2/chat", "auth": "app-token + optional firebase", "async": false, "mvp": true},
+    {"method": "POST", "route": "/api/v2/analyses", "auth": "app-token + optional firebase/quota", "async": true, "mvp": true},
+    {"method": "GET", "route": "/api/v2/analyses/{jobId}", "auth": "app-token", "async": true, "mvp": true},
+    {"method": "POST", "route": "/api/v2/analyses/{jobId}/cancel", "auth": "app-token", "async": false, "mvp": true},
+    {"method": "GET", "route": "/api/v2/analyses/{jobId}/evidence", "auth": "app-token", "async": false, "mvp": false},
+    {"method": "GET", "route": "/api/v2/analyses/{jobId}/evidence.json", "auth": "app-token", "async": false, "mvp": false}
+  ],
+  "invariants": [
+    "Missing data is never scored as zero (excluded from numerator and denominator).",
+    "A hard constraint is a gate, not a weighted factor.",
+    "A route requirement cannot pass without route evidence (unavailable != pass).",
+    "Rent/floor-area/availability/zoning/ownership are unverifiable at screening; disclosed, never claimed passed.",
+    "Exact property availability is never claimed; H3 centroids are zones, not premises.",
+    "Water/unbuildable cells cannot be recommended.",
+    "Weights sum to one (present-weight renormalized).",
+    "Provider failure differs from observed zero.",
+    "An unavailable required factor withholds ranking.",
+    "LLM narrative cannot change deterministic ranks.",
+    "Unverified requirements become next-validation actions.",
+    "Competition can be target-band (less but not zero), not only monotonic.",
+    "No raw exception reaches the user (three-state result contract).",
+    "Reweight-promoted zones do not inherit verification evidence.",
+    "Same normalized brief resolves to a stable methodology (reproducibility)."
+  ],
+  "mvpEssentialCapabilities": [
+    "Conversational LLM planning that emits a validated methodology spec",
+    "Study-area geocoding with coarse-match rejection",
+    "H3 grid generation",
+    "Two-pass MCDA (Euclidean screening + isochrone/real-catchment refinement)",
+    "log-percentile normalization + weighted composite with present-weight exclusion",
+    "Target-band competition curve",
+    "Observed / observed-zero / unavailable data status",
+    "Baseline unbuildable-land + water masks",
+    "Named + coordinate exclusions",
+    "H3 candidate separation + screening-vs-refined distinction",
+    "Conservative unified confidence",
+    "Screening verdict + per-zone next-validation",
+    "Investigation-zone centroid wording",
+    "Three-state result contract + graceful provider degradation",
+    "Interactive map + polling job model"
+  ],
+  "doNotCopy": [
+    "canonical_archetypes.py (hardcoded MCDA registry)",
+    "deterministic_planner.apply_deterministic_plan (registry override + fingerprints)",
+    "Firebase auth + quotas + firestore.rules",
+    "admin dashboard + usage tracking",
+    "PDF reporting + mapFigure (later)",
+    "saved/shared analyses + multi-session memory",
+    "custom-layer sandbox",
+    "GCS job snapshot restore",
+    "model routing/escalation/fallback tiers",
+    "metro static station lists",
+    "GitHub Pages peaceiris workflow + Vercel Node API + VITE_AI_BACKEND_URL",
+    "uploaded-candidates-only mode",
+    "determinism fingerprint fields (planningFingerprint, specFingerprint, schemaFingerprint, normalizedPrompt, llmSuggestedButNotApplied)"
+  ]
+}
