@@ -207,6 +207,127 @@ def _viability_suggestions(spec) -> list[str]:
     return out
 
 
+# ── vNext (v1.9.0): reliability + plain-language helpers ──────────────────────
+# Extracted to module level so they are unit-testable (test_v190_simplicity.py).
+
+# Words too generic to identify an anchor (also guards metro-exclusion briefs
+# whose exclusion legitimately shares "metro station" wording with a route
+# target that names a DIFFERENT place).
+_ANCHOR_STOP_WORDS = {
+    "the", "near", "within", "outside", "strictly", "buffer", "anchor",
+    "zone", "area", "around", "metro", "station", "walking", "radius",
+    "exclusion", "constraint",
+}
+
+
+def _anchor_sig_words(text: str) -> set[str]:
+    return {
+        w for w in _re.split(r"[^a-z]+", (text or "").lower())
+        if len(w) > 3 and w not in _ANCHOR_STOP_WORDS
+    }
+
+
+def drop_anchor_double_encoded_exclusions(spec, notes: list[str]) -> int:
+    """v1.9.0 — an anchor must never be BOTH a required proximity destination
+    AND an excluded area. Observed live (Ruby Crossing QSR): the LLM encoded
+    the anchor as a route gate *and* an exclusion buffer around the same
+    place — together they are unsatisfiable and every candidate failed.
+    Drops the contradictory exclusions in place; returns how many were
+    dropped. Deterministic, disclosed, never raises."""
+    rcs = getattr(spec, "routeConstraints", None) or []
+    excs = getattr(spec, "exclusions", None) or []
+    if not rcs or not excs:
+        return 0
+    rc_words: set[str] = set()
+    for rc in rcs:
+        if getattr(rc, "required", True) and getattr(rc, "targetKeyword", None):
+            rc_words |= _anchor_sig_words(rc.targetKeyword)
+    if not rc_words:
+        return 0
+    kept, dropped = [], 0
+    for e in excs:
+        if _anchor_sig_words(getattr(e, "name", "")) & rc_words:
+            dropped += 1
+            notes.append(
+                f"Exclusion '{e.name}' targets the same anchor as a required "
+                "proximity constraint — dropped (a place cannot be both a "
+                "required destination and an excluded area)."
+            )
+        else:
+            kept.append(e)
+    if dropped:
+        spec.exclusions = kept
+    return dropped
+
+
+def route_gate_envelope_m(rc, walk_speed_m_per_min: float, drive_speed_m_per_min: float) -> float:
+    """v1.9.0 — the straight-line envelope (metres) inside which a candidate
+    could plausibly satisfy a proximity route constraint. Network distance is
+    always ≥ straight-line, so limit × slack keeps every potentially-passing
+    cell; the exact ORS/Routes check still runs per candidate. 0 = no spatial
+    envelope (e.g. a railway-crossing-only constraint)."""
+    speed = drive_speed_m_per_min if getattr(rc, "mode", "walk") == "drive" else walk_speed_m_per_min
+    cands = [
+        float(getattr(rc, "maxDistanceM", 0) or 0),
+        float(getattr(rc, "maxMinutes", 0) or 0) * speed,
+    ]
+    limit = max((c for c in cands if c > 0), default=0.0)
+    return limit * 1.35 if limit > 0 else 0.0
+
+
+def build_plain_withheld_reason(
+    required_missing: list[str],
+    no_eligible: bool,
+    route_constraints,
+    metrics_by_rc: dict[str, list[dict]],
+) -> str | None:
+    """v1.9.0 — ONE plain-English sentence explaining a withheld ranking
+    (live feedback: 'it gave no reliable recommendation and it was not clear
+    why not'). Built only from computed values; None when no clear single
+    cause exists (the UI falls back to the generic wording)."""
+    if required_missing:
+        return (
+            "Required input(s) could not be verified: "
+            + ", ".join(required_missing[:2])
+            + (" (and more)" if len(required_missing) > 2 else "")
+            + ". Ranking without them would be a guess, so it is withheld."
+        )
+    if not no_eligible:
+        return None
+    bits: list[str] = []
+    for rc in route_constraints or []:
+        if not getattr(rc, "required", True):
+            continue
+        ms = [m for m in metrics_by_rc.get(rc.name, []) if m and m.get("status") == "evaluated"]
+        if not ms:
+            bits.append(f"the required '{rc.name}' check could not be computed")
+            continue
+        if getattr(rc, "maxMinutes", None):
+            best = min((m.get("travelMin") if isinstance(m.get("travelMin"), (int, float)) else 9e9) for m in ms)
+            if best < 9e9:
+                bits.append(
+                    f"every candidate zone was too far for '{rc.name}' — the closest "
+                    f"was a {best:.0f}-min {getattr(rc, 'mode', 'walk')} against a "
+                    f"{float(rc.maxMinutes):.0f}-min limit"
+                )
+                continue
+        if getattr(rc, "maxDistanceM", None):
+            best = min((m.get("networkM") if isinstance(m.get("networkM"), (int, float)) else 9e9) for m in ms)
+            if best < 9e9:
+                bits.append(
+                    f"every candidate zone was too far for '{rc.name}' — the closest "
+                    f"was {int(best)} m against a {int(rc.maxDistanceM)} m limit"
+                )
+                continue
+        bits.append(f"no candidate zone passed the required '{rc.name}' check")
+    if not bits:
+        return None
+    return (
+        "No recommendation because " + "; ".join(bits[:2]) + ". "
+        "Try a study area closer to the required location, or relax the limit, and re-run."
+    )
+
+
 TERMINAL_STATUSES = ("done", "error", "cancelled", "timeout")
 
 # v1.4.7 — every job that produces a result payload ends in EXACTLY one of
@@ -834,6 +955,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         [c.constraint for c in _plan.unsupported_constraints],
         _plan.max_runtime_target_seconds,
     )
+
+    # ── vNext (v1.9.0): anchor double-encoding guard ─────────────────────────
+    # Must run BEFORE exclusion tag-sets are built from spec.exclusions.
+    drop_anchor_double_encoded_exclusions(spec, notes)
 
     # v1.4.0: Resolve metro stations early so we can override exclusion_pois below.
     _metro_result = resolve_metro_stations(
@@ -1587,6 +1712,57 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         sorted(set(_provider_degraded)),
     )
 
+    # ── vNext (v1.9.0): route-gate pre-mask ─────────────────────────────────
+    # A required proximity route constraint ("within a 10-min walk of Ruby
+    # Crossing") previously only filtered the ALREADY-SELECTED top-K:
+    # screening picked the best composite cells anywhere in the study area,
+    # then the gate excluded them all → "No reliable recommendation"
+    # (observed live, Ruby Crossing QSR — best cell 2,030 m away vs an 800 m
+    # limit). The gate must constrain WHERE candidates are selected from:
+    # mask cells beyond a generous straight-line envelope of the target
+    # (network distance ≥ straight line, so limit × 1.35 keeps every cell
+    # that could plausibly pass; the exact ORS/Routes check still runs per
+    # candidate). Degradable: an unresolvable target or an envelope that
+    # would empty the grid → mask skipped with an honest note.
+    if spec.routeConstraints and _plan.should_run("routing"):
+        for _rc in spec.routeConstraints:
+            if not _rc.required or not _rc.targetKeyword:
+                continue
+            _env_m = route_gate_envelope_m(_rc, s.walk_speed_m_per_min, s.drive_speed_m_per_min)
+            if _env_m <= 0:
+                continue
+            _rc_pt = await _degradable_call(
+                lambda rc=_rc: geocode(rc.targetKeyword),
+                timeout=20, label=f"route_premask_geocode_{_rc.name}",
+                job=job, fallbacks=fallbacks, degraded=_provider_degraded,
+                default=None, retries=1, breaker=_breaker,
+            )
+            if not _rc_pt:
+                continue
+            _gmask = np.array([
+                scoring.haversine_m(h.lat, h.lng, _rc_pt[0], _rc_pt[1]) > _env_m
+                for h in hexes
+            ], dtype=bool)
+            _gmask &= ~excluded
+            if int((~(excluded | _gmask)).sum()) == 0:
+                notes.append(
+                    f"Route gate '{_rc.name}': no eligible grid cell lies within "
+                    f"plausible reach of {_rc.targetKeyword} (~{int(_env_m)} m "
+                    "envelope) — the requirement cannot be satisfied anywhere in "
+                    "this study area."
+                )
+                continue
+            _n_g = int(_gmask.sum())
+            if _n_g:
+                excluded |= _gmask
+                mask_stats[f"routeGatePremask:{_rc.name}"] = _n_g
+                notes.append(
+                    f"Candidate selection restricted to cells within plausible "
+                    f"reach of {_rc.targetKeyword}: {_n_g} cell(s) beyond the "
+                    f"'{_rc.name}' envelope removed before shortlisting (the "
+                    "exact network check still verifies each candidate)."
+                )
+
     # ── 5. Candidate selection ──────────────────────────────────────
     top_k = min(spec.execution.refineTopK, s.refine_top_k)
     candidates = scoring.select_candidates(
@@ -1642,6 +1818,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "jobRef": job.id[:8],
             "reason": ("No buildable candidate survived the " + wf_band
                        + "water / railway / ghat / heritage / open-space masks."),
+            # v1.9.0 — same message under the plain-reason key the UI leads with
+            "plainReason": ("Every grid cell in this study area was removed by the "
+                            + wf_band + "water and land-safety masks — there is no "
+                            "buildable candidate to rank here. Widen the area or "
+                            "relax the constraints below and re-run."),
             "failedGates": _failed_gates,
             "relaxationSuggestions": _viability_suggestions(spec),
             "degradationNotes": list(fallbacks),
@@ -2268,6 +2449,17 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         loc.get("excluded") for loc in locations
     ) and len(locations) > 0
 
+    # ── vNext (v1.9.0): ONE plain-English sentence for a withheld ranking ──
+    # (live feedback: "it gave no reliable recommendation and it was not
+    # clear as to why not"). Computed values only; None → UI generic wording.
+    _metrics_by_rc: dict[str, list[dict]] = {
+        rc.name: [route_results.get(ci, {}).get(rc.name) or {} for ci in finals]
+        for rc in (spec.routeConstraints or [])
+    }
+    _plain_reason = build_plain_withheld_reason(
+        all_required_missing, no_eligible, spec.routeConstraints, _metrics_by_rc,
+    )
+
     data_sufficiency = {
         "status": "insufficient" if all_required_missing else ("partial" if no_data_layers else "sufficient"),
         "noDataLayers": no_data_layers,
@@ -2389,6 +2581,14 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # Withhold the confident ranking when unreliable OR not enough viable land.
     recommendation_withheld = analysis_status in ("unreliable", "insufficient_viable_land")
     suggestions = _viability_suggestions(spec) if analysis_status == "insufficient_viable_land" else []
+    # v1.9.0 — the route-failure withheld case previously shipped NO
+    # suggestions, leaving the user with a dead end. Give actionable ones.
+    if not suggestions and no_eligible and spec.routeConstraints:
+        suggestions = [
+            "Move or shrink the study area so it sits within reach of the required location, then re-run.",
+            "Relax the travel-time / distance limit if your operations allow it.",
+            "Drop the proximity requirement to see the best zones on merit alone.",
+        ]
     if analysis_status == "insufficient_viable_land":
         _gate_ctx = ("inside the strict riverfront corridor"
                      if (spec.waterfront and spec.waterfront.isWaterfront)
@@ -2750,6 +2950,9 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "dataQuality": data_quality,
         "critique": _det_critic.to_dict(),  # v1.4.0: always-on deterministic critic
         "recommendationWithheld": recommendation_withheld,
+        # v1.9.0 — one plain-English sentence for a withheld ranking (omitted
+        # when no single clear cause exists; the UI keeps generic wording).
+        **({"plainReason": _plain_reason} if _plain_reason else {}),
         # Spatial Reliability Upgrade v1.0.3 — new optional fields (frontend-safe)
         "analysisStatus": analysis_status,
         "suggestions": suggestions,

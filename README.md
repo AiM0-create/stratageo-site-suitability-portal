@@ -4,7 +4,11 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.8.1 — Screening & Investigation-Zone Product Contract (study-area floor hotfix)**
+**Current version: v1.9.0 — Frictionless & Simple**
+
+> One prompt → one plan → press ▶ Start analysis. Results lead with the
+> verdict, a plain-English reason, and what to do next; every technical
+> diagnostic is one click away behind "Technical diagnostics".
 
 ---
 
@@ -21,6 +25,16 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **PDF export** — client-ready screening report with basemap figure, verdict strip, constraint-status table, per-zone next validation, and a clear path to a detailed site study
 
 The product journey: **broad geography → spatial screening → priority investigation zones → detailed site/parcel validation → field and commercial due diligence.** The portal delivers the first three stages; [contact Stratageo](https://stratageo.in/contact.php) to commission the rest.
+
+---
+
+## v1.9.0 Highlights
+
+- **One prompt → one plan → one click.** A first message naming a business and a location goes straight to a compact analysis framework, and the **▶ Start analysis** button appears as soon as the plan is valid — no more typing "run analysis" to reveal it.
+- **Required proximity gates now shape candidate selection.** Candidates are picked only from cells that could plausibly satisfy a "within X minutes/metres of …" requirement (the exact network check still verifies each one) — fixing false "No reliable recommendation" results when the best screening cells sat outside the gate.
+- **Contradictory anchor encodings are caught.** A place can't be both a required destination and an excluded area; the contradiction is dropped and disclosed.
+- **Every withheld result now says why, in one sentence** — with the actual numbers ("the closest zone was a 28-min walk against a 10-min limit") and what to try next.
+- **Simple-first results.** Verdict, plain-English reason, next steps and the zones stay visible; the data-sufficiency grid, constraint verification, analyst review and every other diagnostic sit behind one "Technical diagnostics" expander with a notice count. Nothing was removed.
 
 ---
 
@@ -261,7 +275,7 @@ The product journey: **broad geography → spatial screening → priority invest
 | LLM | OpenAI gpt-5.4-mini (conversation) · gpt-5.4-nano (explanations) · gpt-5.4 (critic) — all configurable via env vars |
 | Auth | Firebase Auth + Firestore |
 | Security | Secret Manager for API keys · per-IP + global rate limiting · `X-App-Token` kill-switch |
-| CI | pytest (679 backend tests) · Vitest (90 frontend tests) · GitHub Actions → GitHub Pages deploy |
+| CI | pytest (697 backend tests) · Vitest (90 frontend tests) · GitHub Actions → GitHub Pages deploy |
 
 ---
 
@@ -427,7 +441,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.8.1** *(current)* | Hotfix — study-area minimum-extent floor (a "specific blocks" brief + res-10 grid was collapsing to ~1 hex → false "no viable site"); riverfront "widen corridor" button no longer shows on landlocked results |
+| **v1.9.0** *(current)* | Frictionless & Simple — route-gate pre-mask (candidates selected inside required proximity gates, fixing false "no reliable recommendation"), anchor double-encoding guard, plain-English `plainReason` + suggestions on every withheld result, Run button on any valid spec (one prompt → one plan, no "type run"), simple-first results drawer with all diagnostics behind one expander |
+| **v1.8.1** | Hotfix — study-area minimum-extent floor (a "specific blocks" brief + res-10 grid was collapsing to ~1 hex → false "no viable site"); riverfront "widen corridor" button no longer shows on landlocked results |
 | **v1.8.0** | Screening & Investigation-Zone Product Contract — per-zone screening verdicts + claim level + generated next-validation actions, target-band competition curve, observed-zero vs provider-unavailable data status, spatial-scale classification + micro↔macro methodology comparison, provisional-reweight rank deltas + Verify adjusted shortlist, executive result header, zone-centroid map semantics, PDF verdict strip/constraint table/CTA, deterministic follow-up modification signals + new-brief context strip |
 | **v1.7.2** | Bengaluru Run Fixes — custom MCDA weights (bare-pair + synonym matching), coordinate-anchored exclusions, always-on baseline unbuildable-land mask, corridor-contamination guard + truthful zero-viable message; reinstates the v1.7.1 stress-battery work |
 | **v1.7.1** *(reverted → reinstated in 1.7.2)* | Stress-Test Battery — traffic-aware drive catchments by default (+ free-flow honesty label), prompt-stated factor weights, named-place exclusions, rent/floor-area feasibility note. Shipped, reverted per an operator request, then reinstated as part of 1.7.2; the release commit is preserved at tag `v1.7.1` |

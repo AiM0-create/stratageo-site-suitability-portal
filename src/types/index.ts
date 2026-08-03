@@ -329,6 +329,10 @@ export interface AnalysisResult {
   providerDiagnostics?: { degraded: string[]; degradationCount?: number; notes?: string[] };
   /** no_viable_site only */
   reason?: string;
+  /** v1.9.0 — ONE computed plain-English sentence explaining a withheld
+   * ranking (route near-miss numbers, missing required inputs, or emptied
+   * grid). Absent when no single clear cause exists. */
+  plainReason?: string;
   failedGates?: Array<Record<string, unknown>>;
   relaxationSuggestions?: string[];
   /** failed only */

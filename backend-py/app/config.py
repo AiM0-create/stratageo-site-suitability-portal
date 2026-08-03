@@ -256,6 +256,31 @@ v1.8.1: Hotfix (live JP Nagar 2nd Phase grocery run). (1) Study-area
   `(waterfront?.corridorWidthM ?? 0) < 500` — which is 0 < 500 = true when
   waterfront is null — so it rendered on landlocked withheld results; now
   gated on `waterfront.isWaterfront`. (3) "1 grid cells" pluralization.
+v1.9.0: Frictionless & Simple (live new-user feedback: too many steps to run,
+  cluttered results, unclear "no reliable recommendation"). Reliability:
+  (1) Route-gate pre-mask — a required proximity route constraint now
+  restricts WHERE candidates are selected from (generous straight-line
+  envelope of the geocoded target, limit x 1.35; exact ORS/Routes check
+  still verifies per candidate). Previously screening picked the best
+  composite cells anywhere in the study area and the gate then excluded
+  them all (observed live: Ruby Crossing QSR — best cell 2,030 m away vs
+  an 800 m limit -> false "No reliable recommendation"). (2) Anchor
+  double-encoding guard — an exclusion that targets the same anchor as a
+  required proximity constraint is contradictory (unsatisfiable together)
+  and is dropped with a disclosed note. (3) plainReason — every withheld
+  ranking now carries ONE computed plain-English sentence (route near-miss
+  numbers, missing required inputs, or emptied grid) plus actionable
+  suggestions for the route-failure case. Friction: the frontend Run button
+  now appears as soon as a VALID spec exists (no more typing "run analysis"
+  to reveal it), and the chat prompt goes straight to a compact framework
+  when the first message names a business + location (scenarios/validation
+  live on the plan card only; replies capped ~18 lines; ends "press ▶ Start
+  analysis", never "type run"). Simplicity: the results drawer is
+  simple-first — verdict, plain-English reason, what-to-try-next and zones
+  stay visible; ALL diagnostic panels (data-sufficiency grid, constraint
+  verification, degraded checks, repair warnings, scope, analyst review,
+  full confidence rationale) collapse behind one "Technical diagnostics"
+  expander with a notice count; internal enum tokens humanized.
 """
 from functools import lru_cache
 from typing import Literal
@@ -263,9 +288,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.8.1"
+APP_VERSION     = "1.9.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00071"
+ENGINE_VERSION  = "stratageo-engine-00072"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -278,7 +303,7 @@ ENGINE_VERSION  = "stratageo-engine-00071"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Screening & Investigation-Zone Product Contract (v1.8.1 study-area floor hotfix)"
+RELEASE_NAME    = "Frictionless & Simple (route-gate pre-mask, plain reasons, one-turn run)"
 
 
 class Settings(BaseSettings):

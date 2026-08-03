@@ -352,6 +352,24 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
     () => (weightsAdjusted ? computeRankDeltas(result.locations ?? [], ranked) : {}),
     [weightsAdjusted, result.locations, ranked],
   );
+  // ── v1.9.0 — SIMPLE-FIRST presentation ──
+  // Live new-user feedback: "the side bar … is very very cluttered … not at
+  // all one shot understandable". All diagnostic panels (data sufficiency
+  // grid, constraint verification, degraded checks, repair warnings,
+  // analysis scope, full confidence rationale) now live behind ONE collapsed
+  // "Technical diagnostics" expander. The always-visible surface is: verdict,
+  // plain-English reason, what to try next, and the zones.
+  const [showDiag, setShowDiag] = useState(false);
+  const prettyToken = (s: string) => String(s).replace(/_/g, ' ');
+  const plainReason: string | undefined =
+    typeof (result as any).plainReason === 'string' ? (result as any).plainReason : undefined;
+  const diagNoticeCount =
+    normalizationWarnings.length
+    + ((buildabilityDegraded.length + providerDegraded.length) > 0 ? 1 : 0)
+    + hcvWarnEntries.length
+    + ((completeness?.degradedStages?.length ?? 0) > 0 ? 1 : 0)
+    + (isProvisional && unverifiedConstraints.length > 0 ? 1 : 0);
+
   const [copiedSummary, setCopiedSummary] = useState(false);
   const handleCopySummary = () => {
     const text = buildCopySummary(result, ranked);
@@ -498,7 +516,16 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
               background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color,
               borderRadius: 6, padding: '7px 12px', fontSize: '12px', marginBottom: 8, lineHeight: 1.45,
             }}>
-              <b>Overall confidence: {uc.level}.</b> {uc.reason}
+              {/* v1.9.0 — one line only; the conservative-merge rationale
+                  lives in Technical diagnostics (live feedback: the meta-
+                  explanation paragraph read as jargon to a new user). */}
+              <b>Overall confidence: {uc.level}.</b>{' '}
+              <button
+                onClick={() => setShowDiag(true)}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit', textDecoration: 'underline', fontSize: '11px' }}
+              >
+                why?
+              </button>
             </div>
           );
         })()}
@@ -512,6 +539,12 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             <div className="withheld-head">
               {insufficient ? '❌ No viable site under the applied constraints' : '❌ No reliable recommendation'}
             </div>
+            {/* v1.9.0 — lead with ONE computed plain-English sentence (live
+                feedback: "it was not clear as to why not"). Generic wording
+                only when the backend found no single clear cause. */}
+            {plainReason ? (
+              <p className="withheld-body"><b>Why:</b> {plainReason}</p>
+            ) : (
             <p className="withheld-body">
               {insufficient ? (
                 <>No viable site remained after applying the hard constraints and land
@@ -524,6 +557,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 possible — are below.</>
               )}
             </p>
+            )}
           </div>
         )}
 
@@ -568,6 +602,35 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           <b>Screening-level candidate zones</b> — H3 micro-market areas, not exact parcels or leasable sites. Field validation required before any leasing or investment decision.
         </div>
 
+        {/* ── v1.9.0 — SIMPLE-FIRST: every diagnostic panel below lives behind
+            ONE collapsed expander. Nothing is removed — data sufficiency,
+            constraint verification, degraded checks, repair warnings, scope,
+            the analyst review and the full confidence rationale are all one
+            click away instead of a wall the user must scroll past. ── */}
+        <div className="drawer-assumptions" style={{ margin: '4px 0 8px' }}>
+          <button
+            className="assumptions-toggle"
+            onClick={() => setShowDiag(!showDiag)}
+            style={{ background: showDiag ? '#f8fafc' : undefined }}
+          >
+            <span>
+              🛠 Technical diagnostics
+              {diagNoticeCount > 0 ? ` (${diagNoticeCount} notice${diagNoticeCount > 1 ? 's' : ''})` : ''}
+            </span>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showDiag ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+          {showDiag && (<>
+
+        {/* v1.9.0 — full conservative-merge confidence rationale (the header
+            shows only the one-line verdict) */}
+        {(result as any).unifiedConfidence?.reason && (
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#475569', margin: '8px 0' }}>
+            <b>Why this confidence level</b> — {(result as any).unifiedConfidence.reason}
+          </div>
+        )}
+
         {/* v1.4.6 — data repaired by the normalization layer (incomplete backend fields) */}
         {normalizationWarnings.length > 0 && (
           <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#92400e', marginBottom: 8 }}>
@@ -582,7 +645,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         {(buildabilityDegraded.length > 0 || providerDegraded.length > 0) && (
           <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#92400e', marginBottom: 8 }}>
             <b>Degraded checks</b> (provider slow/unavailable — skipped, confidence reduced):{' '}
-            {[...buildabilityDegraded, ...providerDegraded].join(', ')}
+            {[...buildabilityDegraded, ...providerDegraded].map(prettyToken).join(', ')}
           </div>
         )}
 
@@ -615,7 +678,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             )}
             {completeness.degradedStages.length > 0 && (
               <div style={{ marginTop: 4, color: '#92400e' }}>
-                ⏱ <b>Degraded this run:</b> {completeness.degradedStages.join(', ')}
+                ⏱ <b>Degraded this run:</b> {completeness.degradedStages.map(prettyToken).join(', ')}
               </div>
             )}
           </div>
@@ -830,6 +893,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             )}
           </div>
         )}
+
+          </>)}
+        </div>
+        {/* ── end v1.9.0 Technical diagnostics expander ── */}
 
         {/* Benchmark comparison — v1.4.6: score must be a real number */}
         {!withheld && spec && ranked[0] && !ranked[0].excluded && typeof ranked[0].mcda_score === 'number' && (() => {

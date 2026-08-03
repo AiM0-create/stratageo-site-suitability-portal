@@ -331,7 +331,13 @@ const App: React.FC = () => {
         dispatch({ type: 'UPDATE_SPEC', spec: resp.spec });
       }
       setChatStage(resp.stage || 'chat');
-      const nowReady = !!resp.spec && resp.readyToExecute && resp.specValid;
+      // v1.9.0 — FRICTIONLESS: the Run button appears as soon as a VALID spec
+      // exists. Previously it also required readyToExecute, which only flips
+      // on an explicit go-signal — so a new user had to literally type "run
+      // analysis" to make the button appear, then click it (live feedback:
+      // "creating friction and making it over complex"). A valid spec IS
+      // runnable; the user still confirms with the click itself.
+      const nowReady = !!resp.spec && resp.specValid;
       setChatReady(nowReady);
       setAnalysisPhase(nowReady ? 'spec_ready' : 'planning');
     } catch (err: any) {

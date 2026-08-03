@@ -4,6 +4,74 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.9.0] — 2026-08-03 — Frictionless & Simple
+
+Minor release driven by live first-time-user feedback on the Ruby Crossing
+student-QSR run: three-turn friction to reach the Run button, a cluttered
+results sidebar, and an unexplained "No reliable recommendation". Full audit:
+`docs/SIMPLICITY_AUDIT_v190.md`. No honesty safeguard was weakened; nothing
+was deleted — diagnostics are demoted behind one expander.
+
+### Fixed — reliability
+- **Route-gate pre-mask (P0).** A required proximity route constraint
+  ("within a 10-min walk of Ruby Crossing") only filtered the
+  already-selected top-K: screening picked the best composite cells anywhere
+  in the study area, then the gate excluded them all (live: best cell
+  2,030 m away vs an 800 m limit → false "No reliable recommendation").
+  Candidates are now selected only from cells within a generous straight-line
+  envelope of the geocoded target (limit × 1.35 — network distance is always
+  ≥ straight-line, so no potentially-passing cell is lost); the exact
+  ORS/Routes check still verifies each candidate. Degradable: unresolvable
+  target or an envelope that would empty the grid → mask skipped with an
+  honest note.
+- **Anchor double-encoding guard (P0).** The LLM encoded the Ruby Crossing
+  anchor as BOTH a required proximity gate and an exclusion buffer around
+  the same place — jointly unsatisfiable. An exclusion whose name matches a
+  required route target's anchor words is now dropped with a disclosed note
+  (`drop_anchor_double_encoded_exclusions`; metro/station words are
+  stop-listed so dark-kitchen metro exclusions are unaffected).
+
+### Added — plain-language honesty
+- **`plainReason`** on withheld results: ONE computed sentence with the real
+  numbers ("every candidate zone was too far for 'Ruby Crossing proximity' —
+  the closest was a 28-min walk against a 10-min limit. Try a study area
+  closer to the required location, or relax the limit, and re-run."). Covers
+  route near-misses, missing required inputs, and fully-masked study areas.
+  The route-failure case also gains three actionable suggestions (previously
+  none — a dead end).
+
+### Changed — friction
+- **The Run button appears as soon as a valid spec exists.** Previously it
+  also required `readyToExecute`, which only flipped on an explicit
+  go-signal — users literally had to type "run analysis" to reveal the
+  button, then click it.
+- **One prompt → one plan.** A first message naming a business + location
+  goes straight to the compact framework (no "ready to see the framework?"
+  turn). Framework replies are capped ~18 short lines — scenarios,
+  validation and misleading-variables live on the plan card (spec), not in
+  chat prose. Replies end "Adjust anything above, or press ▶ Start
+  analysis" — never "say 'run'".
+
+### Changed — simple-first results drawer
+- Always visible: verdict banner, **one-line** confidence (+ "why?"),
+  plain-English reason, what-to-try-next, and the zones.
+- Behind one collapsed **"Technical diagnostics (N notices)"** expander:
+  full confidence rationale, repair warnings, degraded checks, analysis
+  scope, data-sufficiency grid, hard-constraint verification (+ warning
+  cards), provisional notice + validation checklist, coverage warning, and
+  the analyst review. Nothing removed; internal enum tokens
+  (`railway_area` → "railway area") humanized.
+
+### Tests
+- New `tests/test_v190_simplicity.py` (13): double-encoding guard (incl. the
+  exact live failure shape and the metro-stop-word case), route-gate
+  envelope math, plainReason variants (time near-miss, distance near-miss,
+  required-missing priority, no-clear-cause → None, uncomputed check).
+- **697 backend / 90 frontend passed**, tsc clean, build clean.
+  Versions: `1.9.0` / `stratageo-engine-00072`.
+
+---
+
 ## [1.8.1] — 2026-07-15 — Hotfix: study-area minimum-extent floor + riverfront-button guard
 
 Patch found during live manual testing of the JP Nagar 2nd Phase grocery
