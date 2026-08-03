@@ -4,6 +4,45 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.11.0] — 2026-08-03 — Exclusion Integrity
+
+Live failure: a gym brief said *"I already have branches in Colaba and Worli
+… exclude my existing areas"*, the chat plan reply confirmed them as hard
+no-go zones, and the run still returned **Colaba** as ranked candidate #3.
+
+### Fixed — user-requested exclusions were silently unenforced
+- **Schema drift (the root cause).** `deterministic_planner` writes
+  `spec["namedExclusions"]` (plus `competitionCurve` and
+  `promptWeightUnmatched`) onto the plan dict, but `SpecV2` never declared
+  these fields. Pydantic v2 defaults to `extra='ignore'`, so validation threw
+  them away without error. The exclusion-mask loop in `jobs.py` is gated on
+  `getattr(spec, "namedExclusions", None)`, which therefore always saw
+  `None` — the exclusion was never applied, **and** the "could not be
+  enforced" disclosure never fired, so the failure was invisible. This has
+  been dead code since v1.7.1/v1.7.2: named exclusions, coordinate
+  exclusions, the target-band competition flag, and the prompt-weight-
+  unmatched notice were all silently dropped in production. All three
+  fields are now declared on `SpecV2`, and a new schema-drift regression
+  test fails the build if the planner ever again writes a spec key the
+  model doesn't declare.
+- **Wrong shape.** Even once applied, the mask was a fixed 1.5 km circle on
+  the geocoded centroid. A neighbourhood like Colaba is a ~3 km peninsula —
+  a circle on its centroid leaves half of it selectable. Exclusions now use
+  `geocode_with_bbox()`'s real extent (a cell is excluded if it's inside the
+  geocoded bounding box **or** within the buffer of the centroid — the
+  buffer is always a floor, never shrunk by a tight bbox), with a 12 km
+  coarse-match cap so a city-level geocode can't wipe the whole study area.
+- **Enforcement is now a first-class result field** — `exclusionsApplied` /
+  `exclusionsUnenforced` — instead of a buried diagnostics note, so an
+  unenforced exclusion is impossible to miss.
+
+### Added
+- `backend-py/tests/test_v1110_exclusion_integrity.py` (19 tests): schema-
+  drift guard, prompt-parsing regression, extent-vs-circle shape tests using
+  Colaba's real geometry, coarse-match rejection.
+
+---
+
 ## [1.10.0] — 2026-08-03 — Sensible Output
 
 Second live-feedback iteration (Sector V supermarket run on v1.9.0): the

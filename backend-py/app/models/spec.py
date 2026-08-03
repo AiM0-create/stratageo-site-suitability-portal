@@ -492,6 +492,28 @@ class SpecV2(BaseModel):
     # recorded so the report can disclose the customer override.
     searchRadiusOverrideM: Optional[int] = None
 
+    # ── v1.11.0 — planner-written keys that were SILENTLY DROPPED ─────────────
+    # These three are written by deterministic_planner.build_spec() onto the
+    # spec dict, but were never declared here. Pydantic v2 defaults to
+    # extra='ignore', so validation discarded them without error.
+    #
+    # namedExclusions was the damaging one: the mask loop in jobs.py is guarded
+    # by `getattr(spec, "namedExclusions", None)`, which always returned None.
+    # A brief saying "I already have branches in Colaba and Worli — exclude my
+    # existing areas" parsed correctly, then had its exclusions thrown away, and
+    # Colaba could be (and was) returned as a top-ranked zone. Because the loop
+    # never ran, the "could not be enforced" disclosure never fired either, so
+    # the failure was invisible. It also carried the v1.7.2 coordinate-exclusion
+    # entries, so that feature was dead in production too.
+    #
+    # tests/test_v1110_spec_schema_drift.py now fails if the planner ever again
+    # writes a key this model does not declare.
+    #
+    # Entries: {"name": str, "bufferM": float, "lat"?: float, "lng"?: float}.
+    namedExclusions: list[dict] = []
+    competitionCurve: Optional[str] = None      # "target_band" when band scoring is on
+    promptWeightUnmatched: list[str] = []       # stated weights no layer matched
+
     # ── v1.6.3 — grid-level choice ─────────────────────────────────────────────
     # Set true by the UI when the customer picks an H3 level (7 or 8) on the
     # plan card; the deterministic planner then PRESERVES that resolution

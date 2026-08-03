@@ -303,6 +303,27 @@ v1.10.0: Sensible Output (live Sector V supermarket run: 6 grid cells, 2
   (5) The analyst-narrative paragraph in the results drawer is opt-in behind
   a "📝 Analyst narrative" expander — the executive header already tells the
   at-a-glance story.
+v1.11.0: Exclusion Integrity (live failure: "exclude my existing areas in
+  Colaba and Worli" was acknowledged in chat as a hard no-go, then Colaba was
+  returned as a ranked candidate zone). Two stacked defects, both fixed:
+  (1) SCHEMA DRIFT — deterministic_planner wrote spec["namedExclusions"] (and
+  competitionCurve, promptWeightUnmatched), but SpecV2 never declared these
+  fields. Pydantic v2 defaults to extra='ignore', so validation silently
+  dropped them; the jobs.py mask loop is guarded by
+  getattr(spec, "namedExclusions", None), which therefore always saw None —
+  the exclusion was never applied AND the "could not be enforced" disclosure
+  never fired, so the failure was invisible. This had been dead code since
+  v1.7.1/v1.7.2 (named + coordinate exclusions, competition target-band flag,
+  prompt-weight-unmatched notice all affected). All three fields are now
+  declared on SpecV2; a new schema-drift test fails the build if the planner
+  ever again writes an undeclared spec key. (2) WRONG SHAPE — even once
+  applied, the mask was a fixed circular buffer on the geocoded centroid; a
+  neighbourhood like Colaba is a ~3 km peninsula, so a 1.5 km circle left its
+  northern half selectable. Exclusions now use geocode_with_bbox()'s real
+  extent (union of bbox-membership and the buffer, so the buffer is always a
+  floor), with a 12 km coarse-match cap so a city-level geocode can't wipe the
+  study area. Enforcement is now a first-class payload field
+  (exclusionsApplied / exclusionsUnenforced), not a buried diagnostics note.
 """
 from functools import lru_cache
 from typing import Literal
@@ -310,9 +331,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.10.0"
+APP_VERSION     = "1.11.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00074"
+ENGINE_VERSION  = "stratageo-engine-00075"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -325,7 +346,7 @@ ENGINE_VERSION  = "stratageo-engine-00074"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Sensible Output (adaptive grid & separation, natural chat, tight narrative)"
+RELEASE_NAME    = "Exclusion Integrity (named-exclusion schema drift + extent-based masking)"
 
 
 class Settings(BaseSettings):

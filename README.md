@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.10.0 — Sensible Output**
+**Current version: v1.11.0 — Exclusion Integrity**
 
 > One prompt → one plan → press ▶ Start analysis. Results lead with the
 > verdict, a plain-English reason, and what to do next; every technical
@@ -25,6 +25,14 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **PDF export** — client-ready screening report with basemap figure, verdict strip, constraint-status table, per-zone next validation, and a clear path to a detailed site study
 
 The product journey: **broad geography → spatial screening → priority investigation zones → detailed site/parcel validation → field and commercial due diligence.** The portal delivers the first three stages; [contact Stratageo](https://stratageo.in/contact.php) to commission the rest.
+
+---
+
+## v1.11.0 Highlights
+
+- **User-requested exclusions are actually enforced now.** A brief saying "exclude my existing areas in Colaba and Worli" was silently ignored — a schema-drift bug meant the parsed exclusions never reached the masking step, and because the mask loop never ran, the "could not be enforced" warning never fired either. Fixed at the schema level, with a regression test that fails the build if this class of bug (planner writes a spec key the model doesn't declare) ever recurs.
+- **Exclusions now use the real shape of the place, not a fixed circle.** "Colaba" is excluded by its actual geocoded extent, not a 1.5 km circle on its centroid that left half the neighbourhood selectable.
+- **Enforcement is now visible.** Every result reports exactly which named exclusions were applied and which could not be — no longer a buried diagnostics footnote.
 
 ---
 
@@ -450,7 +458,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.10.0** *(current)* | Sensible Output — adaptive grid resolution (small localities refine to a rankable surface), adaptive candidate separation (top-N actually returned on compact areas), narrative discipline (2-3 plain sentences, no score dumps), natural colleague-tone chat replies, analyst narrative opt-in behind an expander; fixes the silently-broken explanation pass |
+| **v1.11.0** *(current)* | Exclusion Integrity — named/coordinate exclusions were silently dropped by a schema-drift bug (SpecV2 never declared `namedExclusions`); fixed and declared, plus a regression test that fails the build if the planner ever writes an undeclared spec key again; exclusion masking now uses the place's real geocoded extent instead of a fixed circle; enforcement status promoted to a first-class result field |
+| **v1.10.0** | Sensible Output — adaptive grid resolution (small localities refine to a rankable surface), adaptive candidate separation (top-N actually returned on compact areas), narrative discipline (2-3 plain sentences, no score dumps), natural colleague-tone chat replies, analyst narrative opt-in behind an expander; fixes the silently-broken explanation pass |
 | **v1.9.0** | Frictionless & Simple — route-gate pre-mask (candidates selected inside required proximity gates, fixing false "no reliable recommendation"), anchor double-encoding guard, plain-English `plainReason` + suggestions on every withheld result, Run button on any valid spec (one prompt → one plan, no "type run"), simple-first results drawer with all diagnostics behind one expander |
 | **v1.8.1** | Hotfix — study-area minimum-extent floor (a "specific blocks" brief + res-10 grid was collapsing to ~1 hex → false "no viable site"); riverfront "widen corridor" button no longer shows on landlocked results |
 | **v1.8.0** | Screening & Investigation-Zone Product Contract — per-zone screening verdicts + claim level + generated next-validation actions, target-band competition curve, observed-zero vs provider-unavailable data status, spatial-scale classification + micro↔macro methodology comparison, provisional-reweight rank deltas + Verify adjusted shortlist, executive result header, zone-centroid map semantics, PDF verdict strip/constraint table/CTA, deterministic follow-up modification signals + new-brief context strip |

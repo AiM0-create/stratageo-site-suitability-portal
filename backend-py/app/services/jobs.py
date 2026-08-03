@@ -39,7 +39,9 @@ from ..engine.grid import cell_boundary as grid_cell_boundary, polyfill
 from ..engine.routing import evaluate_route_constraint, fetch_railway_lines
 from ..engine.traffic import traffic_catchment
 from ..engine.sandbox import run_custom_layer
-from ..engine.study_area import geocode, resolve_study_area, reverse_geocode_name
+from ..engine.study_area import (
+    geocode, geocode_with_bbox, resolve_study_area, reverse_geocode_name,
+)
 from . import storage
 from .critic import critique_analysis
 from ..engine.intent_parser import parse_raw_intent, validate_hard_constraints_in_spec
@@ -273,6 +275,49 @@ def route_gate_envelope_m(rc, walk_speed_m_per_min: float, drive_speed_m_per_min
     ]
     limit = max((c for c in cands if c > 0), default=0.0)
     return limit * 1.35 if limit > 0 else 0.0
+
+
+# v1.11.0 — a geocoded extent wider than this is treated as a too-coarse match
+# (the geocoder returned the whole city instead of the neighbourhood) and is
+# ignored in favour of the plain circular buffer.
+NAMED_EXCLUSION_MAX_SPAN_M = 12000.0
+
+
+def named_exclusion_hit(
+    lat: float,
+    lng: float,
+    center: tuple[float, float],
+    bbox: tuple[float, float, float, float] | None,
+    buffer_m: float,
+) -> bool:
+    """v1.11.0 — is (lat, lng) inside an excluded named place?
+
+    A fixed circular buffer is the wrong SHAPE for a neighbourhood. Colaba is a
+    ~3 km peninsula; a 1.5 km circle on its centroid leaves the northern half
+    selectable — which is exactly how "exclude Colaba" still returned a Colaba
+    zone. The geocoder already knows the place's extent, so use it: a cell is
+    excluded when it lies inside the geocoded bbox OR within buffer_m of the
+    centroid. The union keeps the caller's buffer as a floor, so a tight bbox
+    can never shrink the exclusion below what was asked for.
+    """
+    if scoring.haversine_m(lat, lng, center[0], center[1]) <= buffer_m:
+        return True
+    if bbox is None:
+        return False
+    south, west, north, east = bbox
+    return south <= lat <= north and west <= lng <= east
+
+
+def usable_exclusion_bbox(
+    bbox: tuple[float, float, float, float] | None,
+) -> tuple[float, float, float, float] | None:
+    """Reject a geocoded extent that is too coarse to be the named place."""
+    if bbox is None:
+        return None
+    south, west, north, east = bbox
+    if scoring.haversine_m(south, west, north, east) > NAMED_EXCLUSION_MAX_SPAN_M:
+        return None
+    return bbox
 
 
 def build_plain_withheld_reason(
@@ -718,6 +763,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     s = get_settings()
     notes: list[str] = []
     fallbacks: list[str] = []
+    # v1.11.0 — exclusion enforcement ledger. Declared here (not at the mask
+    # loop) so every terminal payload can reference it, including early returns.
+    enforced_exclusions: list[dict] = []
+    unenforced_exclusions: list[str] = []
     # v1.4.6 — optional provider checks that timed out / failed and were
     # skipped (see _degradable_call). Reported via maskStats["providerDegraded"].
     _provider_degraded: list[str] = []
@@ -1605,30 +1654,52 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         _ne_buf = float(_ne.get("bufferM", 1500))
         if not _ne_name:
             continue
+        _ne_bbox = None
         if isinstance(_ne.get("lat"), (int, float)) and isinstance(_ne.get("lng"), (int, float)):
             _pt = (float(_ne["lat"]), float(_ne["lng"]))   # exact user coordinates — never geocoded
         else:
+            # v1.11.0 — resolve the place's real EXTENT, not just its centroid.
+            # A neighbourhood is not a circle (see named_exclusion_hit).
             try:
-                _pt = await geocode(_ne_name)
+                _g = await geocode_with_bbox(_ne_name)
             except Exception:
+                _g = None
+            if _g:
+                _pt = (_g[0], _g[1])
+                _ne_bbox = usable_exclusion_bbox(_g[2])
+            else:
                 _pt = None
         if not _pt:
-            fallbacks.append(
-                f"Named exclusion '{_ne_name}' could not be geocoded — this "
-                "exclusion was NOT enforced (treat nearby candidates with care)."
+            # Enforcement FAILED. This is a user-visible correctness issue, not
+            # a technical footnote: they asked for an area to be off-limits and
+            # it is not. Recorded for the headline, not just the diagnostics.
+            _msg = (
+                f"'{_ne_name}' could not be located, so it was NOT excluded — "
+                "zones inside it may still appear below."
             )
+            fallbacks.append(_msg)
+            unenforced_exclusions.append(_ne_name)
+            mask_stats[f"namedExclusionUnenforced:{_ne_name}"] = 1
             continue
         _ne_mask = np.array([
-            scoring.haversine_m(h.lat, h.lng, _pt[0], _pt[1]) <= _ne_buf for h in hexes
+            named_exclusion_hit(h.lat, h.lng, _pt, _ne_bbox, _ne_buf) for h in hexes
         ], dtype=bool)
         _n_ne = int(_ne_mask.sum())
         excluded |= _ne_mask
         mask_stats[f"namedExclusion:{_ne_name}"] = _n_ne
+        enforced_exclusions.append({"name": _ne_name, "cells": _n_ne})
+        _extent = "geocoded area" if _ne_bbox else f"{int(_ne_buf)} m radius"
         notes.append(
-            f"Excluded your existing site area '{_ne_name}' "
-            f"({_pt[0]:.4f}, {_pt[1]:.4f}) — {_n_ne} cell(s) within "
-            f"{int(_ne_buf)} m removed from consideration."
+            f"Excluded '{_ne_name}' ({_extent}) — {_n_ne} cell(s) removed "
+            "from consideration."
         )
+        if _n_ne == 0:
+            # Zero cells removed usually means the place is outside the study
+            # area — harmless, but say so rather than implying it did work.
+            notes.append(
+                f"'{_ne_name}' did not overlap the study area, so it removed "
+                "no candidate cells."
+            )
 
     # ── 4e (apply phase). Buildability / no-construction masks (v1.0.3) ──
     # Hard-exclude obvious no-build land for waterfront + commercial briefs:
@@ -2981,6 +3052,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         # v1.9.0 — one plain-English sentence for a withheld ranking (omitted
         # when no single clear cause exists; the UI keeps generic wording).
         **({"plainReason": _plain_reason} if _plain_reason else {}),
+        # v1.11.0 — what the user asked to exclude, and whether it actually was.
+        # Promoted to a first-class payload field (not a diagnostics footnote)
+        # because an unenforced exclusion changes how the ranking must be read.
+        "exclusionsApplied": enforced_exclusions,
+        "exclusionsUnenforced": unenforced_exclusions,
         # Spatial Reliability Upgrade v1.0.3 — new optional fields (frontend-safe)
         "analysisStatus": analysis_status,
         "suggestions": suggestions,
