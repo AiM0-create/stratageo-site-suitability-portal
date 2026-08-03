@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.11.0 — Exclusion Integrity**
+**Current version: v1.11.1 — Answer-First Sidebar** (frontend) / v1.11.0 — Exclusion Integrity (backend)
 
 > One prompt → one plan → press ▶ Start analysis. Results lead with the
 > verdict, a plain-English reason, and what to do next; every technical
@@ -25,6 +25,13 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **PDF export** — client-ready screening report with basemap figure, verdict strip, constraint-status table, per-zone next validation, and a clear path to a detailed site study
 
 The product journey: **broad geography → spatial screening → priority investigation zones → detailed site/parcel validation → field and commercial due diligence.** The portal delivers the first three stages; [contact Stratageo](https://stratageo.in/contact.php) to commission the rest.
+
+---
+
+## v1.11.1 Highlights (frontend-only)
+
+- **The ranked zones now render first.** Live feedback: "why are we not making it simple and interactive" — the sidebar previously listed the actual answer after roughly ten collapsed panels and a bar chart. Reordered (via CSS `order`, not a rewrite) so zones appear right after the verdict/confidence/narrative; all diagnostic panels still exist, just after the answer now.
+- **Map ↔ card interactivity surfaced.** Clicking a zone card already flew the map to it and vice versa — that capability existed but was buried; a short caption above the zone list now says so.
 
 ---
 
@@ -458,7 +465,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.11.0** *(current)* | Exclusion Integrity — named/coordinate exclusions were silently dropped by a schema-drift bug (SpecV2 never declared `namedExclusions`); fixed and declared, plus a regression test that fails the build if the planner ever writes an undeclared spec key again; exclusion masking now uses the place's real geocoded extent instead of a fixed circle; enforcement status promoted to a first-class result field |
+| **v1.11.1** *(current, frontend)* | Answer-First Sidebar — ranked zones now render immediately after the verdict instead of after ~10 collapsed diagnostic panels; map↔card click interactivity surfaced with a caption (the capability already existed, just undiscoverable); pure CSS-order reorder, no JSX relocated |
+| **v1.11.0** | Exclusion Integrity — named/coordinate exclusions were silently dropped by a schema-drift bug (SpecV2 never declared `namedExclusions`); fixed and declared, plus a regression test that fails the build if the planner ever writes an undeclared spec key again; exclusion masking now uses the place's real geocoded extent instead of a fixed circle; enforcement status promoted to a first-class result field |
 | **v1.10.0** | Sensible Output — adaptive grid resolution (small localities refine to a rankable surface), adaptive candidate separation (top-N actually returned on compact areas), narrative discipline (2-3 plain sentences, no score dumps), natural colleague-tone chat replies, analyst narrative opt-in behind an expander; fixes the silently-broken explanation pass |
 | **v1.9.0** | Frictionless & Simple — route-gate pre-mask (candidates selected inside required proximity gates, fixing false "no reliable recommendation"), anchor double-encoding guard, plain-English `plainReason` + suggestions on every withheld result, Run button on any valid spec (one prompt → one plan, no "type run"), simple-first results drawer with all diagnostics behind one expander |
 | **v1.8.1** | Hotfix — study-area minimum-extent floor (a "specific blocks" brief + res-10 grid was collapsing to ~1 hex → false "no viable site"); riverfront "widen corridor" button no longer shows on landlocked results |

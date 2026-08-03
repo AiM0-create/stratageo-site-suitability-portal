@@ -619,9 +619,15 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           </div>
         )}
 
-        {/* v1.4.0 — site claim level disclaimer (always visible) */}
-        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#64748b', marginBottom: 8 }}>
+        {/* v1.4.0 — site claim level disclaimer (always visible).
+            v1.11.0 — order:11: moved to sit directly above the ranked zones
+            (answer-first reorder, see .drawer-body in main.css) and rephrased
+            to surface the map/card click interaction, which already existed
+            (MapView flies to a zone on card click and vice versa) but was
+            undiscoverable this far down the sidebar. */}
+        <div style={{ order: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#64748b', marginBottom: 8 }}>
           <b>Screening-level candidate zones</b> — H3 micro-market areas, not exact parcels or leasable sites. Field validation required before any leasing or investment decision.
+          {' '}Click a zone or a map pin to focus the other.
         </div>
 
         {/* ── v1.9.0 — SIMPLE-FIRST: every diagnostic panel below lives behind
@@ -629,7 +635,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             constraint verification, degraded checks, repair warnings, scope,
             the analyst review and the full confidence rationale are all one
             click away instead of a wall the user must scroll past. ── */}
-        <div className="drawer-assumptions" style={{ margin: '4px 0 8px' }}>
+        {/* v1.11.0 — order:20: moved after the zones — this is the "Details"
+            section now, not a wall the user must scroll past first. */}
+        <div className="drawer-assumptions" style={{ margin: '4px 0 8px', order: 20 }}>
           <button
             className="assumptions-toggle"
             onClick={() => setShowDiag(!showDiag)}
@@ -926,7 +934,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           if (!bench) return null;
           const deltaClass = bench.delta > 0.5 ? 'above' : bench.delta < -0.5 ? 'below' : 'at';
           return (
-            <div className="sg-benchmark">
+            /* v1.11.0 — order:14: answer-first reorder (see .drawer-body in main.css) */
+            <div className="sg-benchmark" style={{ order: 14 }}>
               <span className="sg-benchmark-score">
                 {ranked[0].mcda_score.toFixed(1)}/10
               </span>
@@ -939,8 +948,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         })()}
 
         {/* Analysis Assumptions Panel */}
+        {/* v1.11.0 — order:21 */}
         {spec && (
-          <div className="drawer-assumptions">
+          <div className="drawer-assumptions" style={{ order: 21 }}>
             <button className="assumptions-toggle" onClick={() => setShowAssumptions(!showAssumptions)}>
               <span>Analysis Assumptions</span>
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showAssumptions ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
@@ -1150,8 +1160,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         )}
 
         {/* Suitability-by-factor choropleth toggles */}
+        {/* v1.11.0 — order:9: answer-first reorder (see .drawer-body in main.css) */}
         {poiTypes.length > 0 && (
-          <div className="drawer-layers">
+          <div className="drawer-layers" style={{ order: 9 }}>
             <div className="drawer-layers-label">Map view: suitability by factor</div>
             <button
               className={`drawer-layer-btn ${!heatmapType ? 'active' : ''}`}
@@ -1172,8 +1183,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         )}
 
         {/* When withheld, the chart + ranked cards are hidden behind an explicit opt-in */}
+        {/* v1.11.0 — order:10: answer-first reorder (see .drawer-body in main.css) */}
         {withheld && (
-          <button className="assumptions-toggle withheld-raw-toggle" onClick={() => setShowRaw(!showRaw)}>
+          <button className="assumptions-toggle withheld-raw-toggle" style={{ order: 10 }} onClick={() => setShowRaw(!showRaw)}>
             <span>{showRaw ? 'Hide raw candidates' : 'View raw candidates (not a recommendation)'}</span>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showRaw ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
               <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
@@ -1192,8 +1204,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             re-ranks candidates and recolors the map instantly, client-side —
             no re-run, no quota use. Weights are shown normalized (they always
             sum to 100% in the composite, matching the backend's math). */}
+        {/* v1.11.0 — order:15: moved after the zone list (tweak-the-answer
+            controls belong after the answer, see .drawer-body in main.css) */}
         {!withheld && Object.keys(customWeights).length > 0 && (
-          <div className="drawer-assumptions" style={{ margin: '8px 0' }}>
+          <div className="drawer-assumptions" style={{ margin: '8px 0', order: 15 }}>
             <button
               className="assumptions-toggle"
               onClick={() => setShowWeights(!showWeights)}
@@ -1250,8 +1264,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         )}
         {/* v1.6.0 (Phase 2) — honesty banner: an adjusted ranking must never
             masquerade as the default analysis. */}
+        {/* v1.11.0 — order:16 */}
         {!withheld && weightsAdjusted && (
-          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 6, padding: '8px 10px', fontSize: '12px', margin: '4px 0 8px', lineHeight: 1.45 }}>
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 6, padding: '8px 10px', fontSize: '12px', margin: '4px 0 8px', lineHeight: 1.45, order: 16 }}>
             <b>Custom weights active.</b> Scores and ranking below are recomputed
             from your weights using this analysis's verified factor data.
             Confidence, stability and verification labels were computed under the
@@ -1263,8 +1278,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             selection itself now responds to the customer's weights — honestly
             labeled as screening-basis because Pass-B verification (isochrones,
             routing, Places) only ran for the original shortlist. */}
+        {/* v1.11.0 — order:17 */}
         {!withheld && weightsAdjusted && screeningCandidates.length > 0 && (
-          <div style={{ background: '#fffbeb', border: '1px dashed #d97706', borderRadius: 6, padding: '8px 10px', fontSize: '12px', margin: '0 0 8px', lineHeight: 1.45 }}>
+          <div style={{ background: '#fffbeb', border: '1px dashed #d97706', borderRadius: 6, padding: '8px 10px', fontSize: '12px', margin: '0 0 8px', lineHeight: 1.45, order: 17 }}>
             <div style={{ fontWeight: 700, color: '#92400e', marginBottom: 4 }}>
               Top {screeningCandidates.length} zones under YOUR weights (screening basis — dashed amber pins on the map)
             </div>
@@ -1298,12 +1314,18 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           </div>
         )}
         {/* Comparison chart */}
-        {selectedLocations.length >= 1
-          ? <ComparisonChart locations={selectedLocations} />
-          : <ComparisonChart locations={ranked.filter(l => !l.excluded).slice(0, 3)} />}
+        {/* v1.11.0 — order:12: answer-first reorder (see .drawer-body in main.css) */}
+        <div style={{ order: 12 }}>
+          {selectedLocations.length >= 1
+            ? <ComparisonChart locations={selectedLocations} />
+            : <ComparisonChart locations={ranked.filter(l => !l.excluded).slice(0, 3)} />}
+        </div>
 
         {/* Location cards */}
-        <div className="drawer-locations">
+        {/* v1.11.0 — order:13: THE ANSWER — moved to render right after the
+            verdict/confidence/narrative instead of after ~10 collapsed
+            diagnostic panels (live feedback: "not one shot understandable"). */}
+        <div className="drawer-locations" style={{ order: 13 }}>
           {ranked.map((loc, index) => {
             const isSelected = selectedLocations.some(sl => sl.name === loc.name);
             const isExpanded = expandedLoc === loc.name;
@@ -1646,7 +1668,8 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         </>
         )}
         {/* v1.3.0 — Evidence Trail Section */}
-        <div className="drawer-assumptions" style={{ marginTop: 12 }}>
+        {/* v1.11.0 — order:22 */}
+        <div className="drawer-assumptions" style={{ marginTop: 12, order: 22 }}>
           <button
             className="assumptions-toggle"
             onClick={() => setShowEvidence(!showEvidence)}
@@ -1869,9 +1892,10 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             validation. Uses the existing company contact page; no third-party
             trackers, no fake checkout. The copied summary contains only
             computed values (never the raw prompt). */}
+        {/* v1.11.0 — order:23: always last */}
         <div style={{
           marginTop: 14, padding: '12px 14px', borderRadius: 8,
-          background: '#f0fdf4', border: '1px solid #86efac',
+          background: '#f0fdf4', border: '1px solid #86efac', order: 23,
         }}>
           <div style={{ fontWeight: 700, fontSize: '13px', color: '#14532d', marginBottom: 4 }}>
             Ready for the next stage?

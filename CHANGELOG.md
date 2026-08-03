@@ -4,6 +4,32 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.11.1] — 2026-08-03 — Answer-First Sidebar (frontend-only)
+
+Live feedback on the same run: "why are we not making it simple and
+interactive for the user" — the ranked zones (the actual answer) rendered
+after roughly ten collapsed diagnostic panels, toggle rows, and a bar chart,
+so a first-time viewer had to scroll past all of it to see a result.
+
+### Changed
+- **Answer-first ordering.** The ranked investigation zones now render
+  immediately after the verdict/confidence/narrative — right after the map
+  view toggle and a short caption — instead of after Technical diagnostics,
+  Analysis Assumptions, and the factor-weights panel. Those "Details" panels
+  still exist, unchanged, just after the zones now instead of before.
+- **Interactivity surfaced, not built** — clicking a zone card already flew
+  the map to it and vice versa (`MapView.tsx`); the capability existed but
+  was undiscoverable this deep in the sidebar. The caption above the zone
+  list now says so explicitly.
+- Implemented via CSS flexbox `order` on `.drawer-body` (`main.css`) plus a
+  one-line `order` added to each existing block's root element in
+  `ResultsDrawer.tsx` — no JSX was relocated or rewritten, keeping this a
+  low-risk, easily revertible reorder.
+- No backend changes; `package.json` version bumped independently of
+  `APP_VERSION` since only the frontend redeployed.
+
+---
+
 ## [1.11.0] — 2026-08-03 — Exclusion Integrity
 
 Live failure: a gym brief said *"I already have branches in Colaba and Worli
