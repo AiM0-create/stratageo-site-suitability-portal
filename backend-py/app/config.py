@@ -281,6 +281,28 @@ v1.9.0: Frictionless & Simple (live new-user feedback: too many steps to run,
   verification, degraded checks, repair warnings, scope, analyst review,
   full confidence rationale) collapse behind one "Technical diagnostics"
   expander with a notice count; internal enum tokens humanized.
+v1.10.0: Sensible Output (live Sector V supermarket run: 6 grid cells, 2
+  eligible, top-3 requested but 1 zone returned, and "0.0/10 despite 439
+  observed" score artifacts from a 6-value percentile stretch).
+  (1) Adaptive grid resolution — polyfill(min_cells=40, settable via
+  MIN_GRID_CELLS) refines the H3 level upward (to at most 10) when a small
+  locality yields a grid too small to rank, with a disclosed note; the
+  existing max_hexes degrade loop is untouched and the two cannot conflict.
+  (2) Adaptive candidate separation — the near-duplicate ring rule scales
+  DOWN on small eligible grids (<15 cells → 0 rings, <60 → ≤1) so a compact
+  study area can still return the requested top-N distinct zones; never
+  scaled up, always disclosed. (3) Explanation-pass style discipline — the
+  summary is 2-3 short plain-language sentences naming the top driver and at
+  most one caution; no per-factor score dumps, no meta-commentary about
+  scoring mechanics. Also fixes the explanation pass silently 400-ing
+  (results.py passed the raw legacy explain_model alias, default "" — now
+  effective_report_model; shipped mid-v1.9.0 as engine-00073). (4) Natural
+  chat tone — plan replies open like a colleague ("Got it — …"), no
+  Objective/Constraints/Feasibility section headers (constraints table only
+  for 3+ explicit constraints), ~12-line budget plus the factor table.
+  (5) The analyst-narrative paragraph in the results drawer is opt-in behind
+  a "📝 Analyst narrative" expander — the executive header already tells the
+  at-a-glance story.
 """
 from functools import lru_cache
 from typing import Literal
@@ -288,9 +310,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.9.0"
+APP_VERSION     = "1.10.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00073"
+ENGINE_VERSION  = "stratageo-engine-00074"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -303,7 +325,7 @@ ENGINE_VERSION  = "stratageo-engine-00073"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Frictionless & Simple (route-gate pre-mask, plain reasons, one-turn run)"
+RELEASE_NAME    = "Sensible Output (adaptive grid & separation, natural chat, tight narrative)"
 
 
 class Settings(BaseSettings):
@@ -389,6 +411,10 @@ class Settings(BaseSettings):
 
     # ── Engine tuning ─────────────────────────────────────────────────────────
     max_hexes: int = 8000
+    # v1.10.0 — minimum grid size worth ranking. Below this, polyfill refines
+    # the H3 level (up to 10) so a small locality still yields a comparable,
+    # rankable surface instead of a handful of noise-normalized cells.
+    min_grid_cells: int = 40
     refine_top_k: int = 12
     ors_batch_size: int = 5
     walk_speed_m_per_min: float = 80.0

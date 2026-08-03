@@ -360,6 +360,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   // "Technical diagnostics" expander. The always-visible surface is: verdict,
   // plain-English reason, what to try next, and the zones.
   const [showDiag, setShowDiag] = useState(false);
+  // v1.10.0 — the LLM narrative paragraph is opt-in (exec header covers the
+  // at-a-glance story).
+  const [showNarrative, setShowNarrative] = useState(false);
   const prettyToken = (s: string) => String(s).replace(/_/g, ' ');
   const plainReason: string | undefined =
     typeof (result as any).plainReason === 'string' ? (result as any).plainReason : undefined;
@@ -530,8 +533,27 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
           );
         })()}
 
-        {/* Summary — suppressed when withheld (it may assert a winner the critic rejected) */}
-        {!withheld && <p className="drawer-summary">{result.summary}</p>}
+        {/* Summary — suppressed when withheld (it may assert a winner the
+            critic rejected). v1.10.0 — the narrative paragraph moved behind
+            an expander: the executive header above already answers what /
+            top zone / why / next check at a glance, so the prose is opt-in
+            (live feedback: "still a lot of information … without proper
+            structuring"). */}
+        {!withheld && result.summary && (
+          <div className="drawer-assumptions" style={{ margin: '0 0 8px' }}>
+            <button
+              className="assumptions-toggle"
+              onClick={() => setShowNarrative(!showNarrative)}
+              style={{ background: showNarrative ? '#f8fafc' : undefined }}
+            >
+              <span>📝 Analyst narrative</span>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showNarrative ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+            {showNarrative && <p className="drawer-summary" style={{ marginTop: 6 }}>{result.summary}</p>}
+          </div>
+        )}
 
         {/* Ranking withheld — critic unreliable OR insufficient viable land */}
         {withheld && (

@@ -437,8 +437,14 @@ async def write_explanations(
     prompt = (
         f"You are a GIS site-selection analyst. Business: {spec.businessType}. Objective: {spec.objective}.\n"
         f"Candidates with per-layer scores:\n" + "\n".join(loc_lines) + honesty + "\n\n"
-        'Return JSON: {"summary": "3-4 sentence executive summary", '
-        '"reasonings": ["2-3 sentence assessment for each candidate, in order"]}. '
+        'Return JSON: {"summary": "2-3 SHORT sentences", '
+        '"reasonings": ["1-2 short sentences per candidate, in order"]}. '
+        "SUMMARY STYLE (v1.10.0 — written for a NON-GIS reader): plain language, "
+        "no jargon, no walls of text. Name the single strongest driver and at "
+        "most ONE caution — do NOT list every factor's score (the factor cards "
+        "already show them). Never write meta-commentary about the scoring "
+        "mechanics (e.g. 'only one candidate was provided with per-layer "
+        "scores') — state what was found and what it means for the user. "
         "Be specific about which layers drive each score. NEVER invent data not shown above. "
         "A layer marked NO DATA was not measured — never describe it as good, perfect, or satisfied.\n"
         "CRITICAL — NUMBERS ARE EXACT: when you cite any composite or factor score, reproduce "

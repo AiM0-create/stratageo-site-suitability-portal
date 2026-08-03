@@ -4,6 +4,60 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.10.0] — 2026-08-03 — Sensible Output
+
+Second live-feedback iteration (Sector V supermarket run on v1.9.0): the
+engine screened only **6 grid cells (2 eligible)**, returned **1 zone for a
+top-3 request** (the 2-ring separation rule eliminated the rest), showed
+score artifacts like "0.0/10 despite 439 observed" (a 6-value percentile
+stretch is noise), the plan reply read like a formal report, and the analyst
+narrative re-walled the sidebar.
+
+### Fixed — engine output makes sense on small areas
+- **Adaptive grid resolution.** `polyfill` now refines the H3 level upward
+  (to at most 10) whenever the grid would be smaller than `MIN_GRID_CELLS`
+  (default 40), with a disclosed note — a compact locality like Sector V now
+  yields a genuinely rankable surface instead of a handful of
+  noise-normalized cells. The existing `max_hexes` degrade loop is untouched;
+  the two can never conflict. This also dissolves the "0.0/10 despite 439
+  observed" artifact (percentile stretch becomes meaningful again) and
+  respects an explicit user grid choice except when it would be unusable.
+- **Adaptive candidate separation.** The near-duplicate ring rule scales
+  DOWN on small eligible grids (<15 cells → 0 rings, <60 → at most 1) so the
+  requested top-N distinct zones can actually be returned. Never scaled up;
+  always disclosed in the notes.
+- **Explanation pass was silently broken** (shipped mid-v1.9.0 as
+  engine-00073): `results.py` passed the raw legacy `explain_model` alias
+  (default `""`) to OpenAI — every narrative call 400'd and fell back to the
+  bland template. Now uses `effective_report_model` (gpt-5.4-nano fallback
+  chain).
+
+### Changed — language a non-GIS reader understands
+- **Narrative discipline.** The result summary is now 2-3 short
+  plain-language sentences naming the strongest driver and at most one
+  caution — no per-factor score dumps, no meta-commentary about scoring
+  mechanics ("only one candidate was provided with per-layer scores…").
+  Per-zone reasonings capped at 1-2 sentences.
+- **Natural chat tone.** Plan replies open like a colleague ("Got it — a
+  10,000 sq ft discount supermarket in Sector V…"), with **no**
+  Objective/Constraints Detected/Feasibility section headers. The
+  constraints table appears only for 3+ explicit constraints (fewer are
+  folded into the opening sentences); feasibility is one inline sentence
+  with the status emoji; total budget ~12 lines plus the factor table.
+- **The analyst narrative is opt-in.** The drawer's LLM summary paragraph
+  moved behind a "📝 Analyst narrative" expander — the executive header
+  already answers what / top zone / why / next check at a glance.
+
+### Tests
+- New `tests/test_v1100_sensible_output.py` (8): upward grid adaptation
+  (small area refines + disclosed, large area untouched, `min_cells=0`
+  legacy behaviour, res-10 ceiling) and adaptive separation (tiny → 0,
+  small → ≤1, normal untouched, never raised).
+- **705 backend / 90 frontend passed**, tsc clean, build clean.
+  Versions: `1.10.0` / `stratageo-engine-00074`.
+
+---
+
 ## [1.9.0] — 2026-08-03 — Frictionless & Simple
 
 Minor release driven by live first-time-user feedback on the Ruby Crossing

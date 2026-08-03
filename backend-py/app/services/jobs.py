@@ -328,6 +328,19 @@ def build_plain_withheld_reason(
     )
 
 
+def adaptive_separation_rings(eligible_cells: int, requested_rings: int) -> int:
+    """v1.10.0 — scale the near-duplicate candidate separation DOWN when the
+    eligible grid is small. A 2-ring rule at res 8 spans ~1.6 km — on a small
+    locality it can eliminate every candidate but one (observed live: Sector V
+    supermarket, 2 eligible cells, top-3 requested → 1 zone returned). The
+    requested value is an upper bound, never raised."""
+    if eligible_cells < 15:
+        return 0
+    if eligible_cells < 60:
+        return min(requested_rings, 1)
+    return requested_rings
+
+
 TERMINAL_STATUSES = ("done", "error", "cancelled", "timeout")
 
 # v1.4.7 — every job that produces a result payload ends in EXACTLY one of
@@ -969,7 +982,9 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
     # ── 2. Grid ─────────────────────────────────────────────────────
     _update(job, 12, "grid", f"Building H3 grid (res {spec.grid.resolution})...")
-    hexes, res, grid_notes = polyfill(polygon, spec.grid.resolution)
+    # v1.10.0 — min_cells: a too-small grid auto-refines the H3 level so a
+    # small locality still yields a rankable surface (see grid.polyfill).
+    hexes, res, grid_notes = polyfill(polygon, spec.grid.resolution, min_cells=s.min_grid_cells)
     notes.extend(grid_notes)
     notes.append(f"H3 grid: {len(hexes)} hexes at resolution {res}")
 
@@ -1765,8 +1780,21 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
 
     # ── 5. Candidate selection ──────────────────────────────────────
     top_k = min(spec.execution.refineTopK, s.refine_top_k)
+    # v1.10.0 — adaptive separation: on a small eligible grid the requested
+    # ring rule can eliminate every candidate but one; scale it down (never up).
+    _eligible_cells = int((~excluded).sum())
+    _sep_rings = adaptive_separation_rings(
+        _eligible_cells, spec.output.minCandidateSeparationHexRings,
+    )
+    if _sep_rings != spec.output.minCandidateSeparationHexRings:
+        notes.append(
+            f"Candidate separation relaxed from "
+            f"{spec.output.minCandidateSeparationHexRings} to {_sep_rings} hex "
+            f"ring(s) — only {_eligible_cells} eligible cell(s) in this study "
+            "area, and the stricter rule would leave too few distinct zones to rank."
+        )
     candidates = scoring.select_candidates(
-        composite, hexes, excluded, top_k, spec.output.minCandidateSeparationHexRings,
+        composite, hexes, excluded, top_k, _sep_rings,
     )
     # v1.5.2 — ranking-basis transparency (user-reported confusion: "recommended
     # cells were not the highest suitability scores"). Two legitimate mechanisms
