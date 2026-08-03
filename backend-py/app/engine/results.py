@@ -455,7 +455,13 @@ async def write_explanations(
     )
     try:
         res = await client.chat.completions.create(
-            model=s.explain_model,
+            # v1.9.0 — was `s.explain_model`, the raw LEGACY alias that
+            # defaults to "" — so unless the legacy EXPLAIN_MODEL env var was
+            # set, every explanation pass 400'd ("you must provide a model
+            # parameter", observed in live logs) and silently fell back to
+            # the bland template summary. effective_report_model applies the
+            # documented fallback chain (explain_model → stratageo_report_model).
+            model=s.effective_report_model,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.2,

@@ -290,7 +290,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # ── Version metadata (single source of truth) ─────────────────────────────────
 APP_VERSION     = "1.9.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00072"
+ENGINE_VERSION  = "stratageo-engine-00073"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
