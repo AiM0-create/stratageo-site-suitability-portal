@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import type { SpecV2 } from '../types/chat';
+import {
+  weightPercents, setLayerWeightPercent, toggleLayerDirection, removeLayer,
+  buildAddFactorPrompt,
+} from '../services/factorEditing';
 
 interface SpecSummaryCardProps {
   spec: SpecV2;
@@ -7,8 +11,15 @@ interface SpecSummaryCardProps {
   readyToExecute: boolean;
   isExecuting: boolean;
   onConfirmExecute: () => void;
-  /** When provided, layer weights become editable number inputs */
+  /** When provided, the factor framework becomes editable (weight slider,
+   *  direction toggle, remove). */
   onSpecEdit?: (updated: SpecV2) => void;
+  /** v1.11.4 — send a chat turn. Adding a NEW factor needs a real data source
+   *  (OSM tags / Places types) and a catchment, which only the planner can
+   *  choose — inventing them in the browser would create a layer that matches
+   *  nothing or silently measures the wrong thing. So "add factor" asks the
+   *  planner, while weight/direction/remove stay instant client-side edits. */
+  onSendMessage?: (prompt: string) => void;
 }
 
 function catchmentLabel(l: SpecV2['layers'][number]): string {
@@ -64,20 +75,55 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
   isExecuting,
   onConfirmExecute,
   onSpecEdit,
+  onSendMessage,
 }) => {
-  const totalW = spec.layers.reduce((s, l) => s + l.weight, 0) || 1;
   const plan = spec.plan;
+  const pcts = weightPercents(spec.layers);
+  const [addingFactor, setAddingFactor] = useState(false);
+  const [newFactorName, setNewFactorName] = useState('');
+  const [newFactorDir, setNewFactorDir] = useState<'positive' | 'negative'>('positive');
 
+  // v1.11.4 — BUG FIX. This used to do `weight: pct`, writing the typed
+  // PERCENTAGE straight onto the layer while the card renders weight/sum*100.
+  // Archetype weights are fractions summing to ~1, so typing "25" set one layer
+  // to 25 against a total of ~25.65: it displayed 97% and every OTHER factor
+  // collapsed to 0%. A single edit destroyed the framework — the live
+  // "00% / 0% / 0% / 0%" report. setLayerWeightPercent solves for the weight
+  // that makes this layer exactly pct% while holding the others' ratios fixed.
   const handleWeightChange = (layerId: string, pct: number) => {
-    if (!onSpecEdit || !Number.isFinite(pct) || pct <= 0) return;
-    const updated: SpecV2 = {
+    if (!onSpecEdit) return;
+    onSpecEdit({
       ...spec,
-      layers: spec.layers.map(l => (l.id === layerId ? { ...l, weight: pct } : l)),
+      layers: setLayerWeightPercent(spec.layers, layerId, pct),
       // v1.6.0 (Phase 2) — flag the adjustment so the backend preserves these
       // weights across chat turns and audits them as user-adjusted.
       weightsAdjustedByUser: true,
-    };
-    onSpecEdit(updated);
+    });
+  };
+
+  const handleDirectionToggle = (layerId: string) => {
+    if (!onSpecEdit) return;
+    onSpecEdit({
+      ...spec,
+      layers: toggleLayerDirection(spec.layers, layerId),
+      weightsAdjustedByUser: true,
+    });
+  };
+
+  const handleRemoveLayer = (layerId: string) => {
+    if (!onSpecEdit) return;
+    const layers = removeLayer(spec.layers, layerId);
+    if (layers === spec.layers) return;          // refused: last factor
+    onSpecEdit({ ...spec, layers, weightsAdjustedByUser: true });
+  };
+
+  const handleAddFactor = () => {
+    const name = newFactorName.trim();
+    if (!name || !onSendMessage) return;
+    onSendMessage(buildAddFactorPrompt(name, newFactorDir));
+    setNewFactorName('');
+    setNewFactorDir('positive');
+    setAddingFactor(false);
   };
 
   // v1.6.3 — customer picks the H3 grid level (7 or 8). Flagged so the
@@ -229,42 +275,126 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
       )}
 
       {/* ── Factor framework (hidden when the request is not feasible) ── */}
-      {!blocked && <table className="spec-card-table">
-        <thead>
-          <tr><th></th><th>Factor</th><th>Wt</th><th>Catchment</th><th>Conf.</th></tr>
-        </thead>
-        <tbody>
-          {spec.layers.map(l => (
-            <tr key={l.id} className={l.confidence === 'low' || l.proxyWarning ? 'spec-row-weak-proxy' : ''}>
-              <td className="spec-layer-id">{l.id}</td>
-              <td className="spec-layer-name" title={[l.whyItMatters, l.proxyWarning ? `⚠ ${l.proxyWarning}` : null].filter(Boolean).join(' | ') || undefined}>
-                {l.name}
-                {l.direction === 'negative' && <span className="spec-layer-neg" title="Lower is better">↓</span>}
-                {l.proxyWarning && <span className="spec-proxy-flag" title={l.proxyWarning}>⚠</span>}
-                {l.whyItMatters && <div className="spec-why">{l.whyItMatters}</div>}
-              </td>
-              <td className="spec-layer-weight">
+      {/* v1.11.4 — editable factor framework. Live feedback: "changing
+          variables is a task here, its not friendly at all, also what if i
+          want to introduce my own variable or change the +- of a variable".
+          Each row is now a slider (drag, don't type into a 3-character number
+          spinner), a clickable direction toggle, and a remove button. Adding a
+          brand-new factor goes through the planner — see onSendMessage. */}
+      {!blocked && (
+        <div className="spec-factors">
+          {spec.layers.map((l, i) => (
+            <div
+              key={l.id}
+              className={`spec-factor ${l.confidence === 'low' || l.proxyWarning ? 'spec-row-weak-proxy' : ''}`}
+            >
+              <div className="spec-factor-head">
+                <span
+                  className="spec-factor-name"
+                  title={[l.whyItMatters, l.proxyWarning ? `⚠ ${l.proxyWarning}` : null].filter(Boolean).join(' | ') || undefined}
+                >
+                  {l.name}
+                </span>
                 {onSpecEdit ? (
-                  <span className="spec-weight-edit">
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={Math.round((l.weight / totalW) * 100)}
-                      onChange={e => handleWeightChange(l.id, Number(e.target.value))}
-                      title="Edit weight — others renormalize proportionally"
-                    />%
-                  </span>
+                  <button
+                    type="button"
+                    className={`spec-dir-toggle ${l.direction === 'negative' ? 'is-neg' : 'is-pos'}`}
+                    onClick={() => handleDirectionToggle(l.id)}
+                    title="Click to flip: should more of this be better, or less?"
+                  >
+                    {l.direction === 'negative' ? '− less is better' : '+ more is better'}
+                  </button>
                 ) : (
-                  `${Math.round((l.weight / totalW) * 100)}%`
+                  <span className={`spec-dir-toggle ${l.direction === 'negative' ? 'is-neg' : 'is-pos'}`}>
+                    {l.direction === 'negative' ? '− less is better' : '+ more is better'}
+                  </span>
                 )}
-              </td>
-              <td className="spec-layer-catchment">{catchmentLabel(l)}</td>
-              <td><span className={`spec-conf spec-conf-${l.confidence || 'medium'}`}>{(l.confidence || 'medium')[0].toUpperCase()}</span></td>
-            </tr>
+                {l.proxyWarning && <span className="spec-proxy-flag" title={l.proxyWarning}>⚠</span>}
+                <span className="spec-factor-pct">{pcts[i]}%</span>
+                {onSpecEdit && spec.layers.length > 1 && (
+                  <button
+                    type="button"
+                    className="spec-factor-remove"
+                    onClick={() => handleRemoveLayer(l.id)}
+                    title={`Remove ${l.name} from the analysis`}
+                    aria-label={`Remove ${l.name}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              {onSpecEdit && (
+                <input
+                  className="spec-factor-slider"
+                  type="range"
+                  min={1}
+                  max={99}
+                  value={pcts[i]}
+                  onChange={e => handleWeightChange(l.id, Number(e.target.value))}
+                  aria-label={`Weight for ${l.name}`}
+                  title="Drag to change importance — the other factors keep their relative balance"
+                />
+              )}
+              <div className="spec-factor-meta">
+                {catchmentLabel(l)} · {(l.confidence || 'medium')} confidence
+                {l.whyItMatters ? ` · ${l.whyItMatters}` : ''}
+              </div>
+            </div>
           ))}
-        </tbody>
-      </table>}
+
+          {/* Add your own factor. Routed through the planner because a layer
+              needs a real data source, not a name the browser made up. */}
+          {onSpecEdit && onSendMessage && (
+            addingFactor ? (
+              <div className="spec-add-factor">
+                <input
+                  className="spec-add-input"
+                  type="text"
+                  autoFocus
+                  placeholder="What else matters? e.g. parking availability"
+                  value={newFactorName}
+                  onChange={e => setNewFactorName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleAddFactor();
+                    if (e.key === 'Escape') { setAddingFactor(false); setNewFactorName(''); }
+                  }}
+                />
+                <button
+                  type="button"
+                  className={`spec-dir-toggle ${newFactorDir === 'negative' ? 'is-neg' : 'is-pos'}`}
+                  onClick={() => setNewFactorDir(d => (d === 'negative' ? 'positive' : 'negative'))}
+                  title="Should more of this be better, or less?"
+                >
+                  {newFactorDir === 'negative' ? '− less is better' : '+ more is better'}
+                </button>
+                <button
+                  type="button"
+                  className="spec-add-confirm"
+                  onClick={handleAddFactor}
+                  disabled={!newFactorName.trim()}
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  className="spec-add-cancel"
+                  onClick={() => { setAddingFactor(false); setNewFactorName(''); }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="spec-add-trigger"
+                onClick={() => setAddingFactor(true)}
+              >
+                + Add a factor
+              </button>
+            )
+          )}
+        </div>
+      )}
 
       {/* ── Hard exclusions (red) ── */}
       {(spec.exclusions?.length ?? 0) > 0 && (

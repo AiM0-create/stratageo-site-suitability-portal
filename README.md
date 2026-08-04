@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.11.3 — Coastline & Quiet Detail**
+**Current version: v1.11.4 — Editable Factors** (frontend) / v1.11.3 — Coastline & Quiet Detail (backend)
 
 > One prompt → one plan → one click. Results lead with the
 > verdict, a plain-English reason, and what to do next; every technical
@@ -25,6 +25,15 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **PDF export** — client-ready screening report with basemap figure, verdict strip, constraint-status table, per-zone next validation, and a clear path to a detailed site study
 
 The product journey: **broad geography → spatial screening → priority investigation zones → detailed site/parcel validation → field and commercial due diligence.** The portal delivers the first three stages; [contact Stratageo](https://stratageo.in/contact.php) to commission the rest.
+
+---
+
+## v1.11.4 Highlights (frontend-only)
+
+- **Editing a weight no longer breaks the plan.** The weight box wrote the typed percentage straight onto the factor while the card displayed it as a share of the total — so typing `25` sent that factor to 97% and collapsed every other one to 0%. Weights are now solved properly, the other factors keep their relative balance, and displayed percentages always add to 100.
+- **Weights are sliders**, not tiny number spinners.
+- **Direction is now editable** — click `+ more is better` / `− less is better` to flip a factor. It used to be a read-only `↓` glyph.
+- **Remove a factor** with `×`, or **add your own**: type what matters ("parking availability"), pick its direction, and the planner wires up a real data source for it.
 
 ---
 
@@ -481,7 +490,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.11.3** *(current)* | Coastline & Quiet Detail — open-sea mask derived from `natural=coastline` (the ocean has no polygon in OSM, so coastal runs were returning offshore zones), applied at the same >30% area threshold with fail-safe behaviour everywhere; per-zone technical readouts and the duplicate confidence banner moved into collapsed "Score details" sections |
+| **v1.11.4** *(current, frontend)* | Editable Factors — fixes a weight editor that collapsed every other factor to 0% on a single edit; weights become sliders, direction becomes a click-to-flip toggle, factors can be removed, and new factors can be added through the planner |
+| **v1.11.3** | Coastline & Quiet Detail — open-sea mask derived from `natural=coastline` (the ocean has no polygon in OSM, so coastal runs were returning offshore zones), applied at the same >30% area threshold with fail-safe behaviour everywhere; per-zone technical readouts and the duplicate confidence banner moved into collapsed "Score details" sections |
 | **v1.11.2** | Plain Language — chat replies are conversational prose instead of Constraint/Factor tables that duplicated the plan card; "▶ Start analysis" became a quiet "Run analysis" outline button; sidebar drivers render as labelled bars rather than prose score-lists; the screening caveat is stated once instead of three times |
 | **v1.11.1** | Answer-First Sidebar — ranked zones now render immediately after the verdict instead of after ~10 collapsed diagnostic panels; map↔card click interactivity surfaced with a caption (the capability already existed, just undiscoverable); pure CSS-order reorder, no JSX relocated |
 | **v1.11.0** | Exclusion Integrity — named/coordinate exclusions were silently dropped by a schema-drift bug (SpecV2 never declared `namedExclusions`); fixed and declared, plus a regression test that fails the build if the planner ever writes an undeclared spec key again; exclusion masking now uses the place's real geocoded extent instead of a fixed circle; enforcement status promoted to a first-class result field |

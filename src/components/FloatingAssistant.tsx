@@ -296,6 +296,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 isExecuting={isExecuting}
                 onConfirmExecute={onConfirmExecute ?? (() => {})}
                 onSpecEdit={onSpecEdit}
+                onSendMessage={onRunAnalysis}
               />
             )}
 

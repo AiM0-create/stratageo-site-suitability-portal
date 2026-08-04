@@ -1507,7 +1507,8 @@ body {
 }
 .sg-legend-line-dashed { border-top-style: dashed; }
 
-/* Editable weight inputs in the spec card */
+/* Editable weight inputs in the spec card (legacy table — kept for any
+   non-editable render path) */
 .spec-weight-edit input {
   width: 34px; padding: 1px 2px; font-size: 11px; font-weight: 700;
   color: var(--blue-700, #1d4ed8); text-align: right;
@@ -1515,6 +1516,71 @@ body {
 }
 .spec-weight-edit input:hover, .spec-weight-edit input:focus {
   border-color: var(--gray-300, #cbd5e1); background: #fff; outline: none;
+}
+
+/* ── v1.11.4 — editable factor framework ──────────────────────────────────
+   Replaces the 5-column table whose weight cell was a 34px number spinner.
+   Live feedback: "changing variables is a task here, its not friendly at all,
+   also what if i want to introduce my own varible or change the +- of a
+   variable". Each factor is now a row with a drag slider, a click-to-flip
+   direction toggle and a remove button. */
+.spec-factors { margin: 6px 0; display: flex; flex-direction: column; gap: 7px; }
+.spec-factor {
+  padding: 6px 8px; border: 1px solid var(--gray-200, #e2e8f0);
+  border-radius: 6px; background: #fff;
+}
+.spec-factor.spec-row-weak-proxy { background: #fffbeb; border-color: #fde68a; }
+.spec-factor-head {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.spec-factor-name {
+  font-size: 11.5px; font-weight: 600; color: var(--gray-700, #334155);
+  flex: 1 1 auto; min-width: 0;
+}
+.spec-factor-pct {
+  font-size: 11.5px; font-weight: 700; color: var(--blue-700, #1d4ed8);
+  font-variant-numeric: tabular-nums; min-width: 30px; text-align: right;
+}
+.spec-dir-toggle {
+  font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 9px;
+  cursor: pointer; white-space: nowrap; border: 1px solid transparent;
+}
+button.spec-dir-toggle:hover { filter: brightness(0.95); }
+.spec-dir-toggle.is-pos { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+.spec-dir-toggle.is-neg { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+.spec-factor-remove {
+  border: none; background: none; cursor: pointer; padding: 0 2px;
+  font-size: 15px; line-height: 1; color: var(--gray-400, #94a3b8);
+}
+.spec-factor-remove:hover { color: #dc2626; }
+.spec-factor-slider { width: 100%; margin: 5px 0 3px; accent-color: var(--blue-600, #2563eb); }
+.spec-factor-meta { font-size: 10px; color: var(--gray-500, #64748b); line-height: 1.4; }
+
+.spec-add-trigger {
+  align-self: flex-start; padding: 4px 10px; font-size: 11.5px; font-weight: 600;
+  color: var(--blue-700, #1d4ed8); background: #fff; cursor: pointer;
+  border: 1px dashed var(--gray-300, #cbd5e1); border-radius: 6px;
+}
+.spec-add-trigger:hover { background: var(--blue-50, #eff6ff); border-color: var(--blue-600, #2563eb); }
+.spec-add-factor {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 8px; border: 1px solid var(--blue-600, #2563eb);
+  border-radius: 6px; background: var(--blue-50, #eff6ff);
+}
+.spec-add-input {
+  flex: 1 1 150px; min-width: 0; padding: 4px 7px; font-size: 11.5px;
+  border: 1px solid var(--gray-300, #cbd5e1); border-radius: 5px; background: #fff;
+}
+.spec-add-input:focus { outline: none; border-color: var(--blue-600, #2563eb); }
+.spec-add-confirm {
+  padding: 4px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  color: #fff; background: var(--blue-600, #2563eb);
+  border: 1px solid var(--blue-600, #2563eb); border-radius: 5px;
+}
+.spec-add-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+.spec-add-cancel {
+  padding: 4px 8px; font-size: 11.5px; cursor: pointer;
+  color: var(--gray-500, #64748b); background: none; border: none;
 }
 
 /* v1.6.3 — H3 grid-level picker (7/8) on the plan card */

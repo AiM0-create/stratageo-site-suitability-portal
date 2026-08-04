@@ -4,6 +4,49 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.11.4] — 2026-08-04 — Editable Factors (frontend-only)
+
+Live feedback: *"changing variables is a task here, its not friendly at all,
+also what if i want to introduce my own varible or change the +- of a
+variable, this is not handy at all."*
+
+### Fixed — editing one weight destroyed the whole framework
+- The plan card's weight input assigned the typed **percentage** directly onto
+  `layer.weight`, while the card renders `weight / sum(weights) * 100`.
+  Archetype weights are fractions summing to ~1, so typing `25` set one layer
+  to `25` against a total of ~25.65 — that factor jumped to 97% and **every
+  other factor collapsed to 0%**. That is exactly the `00% / 0% / 0% / 0%` in
+  the reported screenshot: a single edit wrecked the plan.
+- `setLayerWeightPercent()` now solves `w / (w + rest) = pct/100` for the
+  edited layer, holding every other weight fixed so their ratios to each other
+  are preserved — which is what the tooltip ("others renormalize
+  proportionally") always claimed. Input is clamped to 1–99%, and no layer can
+  reach zero (the backend validator requires `weight > 0`).
+- **Displayed percentages now always total 100.** Rounding each share
+  independently gave `41 + 29 + 29 = 99`; shares are apportioned by
+  largest-remainder instead.
+
+### Added — the editing affordances that were missing
+- **Weight is a slider**, not a 34px number spinner — drag it.
+- **Direction is a click-to-flip toggle**: `+ more is better` ⇄
+  `− less is better`. Previously direction was a read-only `↓` glyph with no
+  way to change it.
+- **Remove a factor** with an `×` (never the last one — the backend requires at
+  least one layer).
+- **Add your own factor**: type what matters ("parking availability"), pick its
+  direction, and it goes to the planner. Adding a factor is deliberately *not*
+  a pure client-side edit — a layer needs a real data source (OSM tags / Places
+  types) and a catchment, and inventing those in the browser would produce a
+  layer that matches nothing or silently measures the wrong thing.
+
+### Added — tests
+- `src/__tests__/factorEditing.test.ts` (24 tests): the collapse-to-0%
+  regression, ratio preservation, clamping, repeated-edit stability,
+  largest-remainder apportionment, direction toggle, removal guards, and the
+  add-factor prompt.
+
+---
+
 ## [1.11.3] — 2026-08-04 — Coastline & Quiet Detail
 
 Live run: a South Mumbai gym analysis returned candidate zones sitting in the
