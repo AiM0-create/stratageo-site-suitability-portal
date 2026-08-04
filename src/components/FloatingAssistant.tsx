@@ -361,7 +361,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 className="assistant-start-btn"
                 onClick={() => onConfirmExecute()}
               >
-                ▶ Start analysis
+                Run analysis
               </button>
             </div>
           )}

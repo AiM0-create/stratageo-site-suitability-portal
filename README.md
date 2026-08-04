@@ -4,9 +4,9 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.11.1 — Answer-First Sidebar** (frontend) / v1.11.0 — Exclusion Integrity (backend)
+**Current version: v1.11.2 — Plain Language**
 
-> One prompt → one plan → press ▶ Start analysis. Results lead with the
+> One prompt → one plan → one click. Results lead with the
 > verdict, a plain-English reason, and what to do next; every technical
 > diagnostic is one click away behind "Technical diagnostics".
 
@@ -25,6 +25,15 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **PDF export** — client-ready screening report with basemap figure, verdict strip, constraint-status table, per-zone next validation, and a clear path to a detailed site study
 
 The product journey: **broad geography → spatial screening → priority investigation zones → detailed site/parcel validation → field and commercial due diligence.** The portal delivers the first three stages; [contact Stratageo](https://stratageo.in/contact.php) to commission the rest.
+
+---
+
+## v1.11.2 Highlights
+
+- **The chat talks like a person.** Plan replies are prose plus a few plain bullets — no headers, no Constraint/Factor tables restating what the plan card already shows. It says what it'll weigh most in real-world words, what it can't verify from map data, and closes with a varied natural line instead of a scripted one.
+- **The run control is quiet.** "▶ Start analysis" is now just "Run analysis", a small outline button rather than a full-width blue slab. Same click, far less shouting.
+- **The sidebar is scannable instead of readable.** The top of the panel leads with the zone name and its score, and the drivers behind it render as labelled bars you take in at a glance — replacing prose like "Strong road / transit accessibility (9.8/10) · Strong demand density proxy (6.1/10)". Bar labels are direction-aware ("Competitor saturation — low nearby"), so no legend is needed.
+- **The screening caveat is stated once, not three times.** It used to appear in the verdict banner, the header footer, and a separate disclaimer box; it now sits in one line above the zone list.
 
 ---
 
@@ -465,7 +474,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.11.1** *(current, frontend)* | Answer-First Sidebar — ranked zones now render immediately after the verdict instead of after ~10 collapsed diagnostic panels; map↔card click interactivity surfaced with a caption (the capability already existed, just undiscoverable); pure CSS-order reorder, no JSX relocated |
+| **v1.11.2** *(current)* | Plain Language — chat replies are conversational prose instead of Constraint/Factor tables that duplicated the plan card; "▶ Start analysis" became a quiet "Run analysis" outline button; sidebar drivers render as labelled bars rather than prose score-lists; the screening caveat is stated once instead of three times |
+| **v1.11.1** | Answer-First Sidebar — ranked zones now render immediately after the verdict instead of after ~10 collapsed diagnostic panels; map↔card click interactivity surfaced with a caption (the capability already existed, just undiscoverable); pure CSS-order reorder, no JSX relocated |
 | **v1.11.0** | Exclusion Integrity — named/coordinate exclusions were silently dropped by a schema-drift bug (SpecV2 never declared `namedExclusions`); fixed and declared, plus a regression test that fails the build if the planner ever writes an undeclared spec key again; exclusion masking now uses the place's real geocoded extent instead of a fixed circle; enforcement status promoted to a first-class result field |
 | **v1.10.0** | Sensible Output — adaptive grid resolution (small localities refine to a rankable surface), adaptive candidate separation (top-N actually returned on compact areas), narrative discipline (2-3 plain sentences, no score dumps), natural colleague-tone chat replies, analyst narrative opt-in behind an expander; fixes the silently-broken explanation pass |
 | **v1.9.0** | Frictionless & Simple — route-gate pre-mask (candidates selected inside required proximity gates, fixing false "no reliable recommendation"), anchor double-encoding guard, plain-English `plainReason` + suggestions on every withheld result, Run button on any valid spec (one prompt → one plan, no "type run"), simple-first results drawer with all diagnostics behind one expander |

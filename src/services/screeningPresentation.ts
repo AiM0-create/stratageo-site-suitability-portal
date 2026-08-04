@@ -34,6 +34,49 @@ export function topEvidenceReasons(loc: LocationData, n = 3): string[] {
   return reasons;
 }
 
+/** v1.11.2 — a factor reduced to something the eye can read without parsing a
+ * sentence. Live feedback: "still a lot of info which I really have to READ to
+ * understand what's going on". `topEvidenceReasons` returns prose like
+ * "Strong road / transit accessibility (9.8/10) · Strong demand density proxy
+ * (6.1/10)" — accurate, but it has to be read word by word. The same facts as
+ * {label, score, tone} render as a labelled bar the user takes in at a glance.
+ * No new data, no recomputation — a presentation projection of the same
+ * criteria the prose was built from. */
+export interface FactorSignal {
+  label: string;                 // plain, direction-aware ("Road / transit access")
+  score: number;                 // 0-10, already direction-corrected by the engine
+  tone: 'good' | 'mixed' | 'weak';
+}
+
+export function topFactorSignals(loc: LocationData, n = 3): FactorSignal[] {
+  return (loc.criteria_breakdown ?? [])
+    .filter(c => c.score !== null && c.score !== undefined)
+    .sort((a, b) => (b.score! * b.weight) - (a.score! * a.weight))
+    .slice(0, n)
+    .map(c => ({
+      label: signalLabel(c),
+      score: c.score!,
+      tone: c.score! >= 6.5 ? 'good' : c.score! >= 4.0 ? 'mixed' : 'weak',
+    }));
+}
+
+/** Direction-aware plain label — says what the score MEANS on the ground, so
+ * the bar needs no legend ("Rivals nearby" reads correctly whether the raw
+ * factor was inverted or not). */
+function signalLabel(c: MCDACriteria): string {
+  // Strip trailing analyst jargon repeatedly: "Demand density proxy" → "Demand".
+  // Never strip down to nothing — a factor named only "Score" keeps its name.
+  let name = c.name.trim();
+  for (;;) {
+    const next = name.replace(/\s*(proxy|density|index|score)\s*$/i, '').trim();
+    if (!next || next === name) break;
+    name = next;
+  }
+  if (c.scoringCurve === 'target_band') return `${name} — balance`;
+  if (c.direction === 'negative') return `${name} — low nearby`;
+  return name;
+}
+
 /** One factor phrased in its real-world direction (never raw score-speak). */
 function phraseCriterion(c: MCDACriteria): string {
   const s = c.score!.toFixed(1);

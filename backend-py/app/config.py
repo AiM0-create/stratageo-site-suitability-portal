@@ -324,6 +324,29 @@ v1.11.0: Exclusion Integrity (live failure: "exclude my existing areas in
   floor), with a 12 km coarse-match cap so a city-level geocode can't wipe the
   study area. Enforcement is now a first-class payload field
   (exclusionsApplied / exclusionsUnenforced), not a buried diagnostics note.
+v1.11.2: Plain Language (live feedback: "can we make the chatting more organic
+  and start analysis more subtle, also still a lot of info which I really have
+  to read to understand what's going on in the sidebar").
+  (1) Chat tone — the framework reply is now prose plus a few plain bullets
+  instead of a Constraint table + a 6-column Factor table. The chat no longer
+  duplicates what the plan card already renders (weights, directions,
+  confidence, scenarios all live in the spec block); it says in real-world
+  words what will be weighed most and what can't be verified from map data.
+  No section headers, no tables unless the user explicitly asks for weights or
+  methodology, ~10-line budget, and a varied natural closing line that never
+  names or draws the Start button.
+  (2) Start-analysis affordance — label "▶ Start analysis" → "Run analysis",
+  restyled from a full-width solid-blue slab to a quiet right-aligned outline
+  button. Same single click, same always-visible placement; it just no longer
+  reads as the loudest element on screen.
+  (3) Sidebar scannability — the executive header leads with the zone name and
+  score, and the top drivers render as labelled bars (topFactorSignals) rather
+  than a prose run-on ("Strong road / transit accessibility (9.8/10) · Strong
+  demand density proxy (6.1/10) · …"). Per-zone cards use the same bars. The
+  screening-claim caveat, previously stated three times (verdict banner, exec
+  header footer, disclaimer box), is now stated once above the zone list; the
+  verdict banner is a compact chip. Pure presentation — no scoring, ranking or
+  claim-level semantics changed.
 """
 from functools import lru_cache
 from typing import Literal
@@ -331,9 +354,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.11.0"
+APP_VERSION     = "1.11.2"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00075"
+ENGINE_VERSION  = "stratageo-engine-00076"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -346,7 +369,7 @@ ENGINE_VERSION  = "stratageo-engine-00075"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Exclusion Integrity (named-exclusion schema drift + extent-based masking)"
+RELEASE_NAME    = "Plain Language (organic chat, subtle run control, scannable sidebar)"
 
 
 class Settings(BaseSettings):

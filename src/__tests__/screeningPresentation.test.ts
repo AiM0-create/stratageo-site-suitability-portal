@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   topEvidenceReasons, keyRisk, computeRankDeltas,
   buildExecutiveSummary, buildMethodologyComparison, buildCopySummary,
+  topFactorSignals,
 } from '../services/screeningPresentation';
 import type { AnalysisResult, LocationData } from '../types';
 
@@ -169,5 +170,68 @@ describe('buildCopySummary (§7 CTA)', () => {
     expect(text).toContain('Verify rent');
     expect(text).toContain('abc12345');
     expect(text).toContain('not verified properties');
+  });
+});
+
+// v1.11.2 — the scannable projection behind the sidebar's factor bars.
+// Live feedback: "still a lot of info which I really have to read to
+// understand what's going on". Same criteria the prose was built from,
+// reduced to {label, score, tone} so the UI can draw a bar instead of a
+// sentence the user has to parse word by word.
+describe('topFactorSignals (v1.11.2 scannable drivers)', () => {
+  it('orders by weighted contribution and caps at n', () => {
+    const signals = topFactorSignals(loc('Z', 7, [
+      crit('Road access', 6.0, 0.1),
+      crit('Residential demand', 9.0, 0.5),
+      crit('Footfall', 7.0, 0.3),
+      crit('Parking', 5.0, 0.05),
+    ]), 3);
+    expect(signals).toHaveLength(3);
+    expect(signals[0].label).toBe('Residential demand');
+    expect(signals.map(s => s.label)).not.toContain('Parking');
+  });
+
+  it('labels a negative factor so the bar needs no legend', () => {
+    // Engine pre-inverts negatives: a HIGH score means LITTLE of it nearby.
+    const [s] = topFactorSignals(loc('Z', 7, [
+      crit('Competitor saturation', 8.0, 0.5, 'negative'),
+    ]));
+    expect(s.label).toBe('Competitor saturation — low nearby');
+    expect(s.score).toBe(8.0);
+  });
+
+  it('labels a target-band factor as balance, never "low"', () => {
+    const [s] = topFactorSignals(loc('Z', 7, [
+      crit('Competitor saturation', 8.0, 0.5, 'negative', { scoringCurve: 'target_band' }),
+    ]));
+    expect(s.label).toBe('Competitor saturation — balance');
+    expect(s.label).not.toMatch(/low/i);
+  });
+
+  it('strips noise suffixes so labels read plainly', () => {
+    const [s] = topFactorSignals(loc('Z', 7, [crit('Demand density proxy', 7.0, 0.5)]));
+    expect(s.label).toBe('Demand');
+  });
+
+  it('tones map to the traffic-light the bar colours use', () => {
+    const signals = topFactorSignals(loc('Z', 7, [
+      crit('A', 8.0, 0.4), crit('B', 5.0, 0.3), crit('C', 2.0, 0.3),
+    ]), 3);
+    expect(signals.find(s => s.label === 'A')!.tone).toBe('good');
+    expect(signals.find(s => s.label === 'B')!.tone).toBe('mixed');
+    expect(signals.find(s => s.label === 'C')!.tone).toBe('weak');
+  });
+
+  it('skips factors with no data rather than scoring them zero', () => {
+    const signals = topFactorSignals(loc('Z', 7, [
+      crit('Has data', 6.0, 0.3),
+      crit('No data', null, 0.7),
+    ]), 3);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].label).toBe('Has data');
+  });
+
+  it('returns an empty list for a zone with no breakdown', () => {
+    expect(topFactorSignals(loc('Z', 7, []))).toEqual([]);
   });
 });

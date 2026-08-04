@@ -368,7 +368,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
           onClick={() => onConfirmExecute()}
           disabled={isExecuting}
         >
-          {isExecuting ? 'Running analysis…' : '▶ Start analysis'}
+          {isExecuting ? 'Running analysis…' : 'Run analysis'}
         </button>
       )}
     </div>

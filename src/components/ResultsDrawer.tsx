@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { compareToBenchmark } from '../services/benchmarks';
 import {
   buildExecutiveSummary, topEvidenceReasons, keyRisk, computeRankDeltas,
-  buildCopySummary, type MethodologyComparison,
+  buildCopySummary, topFactorSignals, type MethodologyComparison,
 } from '../services/screeningPresentation';
 import { config } from '../config';
 
@@ -420,48 +420,68 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             padding: '10px 12px', marginBottom: 10, fontSize: '12.5px',
             color: '#0c4a6e', lineHeight: 1.5,
           }}>
-            <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: 3 }}>
-              {execSummary.eligibleCells !== null
-                ? <>Screened {execSummary.screenedCells} {execSummary.screenedCells === 1 ? 'grid cell' : 'grid cells'} ({execSummary.eligibleCells} eligible) </>
-                : <>Screened the study area </>}
-              for {execSummary.businessType || 'this brief'}
-              {execSummary.targetLocation ? <> in {execSummary.targetLocation}</> : null}.
-            </div>
-            <div style={{ marginBottom: 2 }}>
-              <b>Top zone:</b> {execSummary.topZoneName}
+            {/* v1.11.2 — SCANNABLE, not readable. Live feedback: "still a lot
+                of info which I really have to read to understand what's going
+                on". The same computed values, restructured so the eye lands on
+                the answer first: zone name big, score as a number, drivers as
+                labelled bars instead of a prose run-on. Nothing new is claimed
+                and nothing was dropped — only the caveat/claim-level line, which
+                is now stated once above the zone list instead of three times. */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, fontSize: '16px', color: '#0c4a6e' }}>
+                {execSummary.topZoneName}
+              </span>
+              {execSummary.topZoneScore !== null && (
+                <span style={{ fontWeight: 700, fontSize: '15px', color: '#0369a1' }}>
+                  {execSummary.topZoneScore.toFixed(1)}<span style={{ fontSize: '11px', color: '#64748b' }}>/10</span>
+                </span>
+              )}
               {execSummary.topZoneVerdict && (
                 <span style={{
-                  marginLeft: 6, padding: '1px 7px', borderRadius: 9, fontSize: '10.5px',
+                  padding: '1px 7px', borderRadius: 9, fontSize: '10.5px',
                   fontWeight: 700, background: execSummary.topZoneVerdict === 'Priority' ? '#dcfce7' : '#fef3c7',
                   color: execSummary.topZoneVerdict === 'Priority' ? '#166534' : '#92400e',
                 }}>{execSummary.topZoneVerdict}</span>
               )}
-              {execSummary.topZoneScore !== null && (
-                <span style={{ marginLeft: 6, color: '#0369a1' }}>
-                  screening fit {execSummary.topZoneScore.toFixed(1)}/10
-                </span>
-              )}
-              {execSummary.confidenceLevel && (
-                <span style={{ marginLeft: 6, color: '#475569' }}>
-                  · confidence {execSummary.confidenceLevel}
-                </span>
-              )}
             </div>
-            {execSummary.reasons.length > 0 && (
-              <div style={{ marginBottom: 2 }}>
-                <b>Why it stands out:</b> {execSummary.reasons.join(' · ')}
-              </div>
-            )}
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: 1, marginBottom: 6 }}>
+              best of {execSummary.eligibleCells !== null ? execSummary.eligibleCells : 'the'} eligible
+              {execSummary.eligibleCells !== null && execSummary.screenedCells !== null
+                ? <> of {execSummary.screenedCells} screened</> : null}
+              {execSummary.confidenceLevel ? <> · {execSummary.confidenceLevel.toLowerCase()} confidence</> : null}
+            </div>
+
+            {/* Drivers as bars — read at a glance, no sentence parsing */}
+            {(() => {
+              const signals = ranked[0] ? topFactorSignals(ranked[0], 3) : [];
+              if (signals.length === 0) return null;
+              const barColor = (t: string) =>
+                t === 'good' ? '#059669' : t === 'mixed' ? '#d97706' : '#dc2626';
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 6 }}>
+                  {signals.map((s, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px' }}>
+                      <span style={{ flex: '0 0 42%', color: '#334155' }}>{s.label}</span>
+                      <span style={{ flex: 1, height: 5, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                        <span style={{
+                          display: 'block', height: '100%', width: `${Math.max(0, Math.min(10, s.score)) * 10}%`,
+                          background: barColor(s.tone),
+                        }} />
+                      </span>
+                      <span style={{ flex: '0 0 26px', textAlign: 'right', color: '#475569', fontVariantNumeric: 'tabular-nums' }}>
+                        {s.score.toFixed(1)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             {execSummary.criticalNextCheck && (
-              <div style={{ color: '#92400e' }}>
-                <b>Critical next check:</b> {execSummary.criticalNextCheck}
+              <div style={{ color: '#92400e', fontSize: '11.5px' }}>
+                <b>Next check:</b> {execSummary.criticalNextCheck}
               </div>
             )}
-            <div style={{ marginTop: 3, fontSize: '11px', color: '#64748b' }}>
-              Output type: {execSummary.claimLevel.replace(/_/g, ' ')}
-              {execSummary.spatialScale ? <> · scale: {execSummary.spatialScale.replace(/_/g, ' ')}</> : null}
-              {' '}— screening result, not a verified property.
-            </div>
           </div>
         )}
 
@@ -493,13 +513,20 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
         )}
 
         {/* v1.5-Lite — analysis-level investigation verdict badge */}
+        {/* v1.11.2 — compact chip, not a full-width bold slab. The same verdict,
+            but it no longer competes with the zone name for attention (and no
+            longer restates "field validation required", which the line above the
+            zone list already says once). */}
         {analysisRecoMeta && (
-          <div style={{
-            background: analysisRecoMeta.bg, border: `1px solid ${analysisRecoMeta.border}`,
-            color: analysisRecoMeta.color, borderRadius: 6, padding: '7px 12px',
-            fontSize: '13px', fontWeight: 700, marginBottom: 8,
-          }}>
-            {analysisRecoMeta.text}
+          <div style={{ marginBottom: 8 }}>
+            <span style={{
+              display: 'inline-block',
+              background: analysisRecoMeta.bg, border: `1px solid ${analysisRecoMeta.border}`,
+              color: analysisRecoMeta.color, borderRadius: 9, padding: '2px 9px',
+              fontSize: '11px', fontWeight: 700,
+            }}>
+              {analysisRecoMeta.text.split('—')[0].trim()}
+            </span>
           </div>
         )}
 
@@ -625,9 +652,9 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             to surface the map/card click interaction, which already existed
             (MapView flies to a zone on card click and vice versa) but was
             undiscoverable this far down the sidebar. */}
-        <div style={{ order: 11, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#64748b', marginBottom: 8 }}>
-          <b>Screening-level candidate zones</b> — H3 micro-market areas, not exact parcels or leasable sites. Field validation required before any leasing or investment decision.
-          {' '}Click a zone or a map pin to focus the other.
+        <div style={{ order: 11, fontSize: '11px', color: '#64748b', margin: '2px 0 6px', lineHeight: 1.5 }}>
+          Areas to investigate, not exact sites — confirm on the ground before
+          committing. Click a zone or a map pin to focus the other.
         </div>
 
         {/* ── v1.9.0 — SIMPLE-FIRST: every diagnostic panel below lives behind
@@ -1502,21 +1529,37 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 {/* vNext (v1.8.0) — decision hierarchy (§6.2): evidence-backed
                     reasons, key risk, and the required next validation lead;
                     the factor wall stays in the expander. */}
+                {/* v1.11.2 — per-zone drivers as bars rather than a "Why:
+                    Strong x (9.8/10) · Strong y (6.1/10) · …" run-on. Risk and
+                    next check stay as one short line each. */}
                 {!loc.excluded && !raw && (() => {
-                  const reasons = topEvidenceReasons(loc, 3);
+                  const signals = topFactorSignals(loc, 3);
                   const risk = keyRisk(loc);
                   const nextCheck = loc.nextValidation?.[0];
-                  if (reasons.length === 0 && !risk && !nextCheck) return null;
+                  if (signals.length === 0 && !risk && !nextCheck) return null;
+                  const barColor = (t: string) =>
+                    t === 'good' ? '#059669' : t === 'mixed' ? '#d97706' : '#dc2626';
                   return (
-                    <div style={{ margin: '4px 12px 0', fontSize: '11.5px', color: '#334155', lineHeight: 1.5 }}>
-                      {reasons.length > 0 && (
-                        <div><b style={{ color: '#166534' }}>Why:</b> {reasons.join(' · ')}</div>
-                      )}
+                    <div style={{ margin: '4px 12px 0', fontSize: '11px', color: '#334155', lineHeight: 1.5 }}>
+                      {signals.map((s, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ flex: '0 0 42%', color: '#475569' }}>{s.label}</span>
+                          <span style={{ flex: 1, height: 4, background: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
+                            <span style={{
+                              display: 'block', height: '100%', width: `${Math.max(0, Math.min(10, s.score)) * 10}%`,
+                              background: barColor(s.tone),
+                            }} />
+                          </span>
+                          <span style={{ flex: '0 0 24px', textAlign: 'right', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                            {s.score.toFixed(1)}
+                          </span>
+                        </div>
+                      ))}
                       {risk && (
-                        <div><b style={{ color: '#92400e' }}>Key risk:</b> {risk}</div>
+                        <div style={{ marginTop: 2 }}><b style={{ color: '#92400e' }}>Watch:</b> {risk}</div>
                       )}
                       {nextCheck && (
-                        <div><b style={{ color: '#0369a1' }}>Next validation:</b> {nextCheck}</div>
+                        <div><b style={{ color: '#0369a1' }}>Next:</b> {nextCheck}</div>
                       )}
                     </div>
                   );

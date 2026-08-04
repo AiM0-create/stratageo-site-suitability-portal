@@ -274,12 +274,23 @@ body {
   padding: 8px 12px; border-top: 1px solid var(--gray-200);
   flex-shrink: 0;
 }
+/* v1.11.2 — SUBTLE by request: this used to be a full-width solid-blue
+   ▶-prefixed slab that read as the loudest thing on screen and made the flow
+   feel like a wizard step. It's now a quiet right-aligned outline button —
+   still one click, still always visible, just no longer shouting. */
 .assistant-start-btn {
-  width: 100%; padding: 9px 12px; border: none; border-radius: var(--radius);
-  background: var(--blue-600); color: #fff; font-size: 13px; font-weight: 700;
-  cursor: pointer; transition: background 0.15s;
+  display: block; margin-left: auto;
+  padding: 6px 14px; border-radius: var(--radius);
+  border: 1px solid var(--gray-300, #cbd5e1);
+  background: #fff; color: var(--gray-700, #334155);
+  font-size: 12.5px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.assistant-start-btn:hover { background: var(--blue-700, #1d4ed8); }
+.assistant-start-btn:hover {
+  background: var(--blue-50, #eff6ff);
+  border-color: var(--blue-600, #2563eb);
+  color: var(--blue-700, #1d4ed8);
+}
 
 /* v1.4.2 — Retry button shown after a failed analysis */
 .assistant-retry-row { margin-top: 6px; }

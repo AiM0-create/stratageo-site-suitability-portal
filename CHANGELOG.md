@@ -4,6 +4,54 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.11.2] — 2026-08-04 — Plain Language
+
+Live feedback: *"can we make the chatting more organic and start analysis more
+subtle, also still a lot of info which I really have to read to understand
+what's going on in the sidebar as output."*
+
+### Changed — the chat talks instead of filing a report
+- The framework reply is now **prose plus a few plain bullets**, not a
+  Constraints table followed by a six-column Factor table. The chat no longer
+  duplicates what the plan card beside it already renders — weights,
+  directions, confidence levels, scenarios and validation all stay in the spec
+  block. It says, in real-world words, what will be weighed most and what
+  can't be checked from map data.
+- **No headers, no tables by default** (tables only when the user explicitly
+  asks for weights or methodology), ~10-line budget, and a **varied natural
+  closing line** instead of the fixed "Adjust anything above, or press
+  ▶ Start analysis." The model is now told never to name or draw the button.
+- Weight tweaks reply with a sentence ("Bumped competition up and eased off on
+  parking."), not a diff table. Feasibility conflicts are always
+  conversational, at every stage.
+
+### Changed — the run control stops shouting
+- "▶ Start analysis" → **"Run analysis"**, restyled from a full-width
+  solid-blue slab to a quiet right-aligned outline button. Same single click,
+  same always-visible placement, no longer the loudest thing on screen.
+
+### Changed — the sidebar is scannable, not readable
+- The executive header leads with the **zone name and score**, and the top
+  drivers render as **labelled bars** (`topFactorSignals`) instead of a prose
+  run-on ("Strong road / transit accessibility (9.8/10) · Strong demand
+  density proxy (6.1/10) · …"). Per-zone cards use the same bars.
+- Bar labels are direction-aware and jargon-stripped, so the bar needs no
+  legend: "Competitor saturation — low nearby", "Demand density proxy" →
+  "Demand", target-band factors read "— balance", never "low".
+- The screening-claim caveat, previously stated **three times** (verdict
+  banner, exec-header footer, disclaimer box), is now stated **once** above the
+  zone list; the verdict banner is a compact chip.
+- Pure presentation: no scoring, ranking, claim-level or confidence semantics
+  changed. `topEvidenceReasons` is retained and still backs the PDF/copy
+  summary.
+
+### Added
+- `topFactorSignals()` + 7 tests covering ordering by weighted contribution,
+  direction-aware labels, target-band labelling, jargon stripping, tone
+  thresholds, and no-data factors being skipped rather than scored zero.
+
+---
+
 ## [1.11.1] — 2026-08-03 — Answer-First Sidebar (frontend-only)
 
 Live feedback on the same run: "why are we not making it simple and
