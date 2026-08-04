@@ -347,6 +347,34 @@ v1.11.2: Plain Language (live feedback: "can we make the chatting more organic
   header footer, disclaimer box), is now stated once above the zone list; the
   verdict banner is a compact chip. Pure presentation — no scoring, ranking or
   claim-level semantics changed.
+v1.11.3: Coastline & Quiet Detail (live run: a South Mumbai gym analysis put
+  candidate zones in the Arabian Sea off Malabar Point).
+  (1) OPEN-SEA MASK — the water mask fetched natural=water / waterway=*, which
+  covers rivers, lakes, docks and ponds because those are mapped as AREAS. The
+  ocean is NOT a polygon in OpenStreetMap: it is defined implicitly by
+  natural=coastline ways, so a coastal city fetched zero geometry for the sea
+  and every offshore hex survived the mask. Adding the tag alone would not have
+  helped — a coastline is an OPEN line that never polygonizes into a ring.
+  water.build_sea_polygons() now cuts the study bbox with the merged coastline
+  and labels each resulting face using OSM's convention that LAND lies on the
+  LEFT of a coastline way and SEA on its RIGHT (verified by a test that
+  reverses the way direction and asserts the sea side flips).
+  sea_overlap_mask() then applies the same >30% area threshold used for inland
+  water, so genuine waterfront cells that are mostly land are kept and only
+  offshore cells are removed. Fail-safe throughout: no coastline, a coastline
+  that does not divide the area, a degenerate bbox, or an undecidable face vote
+  all mask NOTHING — wrongly masking land would delete valid candidates, which
+  is worse than missing some sea. Reported as maskStats["seaOverlapRemoved"].
+  (2) QUIET DETAIL — per the same feedback ("keep the confidence why and all
+  the technical explanation in collapsed tabs below"), the standalone
+  confidence banner is gone on normal results (the executive header subline
+  already states the level; the merge rationale stays in Technical
+  diagnostics) and is retained only when the ranking is withheld, where the
+  header does not render. Per-zone cards no longer stack confidence label,
+  ranking stability, score band, screening→refined delta and the R/V/C pills
+  in the score column; all five moved into that card's expander under "Score
+  details", relabelled in words ("Rank vs peers", "Absolute viability", "Data
+  confidence") instead of "R:10.0 V:7.4 C:8.1". Nothing removed, one click away.
 """
 from functools import lru_cache
 from typing import Literal
@@ -354,9 +382,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.11.2"
+APP_VERSION     = "1.11.3"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00076"
+ENGINE_VERSION  = "stratageo-engine-00077"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -369,7 +397,7 @@ ENGINE_VERSION  = "stratageo-engine-00076"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Plain Language (organic chat, subtle run control, scannable sidebar)"
+RELEASE_NAME    = "Coastline & Quiet Detail (open-sea mask, collapsed technical readouts)"
 
 
 class Settings(BaseSettings):

@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.11.2 — Plain Language**
+**Current version: v1.11.3 — Coastline & Quiet Detail**
 
 > One prompt → one plan → one click. Results lead with the
 > verdict, a plain-English reason, and what to do next; every technical
@@ -25,6 +25,13 @@ Tell it something like *"Find top 5 dark kitchen locations near Ballygunge Phari
 - **PDF export** — client-ready screening report with basemap figure, verdict strip, constraint-status table, per-zone next validation, and a clear path to a detailed site study
 
 The product journey: **broad geography → spatial screening → priority investigation zones → detailed site/parcel validation → field and commercial due diligence.** The portal delivers the first three stages; [contact Stratageo](https://stratageo.in/contact.php) to commission the rest.
+
+---
+
+## v1.11.3 Highlights
+
+- **Candidate zones can no longer land in the sea.** A South Mumbai run put zones in the Arabian Sea: the water mask covered rivers, lakes and docks (all mapped as areas in OSM) but **the ocean isn't a polygon** — it's defined only by `natural=coastline` ways. The engine now derives sea polygons from the coastline using OSM's land-on-the-left convention, and masks cells that are more than 30% open sea. Genuine waterfront zones survive; only offshore cells are dropped, and every ambiguous case masks nothing rather than risk deleting valid land.
+- **Technical readouts moved into collapsed sections.** The duplicate confidence banner is gone from normal results (the header already says the level), and each zone card's confidence / stability / score-band / screening-vs-refined / R-V-C pills now live under a **"Score details"** toggle inside that card — relabelled in words instead of `R:10.0 V:7.4 C:8.1`. Nothing removed, one click away.
 
 ---
 
@@ -474,7 +481,8 @@ Full detail for every release lives in [`CHANGELOG.md`](CHANGELOG.md); this is a
 
 | Version | Highlights |
 |---|---|
-| **v1.11.2** *(current)* | Plain Language — chat replies are conversational prose instead of Constraint/Factor tables that duplicated the plan card; "▶ Start analysis" became a quiet "Run analysis" outline button; sidebar drivers render as labelled bars rather than prose score-lists; the screening caveat is stated once instead of three times |
+| **v1.11.3** *(current)* | Coastline & Quiet Detail — open-sea mask derived from `natural=coastline` (the ocean has no polygon in OSM, so coastal runs were returning offshore zones), applied at the same >30% area threshold with fail-safe behaviour everywhere; per-zone technical readouts and the duplicate confidence banner moved into collapsed "Score details" sections |
+| **v1.11.2** | Plain Language — chat replies are conversational prose instead of Constraint/Factor tables that duplicated the plan card; "▶ Start analysis" became a quiet "Run analysis" outline button; sidebar drivers render as labelled bars rather than prose score-lists; the screening caveat is stated once instead of three times |
 | **v1.11.1** | Answer-First Sidebar — ranked zones now render immediately after the verdict instead of after ~10 collapsed diagnostic panels; map↔card click interactivity surfaced with a caption (the capability already existed, just undiscoverable); pure CSS-order reorder, no JSX relocated |
 | **v1.11.0** | Exclusion Integrity — named/coordinate exclusions were silently dropped by a schema-drift bug (SpecV2 never declared `namedExclusions`); fixed and declared, plus a regression test that fails the build if the planner ever writes an undeclared spec key again; exclusion masking now uses the place's real geocoded extent instead of a fixed circle; enforcement status promoted to a first-class result field |
 | **v1.10.0** | Sensible Output — adaptive grid resolution (small localities refine to a rankable surface), adaptive candidate separation (top-N actually returned on compact areas), narrative discipline (2-3 plain sentences, no score dumps), natural colleague-tone chat replies, analyst narrative opt-in behind an expander; fixes the silently-broken explanation pass |

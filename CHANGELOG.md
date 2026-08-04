@@ -4,6 +4,52 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.11.3] — 2026-08-04 — Coastline & Quiet Detail
+
+Live run: a South Mumbai gym analysis returned candidate zones sitting in the
+**Arabian Sea** off Malabar Point. Same run, second note: *"keep the confidence
+why and all the technical explanation and stuff in collapsed tabs below."*
+
+### Fixed — the open sea is now excluded
+- **The ocean is not a polygon in OpenStreetMap.** The water mask fetched
+  `natural=water` / `waterway=*`, which covers rivers, lakes, docks and ponds
+  because those are mapped as *areas*. The sea is defined implicitly by
+  `natural=coastline` ways, so a coastal city fetched **zero** geometry for the
+  sea itself and every offshore hex sailed through the mask. Adding the tag
+  alone would not have fixed it either — a coastline is an *open* line that
+  never polygonizes into a ring, so the existing polygon builder would still
+  have produced nothing.
+- `water.build_sea_polygons()` cuts the study bbox with the merged coastline
+  and labels each resulting face using OSM's convention that **land lies on the
+  left** of a coastline way and sea on its right. A regression test reverses the
+  way direction and asserts the sea side flips, so the rule is provably applied
+  rather than accidentally correct.
+- `sea_overlap_mask()` applies the **same >30% area threshold** as inland water:
+  a genuine waterfront zone that is mostly land is kept, only offshore cells are
+  removed. Reported as `maskStats["seaOverlapRemoved"]` with a run note.
+- **Fail-safe throughout.** No coastline, a coastline that doesn't divide the
+  area, a degenerate bbox, or an undecidable face vote all mask *nothing*.
+  Wrongly masking land would delete valid candidates — worse than missing sea.
+
+### Changed — technical readouts moved into collapsed sections
+- The standalone **confidence banner is gone on normal results**: the executive
+  header subline already states the level ("… · medium confidence"), and the
+  conservative-merge rationale already lives in Technical diagnostics. It is
+  retained when the ranking is *withheld*, since the header doesn't render then.
+- **Per-zone cards no longer stack five technical readouts** in the score
+  column — confidence label, ranking stability, score band, the
+  screening→refined delta and the `R:10.0 V:7.4 C:8.1` pills. All five moved
+  into that card's expander under **"Score details"**, relabelled in words
+  ("Rank vs peers", "Absolute viability", "Data confidence"). Nothing was
+  removed; it's one click away.
+
+### Added
+- `backend-py/tests/test_v1113_sea_mask.py` (13 tests): coastline-direction
+  rule, direction-reversal flip, offshore-masked/inland-kept, the waterfront
+  threshold, and every fail-safe path.
+
+---
+
 ## [1.11.2] — 2026-08-04 — Plain Language
 
 Live feedback: *"can we make the chatting more organic and start analysis more

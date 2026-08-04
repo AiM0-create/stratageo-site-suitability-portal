@@ -534,7 +534,16 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             previous experience of three independent signals that could (and
             did) disagree without explanation; the merge is conservative and
             the reason explains any disagreement instead of hiding it. */}
-        {(result as any).unifiedConfidence && (() => {
+        {/* v1.11.3 — shown ONLY when the ranking is withheld. On a normal
+            result the executive header already states the confidence level on
+            its subline ("best of 13 eligible of 43 screened · medium
+            confidence"), so this banner was a second copy of the same word plus
+            a "why?" link — and the user asked for the why and every technical
+            explanation to live in the collapsed sections below. The full
+            conservative-merge rationale is in Technical diagnostics. When the
+            ranking IS withheld the executive header does not render, so the
+            banner remains the only place confidence appears. */}
+        {withheld && (result as any).unifiedConfidence && (() => {
           const uc = (result as any).unifiedConfidence as { level: string; reason: string };
           const meta = uc.level === 'High'
             ? { bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' }
@@ -1435,66 +1444,14 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             {getRecommendationLabel(loc, withheld, raw, demoteRecommended)}
                           </span>
                         )}
-                        {/* v1.4.0: confidence label */}
-                        {!raw && !loc.excluded && (loc as any).confidenceLabel && (
-                          <span style={{
-                            fontSize: '0.70em',
-                            color: (loc as any).confidenceLabel === 'High' ? '#059669' :
-                                   (loc as any).confidenceLabel === 'Medium' ? '#d97706' : '#dc2626',
-                            fontWeight: 600,
-                          }}>
-                            {(loc as any).confidenceLabel} confidence
-                          </span>
-                        )}
-                        {/* v1.5-Lite: scenario ranking stability */}
-                        {!raw && !loc.excluded && (loc as any).stabilityLabel
-                          && STABILITY_TEXT[(loc as any).stabilityLabel] && (
-                          <span
-                            title={(loc as any).stabilityNote || 'Ranking stability under controlled weighting scenarios'}
-                            style={{
-                              fontSize: '0.70em', fontWeight: 600,
-                              color: STABILITY_TEXT[(loc as any).stabilityLabel].color,
-                            }}
-                          >
-                            {STABILITY_TEXT[(loc as any).stabilityLabel].text}
-                          </span>
-                        )}
-                        {/* v1.4.0: score band */}
-                        {!raw && !loc.excluded && !weightsAdjusted && (loc as any).scoreBand && (
-                          <span style={{ fontSize: '0.68em', color: '#94a3b8' }}
-                                title="Proxy-based screening score — band reflects data uncertainty">
-                            ~{(loc as any).scoreBand}
-                          </span>
-                        )}
-                        {/* v1.5.2: score-basis transparency — the map colors use the
-                            screening score; final ranking uses the refined score after
-                            real routing/isochrone/traffic verification. Shown only when
-                            the two meaningfully differ, so users aren't left wondering
-                            why a pick doesn't match the darkest map cell. */}
-                        {!raw && !loc.excluded && !weightsAdjusted && loc.rankingBasis === 'refined'
-                          && typeof loc.screeningScore === 'number'
-                          && Math.abs(loc.screeningScore - loc.mcda_score) >= 0.3 && (
-                          <span
-                            style={{ fontSize: '0.68em', color: '#64748b' }}
-                            title="The map colors every cell by its initial screening score. Shortlisted candidates are then re-verified with real travel-time and place data, and the FINAL ranking uses that refined score — so it can differ from the map color."
-                          >
-                            map/screening {loc.screeningScore.toFixed(1)} → refined {loc.mcda_score.toFixed(1)}
-                          </span>
-                        )}
-                        {/* v1.4.0: close-band warning */}
-                        {!raw && !loc.excluded && !weightsAdjusted && (loc as any).closeBandWarning && (
-                          <span style={{ fontSize: '0.68em', color: '#d97706' }}>
-                            statistically similar
-                          </span>
-                        )}
-                        {/* v1.1.0: show secondary score pills when available */}
-                        {!raw && !loc.excluded && loc.relativeRankScore !== undefined && (
-                          <span className="score-pills" style={{ fontSize: '0.72em', color: '#64748b', marginTop: 2, display: 'flex', gap: 4 }}>
-                            <span title="Rank Score (vs peers)">R:{loc.relativeRankScore?.toFixed(1)}</span>
-                            <span title="Absolute Viability">V:{loc.absoluteViabilityScore?.toFixed(1)}</span>
-                            <span title="Data Confidence">C:{loc.confidenceScore?.toFixed(1)}</span>
-                          </span>
-                        )}
+                        {/* v1.11.3 — the score column is now just the number and
+                            its plain label. Confidence, ranking stability, the
+                            score band, the screening→refined delta and the
+                            R/V/C pills used to stack here, turning every card
+                            into a five-line readout of analyst jargon
+                            ("R:10.0 V:7.4 C:8.1"). They all moved into this
+                            card's expander under "Score details" — nothing was
+                            removed, it's one click away for whoever wants it. */}
                       </>
                     )}
                   </div>
@@ -1569,6 +1526,68 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
 
                 {isExpanded && (
                   <div className="drawer-loc-detail">
+                    {/* v1.11.3 — score details, relocated out of the card
+                        header. Same values, same tooltips; they just no longer
+                        crowd the at-a-glance view. */}
+                    {!raw && !loc.excluded && (() => {
+                      const conf = (loc as any).confidenceLabel as string | undefined;
+                      const stab = (loc as any).stabilityLabel as string | undefined;
+                      const band = (loc as any).scoreBand as string | undefined;
+                      const showDelta = !weightsAdjusted && loc.rankingBasis === 'refined'
+                        && typeof loc.screeningScore === 'number'
+                        && Math.abs(loc.screeningScore - loc.mcda_score) >= 0.3;
+                      const rvc = loc.relativeRankScore !== undefined;
+                      if (!conf && !stab && !band && !showDelta && !rvc
+                          && !(loc as any).closeBandWarning) return null;
+                      return (
+                        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#475569', marginBottom: 6, lineHeight: 1.6 }}>
+                          <b>Score details</b>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', marginTop: 2 }}>
+                            {conf && (
+                              <span>Confidence: <b style={{
+                                color: conf === 'High' ? '#059669' : conf === 'Medium' ? '#d97706' : '#dc2626',
+                              }}>{conf}</b></span>
+                            )}
+                            {stab && STABILITY_TEXT[stab] && (
+                              <span title={(loc as any).stabilityNote || 'Ranking stability under controlled weighting scenarios'}>
+                                Stability: <b style={{ color: STABILITY_TEXT[stab].color }}>{STABILITY_TEXT[stab].text}</b>
+                              </span>
+                            )}
+                            {band && !weightsAdjusted && (
+                              <span title="Proxy-based screening score — band reflects data uncertainty">
+                                Likely range: <b>~{band}</b>
+                              </span>
+                            )}
+                            {!weightsAdjusted && (loc as any).closeBandWarning && (
+                              <span style={{ color: '#d97706' }}>Statistically similar to its neighbours</span>
+                            )}
+                          </div>
+                          {showDelta && (
+                            <div
+                              style={{ marginTop: 2 }}
+                              title="The map colors every cell by its initial screening score. Shortlisted candidates are then re-verified with real travel-time and place data, and the FINAL ranking uses that refined score — so it can differ from the map color."
+                            >
+                              Map colour uses the screening score ({loc.screeningScore!.toFixed(1)});
+                              this zone's rank uses its refined score ({loc.mcda_score.toFixed(1)}) after
+                              travel-time and place verification.
+                            </div>
+                          )}
+                          {rvc && (
+                            <div style={{ marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
+                              <span title="How this zone ranks against the other shortlisted zones">
+                                Rank vs peers: <b>{loc.relativeRankScore?.toFixed(1)}</b>
+                              </span>
+                              <span title="Absolute viability, independent of the other candidates">
+                                Absolute viability: <b>{loc.absoluteViabilityScore?.toFixed(1)}</b>
+                              </span>
+                              <span title="How complete the underlying data was for this zone">
+                                Data confidence: <b>{loc.confidenceScore?.toFixed(1)}</b>
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {/* vNext (v1.8.0) — full next-stage validation list */}
                     {(loc.nextValidation ?? []).length > 1 && (
                       <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, padding: '6px 10px', fontSize: '11px', color: '#0c4a6e', marginBottom: 6 }}>

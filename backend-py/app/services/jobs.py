@@ -1337,7 +1337,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             # withholds the recommendation rather than silently keeping water cells).
             ways = await asyncio.wait_for(
                 fetch_area_geometries(
-                    ["natural=water", "waterway=riverbank", "waterway=river", "water=*"], overpass_bbox,
+                    # v1.11.3 — natural=coastline added: the OCEAN is not an area
+                    # in OSM, so a coastal city fetched no geometry for the sea
+                    # itself and offshore hexes survived every water mask.
+                    ["natural=water", "waterway=riverbank", "waterway=river",
+                     "water=*", "natural=coastline"], overpass_bbox,
                 ),
                 timeout=_opt_timeout,
             )
@@ -1643,6 +1647,29 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             notes.append(
                 f"Water overlap mask removed {n_overlap} hex(es) with >30% water area."
             )
+
+        # ── v1.11.3. Open-sea mask (coastal cities) ──────────────────────────
+        # Live failure: a South Mumbai gym run returned zones sitting in the
+        # Arabian Sea off Malabar Point. natural=water covers rivers/lakes/docks
+        # but NOT the ocean, which OSM represents only as natural=coastline
+        # ways. Derive sea polygons from the coastline (land-on-left rule) and
+        # apply the same >30% area threshold, so shoreline cells that are mostly
+        # land are kept and only genuinely offshore cells are dropped.
+        _coast = [w for w in water_ways
+                  if str((w.get("tags") or {}).get("natural", "")).lower() == "coastline"]
+        if _coast:
+            smask = water.sea_overlap_mask(
+                hexes, _coast, boundaries, overpass_bbox, ratio=0.30,
+            )
+            smask &= ~excluded                  # count only the NEW ones
+            n_sea = int(smask.sum())
+            if n_sea:
+                excluded |= smask
+                mask_stats["seaOverlapRemoved"] = n_sea
+                notes.append(
+                    f"Coastline mask removed {n_sea} hex(es) that are mostly open "
+                    f"sea (from {len(_coast)} coastline feature(s))."
+                )
 
     # ── v1.7.1: named-place exclusions (user's existing sites) ─────────
     # "exclude my existing areas" with named branches: geocode each place
