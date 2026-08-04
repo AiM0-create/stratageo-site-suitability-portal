@@ -400,6 +400,15 @@ body {
      collapsed diagnostic panels. Unset children keep order:0 (source order). */
   display: flex; flex-direction: column;
 }
+/* v1.11.5 — REGRESSION FIX for the flex reorder above. Flex items default to
+   flex-shrink:1, so once the panel's content exceeded the drawer height the
+   browser CRUSHED every child to fit instead of letting this container scroll:
+   a 900px zone list rendered at 236px, and the "Technical diagnostics" /
+   "Analysis Assumptions" / "Evidence Trail" expanders collapsed into
+   near-invisible hairlines — reported live as "there is no show more
+   technical/confidence details". Pinning shrink to 0 restores each child's
+   natural height and makes overflow-y actually scroll. */
+.drawer-body > * { flex-shrink: 0; }
 
 .drawer-summary {
   font-size: 12px; color: var(--gray-500); line-height: 1.6; margin-bottom: 12px;

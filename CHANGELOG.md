@@ -4,6 +4,33 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.11.5] — 2026-08-04 — Drawer Layout Fix (frontend-only)
+
+Live report: *"there is no show more technical/confidence details."*
+
+### Fixed — the results panel was crushing its own content
+- **Regression introduced in v1.11.1.** The answer-first reorder made
+  `.drawer-body` a column flex container so blocks could be resequenced with
+  CSS `order` without moving their JSX. Flex items default to
+  `flex-shrink: 1` — so as soon as the panel's content exceeded the drawer
+  height, the browser **shrank every child to fit instead of scrolling**.
+- Measured in a real browser against the shipped stylesheet: a 900px zone list
+  rendered at **236px**, and the "Technical diagnostics", "Analysis
+  Assumptions" and "Evidence Trail" expanders collapsed into near-invisible
+  hairlines — which is why the technical/confidence detail appeared to be
+  missing entirely. It was present in the DOM the whole time, just squashed.
+- `.drawer-body > * { flex-shrink: 0 }` restores each child's natural height
+  and lets `overflow-y: auto` actually scroll. Re-measured after the fix: zone
+  list back to its full 900px, all three expanders at full height, container
+  scrollHeight 1169 vs clientHeight 500.
+
+### Added
+- `src/__tests__/drawerLayout.test.ts` (4 tests) pinning the stylesheet
+  contract: column flex + `overflow-y: auto` + `flex-shrink: 0` on children,
+  and the cascade order between them.
+
+---
+
 ## [1.11.4] — 2026-08-04 — Editable Factors (frontend-only)
 
 Live feedback: *"changing variables is a task here, its not friendly at all,
