@@ -12,6 +12,14 @@ export const config = {
   /** Rotatable kill-switch token sent as X-App-Token to the engine (not a secret). */
   appToken: import.meta.env.VITE_APP_TOKEN || '',
 
+  /** v1.12.0 — Mapbox GL JS public access token. Ships in the bundle by design
+   *  (that is what a `pk.` token is for); it is protected by a URL restriction
+   *  on the Mapbox account, not by secrecy. Injected at build time from the
+   *  VITE_MAPBOX_TOKEN GitHub secret, same pattern as VITE_APP_TOKEN. Empty in
+   *  a local build without the env var — MapView degrades to a clear message
+   *  rather than a blank canvas. */
+  mapboxToken: import.meta.env.VITE_MAPBOX_TOKEN || '',
+
   /** Demo mode = no backend URL configured. If backend URL exists, we're live. */
   get isDemoMode(): boolean {
     return !this.aiBackendUrl && !this.isConversationalMode;
@@ -34,46 +42,46 @@ export const config = {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
   },
 
+  /** v1.12.0 — Mapbox GL JS vector styles, replacing the previous raster tile
+   *  URLs (CARTO / Esri / OSM). All five picker options are preserved; each is
+   *  mapped to its closest Mapbox equivalent. `style` is what GL JS consumes;
+   *  `rasterTile` is the Static Tiles endpoint for the SAME style, used by the
+   *  PDF report figure so the printed basemap matches what was on screen. */
   basemaps: [
     {
       id: 'light',
       label: 'Light',
       icon: '☀️',
-      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd',
+      style: 'mapbox://styles/mapbox/light-v11',
+      rasterStyle: 'light-v11',
     },
     {
       id: 'dark',
       label: 'Dark',
       icon: '🌙',
-      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd',
+      style: 'mapbox://styles/mapbox/dark-v11',
+      rasterStyle: 'dark-v11',
     },
     {
       id: 'voyager',
       label: 'Voyager',
       icon: '🗺️',
-      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd',
+      style: 'mapbox://styles/mapbox/outdoors-v12',
+      rasterStyle: 'outdoors-v12',
     },
     {
       id: 'satellite',
       label: 'Satellite',
       icon: '🛰️',
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      attribution: '&copy; <a href="https://www.esri.com/">Esri</a>',
-      subdomains: '',
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      rasterStyle: 'satellite-streets-v12',
     },
     {
       id: 'osm',
       label: 'Street',
       icon: '🛣️',
-      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      subdomains: '',
+      style: 'mapbox://styles/mapbox/streets-v12',
+      rasterStyle: 'streets-v12',
     },
   ] as const,
 

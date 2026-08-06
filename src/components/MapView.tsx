@@ -1,8 +1,33 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import type { LocationData, HeatmapType, UserPoint, HexGridCell, CatchmentOutline } from '../types';
 import { config } from '../config';
+import {
+  toLngLatRing, circleRingLngLat, boundsOfLatLng, stretch, rampColor,
+} from '../services/mapGeo';
 
-declare const L: any;
+/**
+ * v1.12.0 — migrated from Leaflet (CDN globals) to Mapbox GL JS.
+ *
+ * Two structural differences drive the shape of this file:
+ *
+ * 1. STYLE RELOADS WIPE LAYERS. Calling map.setStyle() (the basemap picker)
+ *    destroys every custom source and layer. Leaflet kept them. So all data
+ *    layers are (re)built by one idempotent installer that runs on 'load' AND
+ *    on every 'style.load'; `styleEpoch` bumps to re-fire the data effects.
+ *    Markers are DOM overlays and survive style swaps, so they are managed
+ *    separately.
+ *
+ * 2. HUNDREDS OF POLYGONS BECOME ONE SOURCE. The Leaflet build created one
+ *    L.polygon per H3 cell. Here the whole grid is a single GeoJSON source
+ *    coloured by a data-driven paint expression on a per-feature `fill`
+ *    property, so recolouring on a factor toggle or weight change is a GPU
+ *    paint update instead of rebuilding the layer tree.
+ *
+ * Coordinate order is handled exclusively in services/mapGeo (Leaflet is
+ * [lat,lng]; Mapbox is [lng,lat]) — never inline here.
+ */
 
 export type BasemapId = typeof config.basemaps[number]['id'];
 
@@ -29,28 +54,50 @@ interface MapViewProps {
   studyAreaBoundary?: [number, number][];        // [lat,lng] ring of the AOI
 }
 
-/** Normalised 0..1 (0 = least, 1 = most favourable) → red→amber→green ramp. */
-const rampColor = (t: number) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) * 130)}, 80%, 46%)`;
-
 const CATCHMENT_COLORS: Record<string, string> = { walk: '#059669', drive: '#7c3aed' };
 
-const getMarkerIcon = (rank: number, isSelected: boolean, excluded: boolean, raw = false) => {
-  // raw = recommendation withheld → render as a neutral "raw candidate", never a
-  // green recommendation pin (v1.0.3 UI fix: pins must not contradict the banner).
+// Source / layer ids — kept in one place so the installer and the updaters agree.
+const SRC = {
+  hex: 'sg-hex', aoi: 'sg-aoi', catchment: 'sg-catchment',
+  radius: 'sg-radius', buffer: 'sg-buffer',
+} as const;
+const LYR = {
+  hexFill: 'sg-hex-fill', aoiLine: 'sg-aoi-line', catchmentLine: 'sg-catchment-line',
+  radiusLine: 'sg-radius-line', radiusFill: 'sg-radius-fill',
+  bufferLine: 'sg-buffer-line', bufferFill: 'sg-buffer-fill',
+} as const;
+
+const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+/** Ranked candidate pin — same markup/CSS classes as the Leaflet build so the
+ *  existing pin styling and the permanent label carry over unchanged. */
+function buildMarkerEl(
+  rank: number, isSelected: boolean, excluded: boolean, raw: boolean,
+  name: string, score: number,
+): HTMLDivElement {
   const color = excluded ? '#94a3b8' : raw ? '#64748b' : isSelected ? '#1d4ed8' : '#059669';
   const bgColor = excluded ? '#f1f5f9' : raw ? '#e2e8f0' : isSelected ? '#dbeafe' : '#d1fae5';
-  const glyph = excluded ? '✕' : raw ? '?' : rank;
+  const glyph = excluded ? '✕' : raw ? '?' : String(rank);
+  const headGlyph = excluded ? '✕' : raw ? '?' : `#${rank}`;
+  const excludedLabel = excluded
+    ? ' <span style="color:#ef4444;font-size:9px">[EXCLUDED]</span>'
+    : raw ? ' <span style="color:#64748b;font-size:9px">[RAW — NOT RECOMMENDED]</span>' : '';
 
-  return L.divIcon({
-    className: 'sg-marker',
-    html: `<div class="sg-marker-pin" style="--marker-color: ${color}; --marker-bg: ${bgColor}">
-      <span class="sg-marker-rank">${glyph}</span>
-    </div>`,
-    iconSize: [36, 44],
-    iconAnchor: [18, 44],
-    popupAnchor: [0, -44],
-  });
-};
+  const el = document.createElement('div');
+  el.className = 'sg-marker';
+  // vNext (v1.8.0) — zone-centroid honesty: the pin marks the H3 cell's
+  // representative point, never an exact site or address (§6.5).
+  el.innerHTML =
+    `<div class="sg-tooltip-container sg-marker-label">` +
+      `<div class="sg-tooltip"><strong>${headGlyph}</strong> ${name}${excludedLabel}<br/>` +
+      `<span class="sg-tooltip-score">${score}/10</span><br/>` +
+      `<span style="font-size:9px;color:#64748b">Investigation-zone centroid (approximate)</span></div>` +
+    `</div>` +
+    `<div class="sg-marker-pin" style="--marker-color: ${color}; --marker-bg: ${bgColor}">` +
+      `<span class="sg-marker-rank">${glyph}</span>` +
+    `</div>`;
+  return el;
+}
 
 export const MapView: React.FC<MapViewProps> = ({
   locations,
@@ -71,197 +118,216 @@ export const MapView: React.FC<MapViewProps> = ({
   studyAreaBoundary,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const markersRef = useRef<any>(null);
-  const userLayerRef = useRef<any>(null);
-  const tileLayerRef = useRef<any>(null);
-  const hexLayerRef = useRef<any>(null);
-  const catchmentLayerRef = useRef<any>(null);
-  const aoiLayerRef = useRef<any>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const userMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const screeningMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const hoverPopupRef = useRef<mapboxgl.Popup | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showHexGrid, setShowHexGrid] = useState(true);
   const [showCatchments, setShowCatchments] = useState(true);
+  // Bumped on every style (re)load so the data effects re-install their layers.
+  const [styleEpoch, setStyleEpoch] = useState(0);
 
-  // Initialize map
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+  const tokenMissing = !config.mapboxToken;
 
-    const initialBasemap = config.basemaps.find(b => b.id === basemapId) ?? config.basemaps[0];
-
-    const map = L.map(containerRef.current, {
-      center: config.map.defaultCenter,
-      zoom: config.map.defaultZoom,
-      zoomControl: false,
-    });
-
-    const tl = L.tileLayer(initialBasemap.url, {
-      attribution: initialBasemap.attribution,
-      subdomains: initialBasemap.subdomains || 'abc',
-      maxZoom: 19,
-    });
-    tl.addTo(map);
-    tileLayerRef.current = tl;
-
-    L.control.zoom({ position: 'topright' }).addTo(map);
-    map.on('click', onDeselectAll);
-
-    mapRef.current = map;
-    markersRef.current = L.layerGroup().addTo(map);
-
-    setTimeout(() => map.invalidateSize(), 100);
-
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.stop();
-        mapRef.current.remove();
-        mapRef.current = null;
-        tileLayerRef.current = null;
-      }
+  /** Create every source + layer this map uses, empty. Idempotent: safe to call
+   *  again after a style swap, which destroys them all. */
+  const installLayers = useCallback((map: mapboxgl.Map) => {
+    const addSource = (id: string) => {
+      if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY });
     };
+    Object.values(SRC).forEach(addSource);
+
+    if (!map.getLayer(LYR.hexFill)) {
+      map.addLayer({
+        id: LYR.hexFill, type: 'fill', source: SRC.hex,
+        paint: {
+          // Colour and opacity are carried per-feature so the whole grid
+          // recolours as one GPU paint update, not a layer rebuild.
+          'fill-color': ['get', 'fill'],
+          'fill-opacity': ['get', 'opacity'],
+        },
+      });
+    }
+    if (!map.getLayer(LYR.radiusFill)) {
+      map.addLayer({
+        id: LYR.radiusFill, type: 'fill', source: SRC.radius,
+        paint: { 'fill-color': '#1d4ed8', 'fill-opacity': 0.06 },
+      });
+      map.addLayer({
+        id: LYR.radiusLine, type: 'line', source: SRC.radius,
+        paint: { 'line-color': '#1d4ed8', 'line-width': 1.5, 'line-dasharray': [6, 4] },
+      });
+    }
+    if (!map.getLayer(LYR.bufferFill)) {
+      map.addLayer({
+        id: LYR.bufferFill, type: 'fill', source: SRC.buffer,
+        paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.05 },
+      });
+      map.addLayer({
+        id: LYR.bufferLine, type: 'line', source: SRC.buffer,
+        paint: { 'line-color': '#ef4444', 'line-width': 1, 'line-dasharray': [4, 3] },
+      });
+    }
+    if (!map.getLayer(LYR.catchmentLine)) {
+      map.addLayer({
+        id: LYR.catchmentLine, type: 'line', source: SRC.catchment,
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 2,
+          'line-dasharray': ['case', ['==', ['get', 'mode'], 'drive'], ['literal', [8, 5]], ['literal', [1, 0]]],
+        },
+      });
+    }
+    if (!map.getLayer(LYR.aoiLine)) {
+      map.addLayer({
+        id: LYR.aoiLine, type: 'line', source: SRC.aoi,
+        paint: { 'line-color': '#475569', 'line-width': 1.5, 'line-dasharray': [5, 5] },
+      });
+    }
   }, []);
 
-  // Swap tile layer when basemap changes
+  const setData = useCallback((id: string, data: GeoJSON.FeatureCollection) => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
+    if (src) src.setData(data);
+  }, []);
+
+  // ── Initialise map ──
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current || tokenMissing) return;
+
+    mapboxgl.accessToken = config.mapboxToken;
+    const bm = config.basemaps.find(b => b.id === basemapId) ?? config.basemaps[0];
+
+    const map = new mapboxgl.Map({
+      container: containerRef.current,
+      style: bm.style,
+      center: [config.map.defaultCenter[1], config.map.defaultCenter[0]],  // [lng,lat]
+      zoom: config.map.defaultZoom,
+      attributionControl: true,
+    });
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+    map.on('click', () => onDeselectAll());
+    map.on('load', () => { installLayers(map); setStyleEpoch(e => e + 1); });
+    // Fires after every setStyle() — the style reload wiped our layers, rebuild.
+    map.on('style.load', () => { installLayers(map); setStyleEpoch(e => e + 1); });
+
+    mapRef.current = map;
+    setTimeout(() => map.resize(), 100);
+
+    return () => {
+      markersRef.current.forEach(m => m.remove());
+      userMarkersRef.current.forEach(m => m.remove());
+      screeningMarkersRef.current.forEach(m => m.remove());
+      markersRef.current = []; userMarkersRef.current = []; screeningMarkersRef.current = [];
+      hoverPopupRef.current?.remove();
+      map.remove();
+      mapRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Basemap swap: setStyle wipes layers; 'style.load' reinstalls them ──
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const bm = config.basemaps.find(b => b.id === basemapId) ?? config.basemaps[0];
-    if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current);
-    }
-    const tl = L.tileLayer(bm.url, {
-      attribution: bm.attribution,
-      subdomains: bm.subdomains || 'abc',
-      maxZoom: 19,
-    });
-    tl.addTo(map);
-    tl.bringToBack();
-    tileLayerRef.current = tl;
+    const current = map.getStyle()?.sprite;   // cheap identity check, avoids redundant reloads
+    if (current === undefined && !map.isStyleLoaded()) return;
+    map.setStyle(bm.style);
   }, [basemapId]);
 
-  // Update markers
+  // ── Ranked candidate markers + fly-to ──
   useEffect(() => {
     const map = mapRef.current;
-    const markers = markersRef.current;
-    if (!map || !markers) return;
+    if (!map) return;
 
-    map.stop();
-    markers.clearLayers();
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
 
     if (locations.length === 0) {
-      map.flyTo(config.map.defaultCenter, config.map.defaultZoom, { animate: true, duration: 1 });
+      map.flyTo({
+        center: [config.map.defaultCenter[1], config.map.defaultCenter[0]],
+        zoom: config.map.defaultZoom, duration: 1000,
+      });
       return;
     }
 
-    const bounds: [number, number][] = [];
-
-    // Sort: non-excluded first by score
     const ranked = [...locations].sort((a, b) => {
       if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;
       return b.mcda_score - a.mcda_score;
     });
 
+    const pts: { lat: number; lng: number }[] = [];
     let visibleRank = 0;
-    ranked.forEach((loc) => {
+    for (const loc of ranked) {
       const lat = Number(loc.lat);
       const lng = Number(loc.lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
       if (!loc.excluded) visibleRank++;
       const displayRank = loc.excluded ? 0 : visibleRank;
       const isSelected = selectedLocations.some(sl => sl.name === loc.name);
       const raw = recommendationWithheld && !loc.excluded;
-      const icon = getMarkerIcon(displayRank, isSelected, loc.excluded, raw);
 
-      try {
-        const marker = L.marker([lat, lng], { icon });
-        const excludedLabel = loc.excluded
-          ? ' <span style="color:#ef4444;font-size:9px">[EXCLUDED]</span>'
-          : raw ? ' <span style="color:#64748b;font-size:9px">[RAW — NOT RECOMMENDED]</span>' : '';
-        const headGlyph = loc.excluded ? '✕' : raw ? '?' : `#${displayRank}`;
-        // vNext (v1.8.0) — zone-centroid honesty: the pin marks the H3 cell's
-        // representative point, never an exact site or address (§6.5).
-        marker.bindTooltip(
-          `<div class="sg-tooltip"><strong>${headGlyph}</strong> ${loc.name}${excludedLabel}<br/><span class="sg-tooltip-score">${loc.mcda_score}/10</span><br/><span style="font-size:9px;color:#64748b">Investigation-zone centroid (approximate)</span></div>`,
-          { permanent: true, direction: 'top', className: 'sg-tooltip-container', offset: [0, -44] }
-        );
-        marker.on('click', (e: any) => {
-          L.DomEvent.stopPropagation(e);
-          onSelectLocation(loc);
-        });
-        markers.addLayer(marker);
-        bounds.push([lat, lng]);
-      } catch { /* skip invalid marker */ }
-    });
+      const el = buildMarkerEl(displayRank, isSelected, loc.excluded, raw, loc.name, loc.mcda_score);
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); onSelectLocation(loc); });
 
-    // Selected location search radius
-    selectedLocations.forEach(sl => {
-      const lat = Number(sl.lat);
-      const lng = Number(sl.lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      const radius = sl.searchRadiusM || 1000;
-      try {
-        L.circle([lat, lng], {
-          radius,
-          color: '#1d4ed8',
-          fillColor: '#1d4ed8',
-          fillOpacity: 0.06,
-          weight: 1.5,
-          dashArray: '6 4',
-        }).addTo(markers);
-      } catch { /* skip */ }
-    });
-
-    // Fit bounds
-    const selCoords = selectedLocations
-      .map(l => [Number(l.lat), Number(l.lng)] as [number, number])
-      .filter(c => Number.isFinite(c[0]) && Number.isFinite(c[1]));
-
-    if (selCoords.length === 1) {
-      map.flyTo(selCoords[0], 13, { animate: true, duration: 1 });
-    } else if (selCoords.length > 1) {
-      map.flyToBounds(selCoords, { padding: [60, 60], animate: true, duration: 1.2 });
-    } else if (bounds.length === 1) {
-      map.flyTo(bounds[0], 13, { animate: true, duration: 1 });
-    } else if (bounds.length > 1) {
-      map.flyToBounds(bounds, { padding: [60, 60], animate: true, duration: 1.2 });
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([lng, lat])
+        .addTo(map);
+      markersRef.current.push(marker);
+      pts.push({ lat, lng });
     }
-  }, [locations, selectedLocations, onSelectLocation, heatmapType, recommendationWithheld]);
+
+    // Search-radius rings around selected zones (Leaflet's L.circle had no
+    // Mapbox equivalent — emitted as real polygons instead).
+    const radiusFeatures: GeoJSON.Feature[] = [];
+    for (const sl of selectedLocations) {
+      const ring = circleRingLngLat(Number(sl.lat), Number(sl.lng), sl.searchRadiusM || 1000);
+      if (ring) {
+        radiusFeatures.push({
+          type: 'Feature', properties: {},
+          geometry: { type: 'Polygon', coordinates: [ring] },
+        });
+      }
+    }
+    setData(SRC.radius, { type: 'FeatureCollection', features: radiusFeatures });
+
+    const selPts = selectedLocations
+      .map(l => ({ lat: Number(l.lat), lng: Number(l.lng) }))
+      .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    const focus = selPts.length > 0 ? selPts : pts;
+    if (focus.length === 1) {
+      map.flyTo({ center: [focus[0].lng, focus[0].lat], zoom: 13, duration: 1000 });
+    } else if (focus.length > 1) {
+      const b = boundsOfLatLng(focus);
+      if (b) map.fitBounds(b, { padding: 60, duration: 1200 });
+    }
+  }, [locations, selectedLocations, onSelectLocation, recommendationWithheld, styleEpoch, setData]);
 
   // ── Study-area (AOI) boundary outline (v1.0.3) ──
-  // Draw the resolved study area so the user can SEE whether the spatial area is
-  // wrong (e.g. a buffered chord across both riverbanks). Excluded water/rail/ghat
-  // cells are already greyed in the hex layer below.
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (aoiLayerRef.current) {
-      map.removeLayer(aoiLayerRef.current);
-      aoiLayerRef.current = null;
-    }
-    if (!studyAreaBoundary || studyAreaBoundary.length < 3) return;
-    try {
-      const poly = L.polygon(studyAreaBoundary, {
-        color: '#475569',
-        weight: 1.5,
-        dashArray: '5 5',
-        fill: false,
-        interactive: false,
-      });
-      poly.bindTooltip('Study area (AOI)', { sticky: true, className: 'sg-tooltip-container' });
-      poly.addTo(map);
-      aoiLayerRef.current = poly;
-    } catch { /* skip */ }
-  }, [studyAreaBoundary]);
+    const ring = toLngLatRing(studyAreaBoundary);
+    setData(SRC.aoi, ring
+      ? { type: 'FeatureCollection', features: [{
+          type: 'Feature', properties: {},
+          geometry: { type: 'Polygon', coordinates: [ring] },
+        }] }
+      : EMPTY);
+  }, [studyAreaBoundary, styleEpoch, setData]);
 
   // ── Hex suitability surface (v2 engine choropleth) ──
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (hexLayerRef.current) {
-      map.removeLayer(hexLayerRef.current);
-      hexLayerRef.current = null;
+    if (!showHexGrid || !hexGrid || hexGrid.length === 0) {
+      setData(SRC.hex, EMPTY);
+      return;
     }
-    if (!showHexGrid || !hexGrid || hexGrid.length === 0) return;
 
     // Which value are we colouring? Overall composite, or one factor's per-hex
     // score (direction already applied → higher = more favourable for every factor).
@@ -277,183 +343,171 @@ export const MapView: React.FC<MapViewProps> = ({
       .filter((v): v is number => typeof v === 'number');
     const lo = vals.length ? Math.min(...vals) : 0;
     const hi = vals.length ? Math.max(...vals) : 10;
-    const span = hi - lo > 0.1 ? hi - lo : 1;
 
-    const renderer = L.canvas({ padding: 0.3 });
-    const group = L.layerGroup();
+    const features: GeoJSON.Feature[] = [];
     for (const cell of hexGrid) {
-      if (!Array.isArray(cell.boundary) || cell.boundary.length < 3) continue;
+      const ring = toLngLatRing(cell.boundary as [number, number][]);
+      if (!ring) continue;
       const v = scoreOf(cell);
       const hasVal = typeof v === 'number';
-      const t = hasVal ? Math.max(0, Math.min(1, (v! - lo) / span)) : 0;  // 0=worst .. 1=best in view
-      try {
-        // v1.6.4 — when the analyst review withholds the recommendation, the
-        // suitability surface must not keep advertising confident green/red
-        // gradation (user-reported contradiction). Render it grey and label
-        // it as context-only; relative shading is kept faint for orientation.
-        const poly = L.polygon(cell.boundary, {
-          renderer,
-          stroke: false,
-          fillColor: cell.excluded || !hasVal
-            ? '#64748b'
-            : recommendationWithheld ? '#94a3b8' : rampColor(t),
-          fillOpacity: cell.excluded
-            ? 0.22
-            : !hasVal
-              ? 0.12
-              : recommendationWithheld ? 0.10 + t * 0.20 : 0.30 + t * 0.45,
-          interactive: true,
-        });
-        const finalTag = (cell as any).refinedCandidate ? ' — FINAL refined score (chosen candidate)' : '';
-        const label = cell.excluded
-          ? 'Excluded zone'
-          : !hasVal
-            ? `${factor}: no data here`
-            : recommendationWithheld
-              ? `Screening value ${v!.toFixed(1)}/10 — context only: this result was flagged unreliable, no recommendation is made`
-              : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10${factor ? '' : finalTag}${
-                  !factor && cellRanks?.ranks?.[cell.h3]
-                    ? ` — rank ${cellRanks.ranks[cell.h3]} of ${cellRanks.total} eligible cells`
-                    : ''}`;
-        poly.bindTooltip(label, { sticky: true, direction: 'top', className: 'sg-tooltip-container' });
-        group.addLayer(poly);
-      } catch { /* skip malformed cell */ }
-    }
-    group.addTo(map);
-    hexLayerRef.current = group;
-  }, [hexGrid, showHexGrid, heatmapType, recommendationWithheld, cellRanks]);
+      const t = hasVal ? stretch(v!, lo, hi) : 0;
+      // v1.6.4 — when the analyst review withholds the recommendation, the
+      // suitability surface must not keep advertising confident green/red
+      // gradation (user-reported contradiction). Render it grey and label
+      // it as context-only; relative shading is kept faint for orientation.
+      const fill = cell.excluded || !hasVal
+        ? '#64748b'
+        : recommendationWithheld ? '#94a3b8' : rampColor(t);
+      const opacity = cell.excluded
+        ? 0.22
+        : !hasVal
+          ? 0.12
+          : recommendationWithheld ? 0.10 + t * 0.20 : 0.30 + t * 0.45;
 
-  // ── v1.6.7: screening-basis top-X under custom weights (amber, unverified) ──
-  const screeningLayerRef = useRef<any>(null);
+      const finalTag = (cell as any).refinedCandidate ? ' — FINAL refined score (chosen candidate)' : '';
+      const label = cell.excluded
+        ? 'Excluded zone'
+        : !hasVal
+          ? `${factor}: no data here`
+          : recommendationWithheld
+            ? `Screening value ${v!.toFixed(1)}/10 — context only: this result was flagged unreliable, no recommendation is made`
+            : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10${factor ? '' : finalTag}${
+                !factor && cellRanks?.ranks?.[cell.h3]
+                  ? ` — rank ${cellRanks.ranks[cell.h3]} of ${cellRanks.total} eligible cells`
+                  : ''}`;
+
+      features.push({
+        type: 'Feature',
+        properties: { fill, opacity, label },
+        geometry: { type: 'Polygon', coordinates: [ring] },
+      });
+    }
+    setData(SRC.hex, { type: 'FeatureCollection', features });
+  }, [hexGrid, showHexGrid, heatmapType, recommendationWithheld, cellRanks, styleEpoch, setData]);
+
+  // ── Hex hover tooltip (Leaflet bindTooltip{sticky} equivalent) ──
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (screeningLayerRef.current) {
-      map.removeLayer(screeningLayerRef.current);
-      screeningLayerRef.current = null;
-    }
-    if (!screeningCandidates || screeningCandidates.length === 0) return;
-    const group = L.layerGroup();
-    screeningCandidates.forEach((c, i) => {
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="width:26px;height:26px;border-radius:50%;background:#fffbeb;border:2.5px dashed #d97706;color:#92400e;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,0.3)">${i + 1}</div>`,
-        iconSize: [26, 26], iconAnchor: [13, 13],
-      });
-      const m = L.marker([c.lat, c.lng], { icon });
-      m.bindTooltip(
-        `Top ${i + 1} under YOUR weights — screening basis only (score ${c.score.toFixed(1)}/10, grid rank ${c.rank}). Not yet verified with travel-time / routing / Places data.`,
-        { direction: 'top', className: 'sg-tooltip-container' },
-      );
-      group.addLayer(m);
+    const popup = new mapboxgl.Popup({
+      closeButton: false, closeOnClick: false, className: 'sg-tooltip-container',
     });
-    group.addTo(map);
-    screeningLayerRef.current = group;
-  }, [screeningCandidates]);
+    hoverPopupRef.current = popup;
+
+    const onMove = (e: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] }) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      map.getCanvas().style.cursor = 'pointer';
+      popup.setLngLat(e.lngLat).setText(String(f.properties?.label ?? '')).addTo(map);
+    };
+    const onLeave = () => {
+      map.getCanvas().style.cursor = '';
+      popup.remove();
+    };
+    map.on('mousemove', LYR.hexFill, onMove);
+    map.on('mouseleave', LYR.hexFill, onLeave);
+    return () => {
+      map.off('mousemove', LYR.hexFill, onMove);
+      map.off('mouseleave', LYR.hexFill, onLeave);
+      popup.remove();
+    };
+  }, [styleEpoch]);
+
+  // ── v1.6.7: screening-basis top-X under custom weights (amber, unverified) ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    screeningMarkersRef.current.forEach(m => m.remove());
+    screeningMarkersRef.current = [];
+    if (!screeningCandidates || screeningCandidates.length === 0) return;
+
+    screeningCandidates.forEach((c, i) => {
+      const el = document.createElement('div');
+      el.innerHTML =
+        `<div title="Top ${i + 1} under YOUR weights — screening basis only (score ${c.score.toFixed(1)}/10, grid rank ${c.rank}). Not yet verified with travel-time / routing / Places data." ` +
+        `style="width:26px;height:26px;border-radius:50%;background:#fffbeb;border:2.5px dashed #d97706;color:#92400e;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,0.3)">${i + 1}</div>`;
+      const m = new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat]).addTo(map);
+      screeningMarkersRef.current.push(m);
+    });
+  }, [screeningCandidates, styleEpoch]);
 
   // ── Catchment isochrone outlines (v2 engine, selected location) ──
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (catchmentLayerRef.current) {
-      map.removeLayer(catchmentLayerRef.current);
-      catchmentLayerRef.current = null;
+    if (!showCatchments || !catchments || catchments.length === 0) {
+      setData(SRC.catchment, EMPTY);
+      return;
     }
-    if (!showCatchments || !catchments || catchments.length === 0) return;
-
     // Show catchments for the selected location, else for the #1 ranked one
     const focusName = selectedLocations[0]?.name || locations.filter(l => !l.excluded)[0]?.name;
-    if (!focusName) return;
-    const relevant = catchments.filter(c => c.locationName === focusName);
-    if (relevant.length === 0) return;
+    if (!focusName) { setData(SRC.catchment, EMPTY); return; }
 
-    const group = L.layerGroup();
-    for (const c of relevant) {
-      if (!Array.isArray(c.polygon) || c.polygon.length < 3) continue;
-      try {
-        const poly = L.polygon(c.polygon, {
-          color: CATCHMENT_COLORS[c.mode] || '#1d4ed8',
-          weight: 2,
-          dashArray: c.mode === 'drive' ? '8 5' : undefined,
-          fill: false,
-          interactive: true,
-        });
-        poly.bindTooltip(
-          `${c.minutes}-min ${c.mode} — ${c.layerName}`,
-          { sticky: true, direction: 'top', className: 'sg-tooltip-container' },
-        );
-        group.addLayer(poly);
-      } catch { /* skip */ }
+    const features: GeoJSON.Feature[] = [];
+    for (const c of catchments.filter(c => c.locationName === focusName)) {
+      const ring = toLngLatRing(c.polygon as [number, number][]);
+      if (!ring) continue;
+      features.push({
+        type: 'Feature',
+        properties: { color: CATCHMENT_COLORS[c.mode] || '#1d4ed8', mode: c.mode },
+        geometry: { type: 'Polygon', coordinates: [ring] },
+      });
     }
-    group.addTo(map);
-    catchmentLayerRef.current = group;
-  }, [catchments, showCatchments, selectedLocations, locations]);
+    setData(SRC.catchment, { type: 'FeatureCollection', features });
+  }, [catchments, showCatchments, selectedLocations, locations, styleEpoch, setData]);
 
-  // User-uploaded points layer
+  // ── User-uploaded points layer ──
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    if (userLayerRef.current) {
-      map.removeLayer(userLayerRef.current);
-      userLayerRef.current = null;
-    }
+    userMarkersRef.current.forEach(m => m.remove());
+    userMarkersRef.current = [];
 
-    if (userPoints.length === 0) return;
+    if (userPoints.length === 0) { setData(SRC.buffer, EMPTY); return; }
 
-    const group = L.layerGroup();
-
-    const userIcon = L.divIcon({
-      className: 'sg-marker',
-      html: `<div class="user-marker-dot"></div>`,
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
-    });
-
+    const bufferFeatures: GeoJSON.Feature[] = [];
+    const pts: { lat: number; lng: number }[] = [];
     for (const pt of userPoints) {
       const lat = Number(pt.lat);
       const lng = Number(pt.lng);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
-      const marker = L.marker([lat, lng], { icon: userIcon, interactive: false });
-      if (pt.name) {
-        marker.bindTooltip(pt.name, { direction: 'top', offset: [0, -8], className: 'sg-tooltip-container' });
-      }
-      group.addLayer(marker);
+      const el = document.createElement('div');
+      el.className = 'sg-marker';
+      el.innerHTML = `<div class="user-marker-dot"${pt.name ? ` title="${pt.name}"` : ''}></div>`;
+      userMarkersRef.current.push(
+        new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map),
+      );
+      pts.push({ lat, lng });
 
-      // Buffer circles
       if (showBuffers && bufferRadiusM) {
-        try {
-          L.circle([lat, lng], {
-            radius: bufferRadiusM,
-            color: '#ef4444',
-            fillColor: '#ef4444',
-            fillOpacity: 0.05,
-            weight: 1,
-            dashArray: '4 3',
-            interactive: false,
-          }).addTo(group);
-        } catch { /* skip */ }
+        const ring = circleRingLngLat(lat, lng, bufferRadiusM);
+        if (ring) {
+          bufferFeatures.push({
+            type: 'Feature', properties: {},
+            geometry: { type: 'Polygon', coordinates: [ring] },
+          });
+        }
       }
     }
-
-    group.addTo(map);
-    userLayerRef.current = group;
+    setData(SRC.buffer, { type: 'FeatureCollection', features: bufferFeatures });
 
     // If no analysis locations yet, fit to user points
-    if (locations.length === 0 && userPoints.length > 0) {
-      const pts = userPoints
-        .map(p => [Number(p.lat), Number(p.lng)] as [number, number])
-        .filter(c => Number.isFinite(c[0]) && Number.isFinite(c[1]));
-      if (pts.length > 0) {
-        map.flyToBounds(pts, { padding: [60, 60], animate: true, duration: 1 });
-      }
+    if (locations.length === 0 && pts.length > 0) {
+      const b = boundsOfLatLng(pts);
+      if (b) map.fitBounds(b, { padding: 60, duration: 1000 });
     }
-  }, [userPoints, showBuffers, bufferRadiusM, locations.length]);
+  }, [userPoints, showBuffers, bufferRadiusM, locations.length, styleEpoch, setData]);
 
   return (
     <div className="sg-map-wrapper">
       <div ref={containerRef} className="sg-map" id="map-container" />
+
+      {tokenMissing && (
+        <div className="sg-map-token-missing">
+          <strong>Map unavailable</strong>
+          <span>No Mapbox token is configured for this build (VITE_MAPBOX_TOKEN).</span>
+        </div>
+      )}
 
       {/* ── Basemap picker ── */}
       <div className="sg-basemap-control">

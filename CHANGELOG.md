@@ -4,6 +4,67 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.0] — 2026-08-06 — Mapbox GL JS (frontend-only)
+
+Full migration of the map from **Leaflet** (loaded as CDN `<script>` globals) to
+**Mapbox GL JS 3** (bundled via npm). Vector tiles rendered on the GPU rather
+than raster tile images stitched in the DOM.
+
+### Changed — renderer
+- `MapView.tsx` rewritten against Mapbox GL JS. Every layer ported: ranked
+  candidate pins, H3 suitability choropleth, study-area boundary, catchment
+  isochrones, search-radius rings, CSV user points + buffers, and the
+  screening-basis amber candidates.
+- **The H3 grid is now one GeoJSON source with a data-driven paint expression**
+  instead of one `L.polygon` per cell. Recolouring on a factor toggle or a
+  weight change is a GPU paint update rather than a rebuild of hundreds of DOM
+  polygons — the main performance reason for the migration.
+- **Style reloads are handled explicitly.** `map.setStyle()` (the basemap
+  picker) destroys all custom sources and layers, which Leaflet never did. One
+  idempotent installer runs on `load` and on every `style.load`, and a
+  `styleEpoch` counter re-fires the data effects so layers survive a basemap
+  switch.
+- **Coordinate order is isolated and tested.** Leaflet takes `[lat,lng]`;
+  GeoJSON/Mapbox take `[lng,lat]`, and every ring from the backend is
+  `[lat,lng]`. All conversion lives in the new `services/mapGeo.ts` — a silent
+  swap renders geometry in the wrong hemisphere without throwing, so it is
+  covered by tests using real Indian coordinates where a swap is unmistakable.
+- `L.circle({radius: metres})` has no Mapbox equivalent, so search radii and CSV
+  buffers are emitted as real polygons with a cos-latitude correction (without
+  it a 1 km circle in Mumbai renders visibly elliptical).
+
+### Changed — basemaps
+- All five picker options preserved, each mapped to its closest Mapbox style:
+  Light → `light-v11`, Dark → `dark-v11`, Voyager → `outdoors-v12`,
+  Satellite → `satellite-streets-v12`, Street → `streets-v12`.
+
+### Changed — PDF report figure
+- `mapFigure.ts` now pulls basemap tiles from Mapbox's Static Tiles API instead
+  of CARTO, so the printed figure matches the style on screen. The Web-Mercator
+  stitching path is unchanged. With no token, tile loading fails cleanly and the
+  figure falls back to its existing no-basemap rendering — the report can never
+  break on a missing basemap. Attribution updated to Mapbox + OpenStreetMap.
+
+### Added
+- `VITE_MAPBOX_TOKEN` build-time variable, wired through the Pages workflow the
+  same way as `VITE_APP_TOKEN`. A `pk.` token ships in the bundle by design and
+  is protected by a URL restriction on the Mapbox account, not by secrecy.
+  Absent token → a clear "Map unavailable" message rather than a blank canvas.
+- `services/mapGeo.ts` + 16 tests (ring conversion/closure, metre-accurate
+  circles, bounds order, contrast stretch, colour ramp parity with the PDF).
+
+### Removed
+- Leaflet, `leaflet.heat`, and their CDN `<script>`/`<link>` tags — no
+  render-blocking third-party map scripts in `index.html` any more.
+
+### Performance note
+- Mapbox GL JS is ~1.9 MB raw, so it is split into its own chunk. The entry
+  bundle is 1,149 kB (gzip 317 kB) — effectively unchanged from 1,146 kB before
+  the migration — and the map library loads in parallel instead of blocking the
+  login screen, which has no map.
+
+---
+
 ## [1.11.5] — 2026-08-04 — Drawer Layout Fix (frontend-only)
 
 Live report: *"there is no show more technical/confidence details."*

@@ -18,12 +18,26 @@
  * ranked-pin and excluded-cell samples, study-area line sample).
  */
 import type { HexGridCell, LocationData } from '../types';
+import { config } from '../config';
 
 const RAMP = (t: number) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) * 130)}, 80%, 46%)`; // matches MapView
 
-const TILE_SUBDOMAINS = ['a', 'b', 'c', 'd'];
-const tileUrl = (z: number, x: number, y: number) =>
-  `https://${TILE_SUBDOMAINS[(x + y) % 4]}.basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png`;
+/**
+ * v1.12.0 — basemap tiles now come from Mapbox's Static Tiles API instead of
+ * CARTO, so the PDF figure matches the Mapbox style the user just looked at on
+ * screen. Same {z}/{x}/{y} raster contract as before, so the whole Web-Mercator
+ * tile-stitching path below is unchanged.
+ *
+ * The token is the same public `pk.` token the map uses. If it is absent (a
+ * build without VITE_MAPBOX_TOKEN), tileUrl returns null and fetchBasemap
+ * falls back to the clean no-basemap rendering — exactly as it already did
+ * when a tile request failed. The report can never break on a missing basemap.
+ */
+const tileUrl = (z: number, x: number, y: number): string | null => {
+  if (!config.mapboxToken) return null;
+  return `https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/256/${z}/${x}/${y}`
+    + `?access_token=${encodeURIComponent(config.mapboxToken)}`;
+};
 
 const TILE_TIMEOUT_MS = 5000;   // whole-basemap budget; miss it -> clean fallback
 const MAX_TILES = 32;           // safety cap (a city extent needs ~6-16)
@@ -47,11 +61,13 @@ const yFrac = (lat: number) => {
 
 function loadTile(z: number, x: number, y: number): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
+    const url = tileUrl(z, x, y);
+    if (!url) { reject(new Error('no basemap token')); return; }
     const img = new Image();
     img.crossOrigin = 'anonymous'; // required to keep the canvas exportable
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('tile failed'));
-    img.src = tileUrl(z, x, y);
+    img.src = url;
   });
 }
 
@@ -336,7 +352,7 @@ export async function renderMapFigure(
     );
     ctx.fillText(
       hasBasemap
-        ? 'Basemap (c) OpenStreetMap contributors, (c) CARTO. Analysis data: OpenStreetMap, Google Places. H3 hexagonal grid, Web Mercator.'
+        ? 'Basemap (c) Mapbox (c) OpenStreetMap contributors. Analysis data: OpenStreetMap, Google Places. H3 hexagonal grid, Web Mercator.'
         : 'Analytical figure (basemap unavailable at export time). Data: (c) OpenStreetMap contributors; Google Places. H3 hexagonal grid.',
       lx, row3,
     );

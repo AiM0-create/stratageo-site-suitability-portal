@@ -49,7 +49,7 @@ const TOUR_STEPS: TourStep[] = [
     fallbackSelector: '.drawer',
   },
   {
-    selector: '.leaflet-container',
+    selector: '.sg-map',
     title: 'Interactive Map',
     description: 'After analysis, the map shows numbered markers for each ranked site. Click any marker for its score and computed network routes. Greyed hexes are masked out — outside a constraint, inside a buffer, or in water.',
     position: 'right',

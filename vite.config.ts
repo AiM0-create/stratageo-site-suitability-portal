@@ -47,6 +47,10 @@ export default defineConfig(({ command }) => ({
         manualChunks: {
           react: ['react', 'react-dom'],
           recharts: ['recharts'],
+          // v1.12.0 — Mapbox GL JS is ~1.9 MB raw. Split out so it does not sit
+          // in the entry chunk blocking first paint: the login screen and the
+          // chat have no map, and the browser can fetch this in parallel.
+          mapbox: ['mapbox-gl'],
         },
       },
     },
