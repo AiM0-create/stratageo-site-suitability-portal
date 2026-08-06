@@ -5,7 +5,33 @@ import react from '@vitejs/plugin-react';
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 
-export default defineConfig(({ command }) => ({
+/**
+ * v1.12.0 — fail the build if VITE_MAPBOX_TOKEN is a Mapbox SECRET token.
+ *
+ * Vite inlines env vars as string literals, so an `sk.` token ends up embedded
+ * in the bundle regardless of any runtime guard. That is exactly what happened
+ * on the first v1.12.0 deploy: the build succeeded, and GitHub push protection
+ * rejected the gh-pages push with an opaque "git failed with exit code 1".
+ *
+ * Failing here turns that into a one-line, obvious error at the build step, and
+ * guarantees a secret token can never be written into a publishable artifact.
+ */
+function assertNotSecretMapboxToken() {
+  const t = (process.env.VITE_MAPBOX_TOKEN || '').trim();
+  if (t.startsWith('sk.')) {
+    throw new Error(
+      'VITE_MAPBOX_TOKEN is a Mapbox SECRET token (starts with "sk."). Secret ' +
+      'tokens can modify your Mapbox account and must never be embedded in a ' +
+      'browser bundle. Revoke it in the Mapbox console and replace it with a ' +
+      'PUBLIC token (starts with "pk.") restricted to this site. ' +
+      'A token becomes "sk." as soon as any Secret scope is ticked when creating it.',
+    );
+  }
+}
+
+export default defineConfig(({ command }) => {
+  assertNotSecretMapboxToken();
+  return ({
   // Injected at build time so the UI version badge always matches package.json
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
@@ -55,4 +81,5 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
-}));
+  });
+});
