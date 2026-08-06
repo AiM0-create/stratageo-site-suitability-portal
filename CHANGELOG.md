@@ -53,6 +53,17 @@ than raster tile images stitched in the DOM.
 - `services/mapGeo.ts` + 16 tests (ring conversion/closure, metre-accurate
   circles, bounds order, contrast stretch, colour ramp parity with the PDF).
 
+### Added — secret-token guard
+- Mapbox issues `sk.` (secret) instead of `pk.` (public) the moment any *Secret
+  scope* is ticked when creating a token, and the two look nearly identical. An
+  `sk.` token reached the build secret during this migration; the bundle built
+  fine and **GitHub push protection blocked the deploy**, which is the only
+  thing that stopped a secret token being published to a public repo.
+- `services/mapboxToken.ts` now discards any token that is not a well-formed
+  `pk.`, disables the map, and logs why (without echoing the token). A secret
+  token is therefore un-shippable rather than dependent on GitHub noticing.
+  11 tests cover it.
+
 ### Removed
 - Leaflet, `leaflet.heat`, and their CDN `<script>`/`<link>` tags — no
   render-blocking third-party map scripts in `index.html` any more.

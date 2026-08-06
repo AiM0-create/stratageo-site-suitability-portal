@@ -1,3 +1,5 @@
+import { publicMapboxToken } from '../services/mapboxToken';
+
 export const config = {
   appName: 'Stratageo',
   tagline: 'AI-Assisted Site Suitability Portal',
@@ -18,7 +20,7 @@ export const config = {
    *  VITE_MAPBOX_TOKEN GitHub secret, same pattern as VITE_APP_TOKEN. Empty in
    *  a local build without the env var — MapView degrades to a clear message
    *  rather than a blank canvas. */
-  mapboxToken: import.meta.env.VITE_MAPBOX_TOKEN || '',
+  mapboxToken: publicMapboxToken(import.meta.env.VITE_MAPBOX_TOKEN),
 
   /** Demo mode = no backend URL configured. If backend URL exists, we're live. */
   get isDemoMode(): boolean {
