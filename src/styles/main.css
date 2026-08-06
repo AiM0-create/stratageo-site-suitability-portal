@@ -1024,7 +1024,9 @@ body {
   /* --- Map & overlays --- */
   .sg-map-legend { bottom: 80px; left: 8px; }
   .mapboxgl-ctrl-top-right { top: 54px !important; right: 8px !important; }
-  .mapboxgl-ctrl-bottom-right { display: none !important; } /* Hide attribution on mobile — it overlaps assistant */
+  /* v1.12.1 — attribution stays visible on mobile: Mapbox's terms require it.
+     It is the compact (i) badge now, so it no longer crowds the assistant. */
+  .mapboxgl-ctrl-bottom-left { display: none !important; } /* scale bar only — hide on mobile */
 
   /* --- Panels --- */
   .sg-admin-panel { max-width: 100%; max-height: 95vh; border-radius: 12px; margin: 8px; }

@@ -4,6 +4,34 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.1] — 2026-08-06 — Native map controls (frontend-only)
+
+Live report: *"why are there still old navigation buttons and not mapbox native
+controls?"* — fair. They **were** Mapbox's `NavigationControl`, but v1.12.0
+passed `showCompass: false`, reducing it to a bare +/− pair visually
+indistinguishable from the Leaflet control it replaced. The migration's new
+capabilities were invisible.
+
+### Changed
+- **Compass enabled** (`showCompass`, `visualizePitch`) — surfaces what GL JS
+  actually adds over raster Leaflet: drag-rotate and pitch, with
+  click-to-reset-north.
+- **Fullscreen control added** — useful when reading a dense hex surface.
+- **Scale bar added** (bottom-left, metric) — a screening zone only means
+  something against a distance reference.
+
+### Fixed — attribution compliance
+- The inherited mobile rule hid the bottom-right corner outright
+  (`display: none`). That was acceptable for OSM/CARTO but **Mapbox's terms
+  require attribution to remain visible**. Attribution is now Mapbox's compact
+  `(i)` badge, kept visible at all breakpoints; the scale bar hides on mobile
+  instead.
+
+Verified in a browser against the live token: zoom, compass, fullscreen, scale
+and compact attribution all present, with the scale bar reading a real distance.
+
+---
+
 ## [1.12.0] — 2026-08-06 — Mapbox GL JS
 
 Full migration of the map from **Leaflet** (loaded as CDN `<script>` globals) to

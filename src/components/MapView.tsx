@@ -223,9 +223,29 @@ export const MapView: React.FC<MapViewProps> = ({
       style: bm.style,
       center: [config.map.defaultCenter[1], config.map.defaultCenter[0]],  // [lng,lat]
       zoom: config.map.defaultZoom,
-      attributionControl: true,
+      // v1.12.1 — compact attribution: an (i) that expands on click. Mapbox's
+      // terms require attribution to stay visible, and the inherited mobile CSS
+      // used to hide the corner outright (acceptable for OSM/CARTO, not here).
+      attributionControl: false,
     });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+    // v1.12.1 — the full native Mapbox control set. v1.12.0 passed
+    // showCompass:false, which reduced NavigationControl to a bare +/- pair
+    // visually indistinguishable from the Leaflet control it replaced — the
+    // migration's capabilities were invisible. The compass exposes what GL JS
+    // actually adds over raster Leaflet: drag-rotate and pitch, with a
+    // click-to-reset-north affordance. Scale matters for a spatial-screening
+    // tool (a zone is only meaningful against a distance reference), and
+    // fullscreen is genuinely useful when reading a dense hex surface.
+    map.addControl(
+      new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }),
+      'top-right',
+    );
+    map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
+    map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
+    map.addControl(
+      new mapboxgl.ScaleControl({ maxWidth: 110, unit: 'metric' }),
+      'bottom-left',
+    );
     map.on('click', () => onDeselectAll());
     map.on('load', () => { installLayers(map); setStyleEpoch(e => e + 1); });
     // Fires after every setStyle() — the style reload wiped our layers, rebuild.
