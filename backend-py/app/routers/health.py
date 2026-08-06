@@ -10,6 +10,42 @@ from ..config import (
 router = APIRouter()
 
 
+def public_mapbox_token(raw: str) -> str:
+    """v1.12.0 — only ever hand a PUBLIC (`pk.`) Mapbox token to a browser.
+
+    Mapbox mints an `sk.` (secret) token the moment any Secret scope is ticked
+    when creating one, and the two are one letter apart with an identical-looking
+    body. A secret token can modify the account, so serving one to the browser
+    would be far worse than not having a map. Anything that is not a well-formed
+    public token is withheld and the map degrades to "Map unavailable".
+    """
+    t = (raw or "").strip()
+    if not t.startswith("pk."):
+        return ""
+    # pk. + a non-trivial body — keeps placeholders like "pk.TODO" out.
+    return t if len(t) >= 20 else ""
+
+
+@router.get("/api/v2/map-config")
+async def map_config():
+    """Runtime map configuration for the frontend.
+
+    Exists so the Mapbox token is NOT compiled into the JS bundle. Returns only
+    a public token (or an empty string), never a secret. Deliberately
+    unauthenticated: the value is public by design and readable from the live
+    page anyway, and gating it would only break the map on first paint.
+    """
+    s = get_settings()
+    token = public_mapbox_token(s.mapbox_token)
+    return {
+        "mapboxToken": token,
+        "mapboxConfigured": bool(token),
+        # True when a token IS set but was rejected for not being public —
+        # lets the UI say something more useful than "not configured".
+        "mapboxTokenRejected": bool(s.mapbox_token) and not token,
+    }
+
+
 @router.get("/health")
 async def health():
     s = get_settings()

@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.12.0 — Mapbox GL JS** (frontend) / v1.11.3 (backend)
+**Current version: v1.12.0 — Mapbox GL JS**
 
 > One prompt → one plan → one click. Results lead with the
 > verdict, a plain-English reason, and what to do next; every technical
@@ -32,7 +32,8 @@ The product journey: **broad geography → spatial screening → priority invest
 
 The current release is **v1.12.0 — Mapbox GL JS**: the map is now GPU-rendered vector
 tiles instead of raster tiles, so the suitability grid recolours instantly and pan/zoom
-is smooth. All five basemaps are preserved and the PDF figure uses the same style.
+is smooth. All five basemaps are preserved and the PDF figure uses the same style. The
+map token is served by the engine at runtime rather than compiled into the bundle.
 
 Every release — what changed, why, and the live failure that motivated it — is in
 [`CHANGELOG.md`](CHANGELOG.md). This README describes the portal as it is **today**;
@@ -121,10 +122,9 @@ it deliberately does not accumulate a section per version.
 ```
 VITE_PY_BACKEND_URL           # Cloud Run engine base URL
 VITE_APP_TOKEN                # X-App-Token kill-switch (ships in bundle by design)
-VITE_MAPBOX_TOKEN             # Mapbox GL JS public `pk.` token — ships in the bundle;
-                              # protect it with a URL restriction on the Mapbox account,
-                              # not by secrecy. Without it the map shows a clear
-                              # "Map unavailable" message instead of a blank canvas.
+# NOTE: there is deliberately NO Mapbox token here. Baking it in put the token
+# in the shipped JS and GitHub push protection blocked every deploy. The map
+# fetches it at runtime from the engine's /api/v2/map-config instead.
 ```
 
 **Backend** (set in Secret Manager for Cloud Run; `.env` for local dev):
@@ -134,6 +134,9 @@ OPENAI_API_KEY
 GOOGLE_PLACES_API_KEY
 ORS_API_KEY
 APP_SHARED_TOKEN
+MAPBOX_TOKEN                  # Mapbox GL JS PUBLIC token (pk.). Served to the browser
+                              # by /api/v2/map-config, never bundled. Rotate here alone —
+                              # no frontend rebuild. A secret (sk.) token is refused.
 
 # Cost-aware model routing (v1.1.0)
 STRATAGEO_CHAT_MODEL          # default: gpt-5.4-mini

@@ -18,7 +18,7 @@
  * ranked-pin and excluded-cell samples, study-area line sample).
  */
 import type { HexGridCell, LocationData } from '../types';
-import { config } from '../config';
+import { mapboxTokenSync, loadMapConfig } from './mapConfig';
 
 const RAMP = (t: number) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) * 130)}, 80%, 46%)`; // matches MapView
 
@@ -28,15 +28,17 @@ const RAMP = (t: number) => `hsl(${Math.round(Math.max(0, Math.min(1, t)) * 130)
  * screen. Same {z}/{x}/{y} raster contract as before, so the whole Web-Mercator
  * tile-stitching path below is unchanged.
  *
- * The token is the same public `pk.` token the map uses. If it is absent (a
- * build without VITE_MAPBOX_TOKEN), tileUrl returns null and fetchBasemap
- * falls back to the clean no-basemap rendering — exactly as it already did
- * when a tile request failed. The report can never break on a missing basemap.
+ * The token is the same public `pk.` token the map uses, fetched at runtime
+ * from the engine (never bundled — see services/mapConfig.ts). If it is absent,
+ * tileUrl returns null and fetchBasemap falls back to the clean no-basemap
+ * rendering — exactly as it already did when a tile request failed. The report
+ * can never break on a missing basemap.
  */
 const tileUrl = (z: number, x: number, y: number): string | null => {
-  if (!config.mapboxToken) return null;
+  const token = mapboxTokenSync();
+  if (!token) return null;
   return `https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/256/${z}/${x}/${y}`
-    + `?access_token=${encodeURIComponent(config.mapboxToken)}`;
+    + `?access_token=${encodeURIComponent(token)}`;
 };
 
 const TILE_TIMEOUT_MS = 5000;   // whole-basemap budget; miss it -> clean fallback
@@ -106,6 +108,12 @@ export async function renderMapFigure(
 ): Promise<{ dataUrl: string; aspect: number; hasBasemap: boolean } | null> {
   const { hexGrid, locations, studyAreaBoundary, withheld = false, weightsAdjusted = false } = opts;
   if (!hexGrid || hexGrid.length === 0) return null;
+
+  // v1.12.0 — make sure the runtime token is resolved before any tile request.
+  // Usually already cached (the map fetched it), but a PDF exported from a
+  // restored/shared analysis may reach here first. Never throws: on failure the
+  // token stays empty and the figure renders without a basemap.
+  try { await loadMapConfig(); } catch { /* basemap-less figure is fine */ }
 
   try {
     // ── Geographic bounds over every drawable geometry ──

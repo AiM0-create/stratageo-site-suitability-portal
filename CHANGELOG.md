@@ -4,7 +4,7 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
-## [1.12.0] — 2026-08-06 — Mapbox GL JS (frontend-only)
+## [1.12.0] — 2026-08-06 — Mapbox GL JS
 
 Full migration of the map from **Leaflet** (loaded as CDN `<script>` globals) to
 **Mapbox GL JS 3** (bundled via npm). Vector tiles rendered on the GPU rather
@@ -45,13 +45,29 @@ than raster tile images stitched in the DOM.
   figure falls back to its existing no-basemap rendering — the report can never
   break on a missing basemap. Attribution updated to Mapbox + OpenStreetMap.
 
-### Added
-- `VITE_MAPBOX_TOKEN` build-time variable, wired through the Pages workflow the
-  same way as `VITE_APP_TOKEN`. A `pk.` token ships in the bundle by design and
-  is protected by a URL restriction on the Mapbox account, not by secrecy.
-  Absent token → a clear "Map unavailable" message rather than a blank canvas.
+### Added — the token is served at runtime, never bundled
+- **New engine endpoint `GET /api/v2/map-config`** returns the Mapbox token to
+  the browser at startup. The frontend no longer has a build-time token at all.
+- *Why:* the first cut injected it via `VITE_MAPBOX_TOKEN`. Vite inlines env
+  vars as string literals, so the token ended up in the shipped JS and **GitHub
+  push protection rejected every gh-pages deploy** ("Mapbox Secret Access
+  Token"). Verified empirically: with the env var set, the token string was
+  present in `dist/`. Serving it at runtime means it never enters the repo or
+  any build artifact — proven by a build with the env var set producing **zero**
+  token strings in the output — and it can be **rotated by updating one Cloud
+  Run env var, with no frontend rebuild**.
+- **Public tokens only, enforced on both sides.** Mapbox mints an `sk.` (secret)
+  token the moment any Secret scope is ticked, and the two are one letter apart.
+  A secret token can modify the Mapbox account. The endpoint withholds anything
+  that is not a well-formed `pk.`, and the client re-validates rather than
+  trusting the response. The build additionally refuses to run if a `VITE_`
+  Mapbox token is present at all.
+- The endpoint is deliberately unauthenticated: the value is public by design
+  and readable from the live page anyway, and gating it would break first paint.
 - `services/mapGeo.ts` + 16 tests (ring conversion/closure, metre-accurate
-  circles, bounds order, contrast stretch, colour ramp parity with the PDF).
+  circles, bounds order, contrast stretch, colour ramp parity with the PDF);
+  `services/mapConfig.ts` + 11 tests (caching, degradation, secret rejection);
+  `services/mapboxToken.ts` + 11 tests; 10 backend tests for the endpoint.
 
 ### Added — secret-token guard
 - Mapbox issues `sk.` (secret) instead of `pk.` (public) the moment any *Secret

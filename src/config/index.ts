@@ -1,5 +1,3 @@
-import { publicMapboxToken } from '../services/mapboxToken';
-
 export const config = {
   appName: 'Stratageo',
   tagline: 'AI-Assisted Site Suitability Portal',
@@ -14,13 +12,10 @@ export const config = {
   /** Rotatable kill-switch token sent as X-App-Token to the engine (not a secret). */
   appToken: import.meta.env.VITE_APP_TOKEN || '',
 
-  /** v1.12.0 — Mapbox GL JS public access token. Ships in the bundle by design
-   *  (that is what a `pk.` token is for); it is protected by a URL restriction
-   *  on the Mapbox account, not by secrecy. Injected at build time from the
-   *  VITE_MAPBOX_TOKEN GitHub secret, same pattern as VITE_APP_TOKEN. Empty in
-   *  a local build without the env var — MapView degrades to a clear message
-   *  rather than a blank canvas. */
-  mapboxToken: publicMapboxToken(import.meta.env.VITE_MAPBOX_TOKEN),
+  /* v1.12.0 — the Mapbox token deliberately does NOT live here. Baking it in
+   * at build time put it in the shipped JS, which GitHub push protection
+   * rejected on every deploy. It is fetched at runtime from the engine's
+   * /api/v2/map-config instead — see services/mapConfig.ts. */
 
   /** Demo mode = no backend URL configured. If backend URL exists, we're live. */
   get isDemoMode(): boolean {

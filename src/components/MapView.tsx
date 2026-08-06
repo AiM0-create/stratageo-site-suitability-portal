@@ -6,6 +6,7 @@ import { config } from '../config';
 import {
   toLngLatRing, circleRingLngLat, boundsOfLatLng, stretch, rampColor,
 } from '../services/mapGeo';
+import { loadMapConfig } from '../services/mapConfig';
 
 /**
  * v1.12.0 — migrated from Leaflet (CDN globals) to Mapbox GL JS.
@@ -129,7 +130,22 @@ export const MapView: React.FC<MapViewProps> = ({
   // Bumped on every style (re)load so the data effects re-install their layers.
   const [styleEpoch, setStyleEpoch] = useState(0);
 
-  const tokenMissing = !config.mapboxToken;
+  // v1.12.0 — the token is fetched from the engine at runtime (never bundled),
+  // so map creation waits for it. null = still loading, '' = unavailable.
+  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
+  const [tokenRejected, setTokenRejected] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    loadMapConfig().then(cfg => {
+      if (!alive) return;
+      setMapboxToken(cfg.token);
+      setTokenRejected(cfg.rejected);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const tokenLoading = mapboxToken === null;
+  const tokenMissing = mapboxToken === '';
 
   /** Create every source + layer this map uses, empty. Idempotent: safe to call
    *  again after a style swap, which destroys them all. */
@@ -197,9 +213,9 @@ export const MapView: React.FC<MapViewProps> = ({
 
   // ── Initialise map ──
   useEffect(() => {
-    if (!containerRef.current || mapRef.current || tokenMissing) return;
+    if (!containerRef.current || mapRef.current || !mapboxToken) return;
 
-    mapboxgl.accessToken = config.mapboxToken;
+    mapboxgl.accessToken = mapboxToken;
     const bm = config.basemaps.find(b => b.id === basemapId) ?? config.basemaps[0];
 
     const map = new mapboxgl.Map({
@@ -227,8 +243,9 @@ export const MapView: React.FC<MapViewProps> = ({
       map.remove();
       mapRef.current = null;
     };
+    // Re-runs once the token arrives; guarded above so it builds the map once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mapboxToken]);
 
   // ── Basemap swap: setStyle wipes layers; 'style.load' reinstalls them ──
   useEffect(() => {
@@ -502,10 +519,19 @@ export const MapView: React.FC<MapViewProps> = ({
     <div className="sg-map-wrapper">
       <div ref={containerRef} className="sg-map" id="map-container" />
 
+      {tokenLoading && (
+        <div className="sg-map-token-missing">
+          <span>Loading map…</span>
+        </div>
+      )}
       {tokenMissing && (
         <div className="sg-map-token-missing">
           <strong>Map unavailable</strong>
-          <span>No Mapbox token is configured for this build (VITE_MAPBOX_TOKEN).</span>
+          <span>
+            {tokenRejected
+              ? 'The configured Mapbox token is not a public (pk.) token, so it was refused.'
+              : 'No Mapbox token is configured on the analysis engine (MAPBOX_TOKEN).'}
+          </span>
         </div>
       )}
 

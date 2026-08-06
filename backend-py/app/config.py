@@ -382,9 +382,9 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.11.3"
+APP_VERSION     = "1.12.0"
 API_VERSION     = "v2"
-ENGINE_VERSION  = "stratageo-engine-00077"
+ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
 # v1.6.0/v1.6.1/v1.6.2/v1.6.3 — the SpecV2 wire schema and the EvidenceTrail
 # schema are structurally unchanged; hardConstraintVerification /
@@ -397,7 +397,7 @@ ENGINE_VERSION  = "stratageo-engine-00077"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Coastline & Quiet Detail (open-sea mask, collapsed technical readouts)"
+RELEASE_NAME    = "Mapbox GL JS (vector map, runtime-served map token)"
 
 
 class Settings(BaseSettings):
@@ -415,6 +415,14 @@ class Settings(BaseSettings):
     google_places_api_key: str = ""
     ors_api_key: str = ""
     app_shared_token: str = ""
+    # v1.12.0 — Mapbox GL JS PUBLIC token, served to the browser at runtime by
+    # /api/v2/map-config rather than baked into the frontend bundle at build
+    # time. Keeping it out of the bundle means it never enters the repo or a
+    # build artifact (GitHub push protection flagged the baked-in version), and
+    # it can be rotated by updating this env var alone — no frontend rebuild.
+    # It is still public by nature: any visitor can read it from the network
+    # tab. Its real protection is the URL restriction on the Mapbox account.
+    mapbox_token: str = ""
 
     # ── CORS / origin ─────────────────────────────────────────────────────────
     frontend_origins: str = "http://localhost:5173"
