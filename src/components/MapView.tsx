@@ -204,11 +204,36 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, []);
 
+  /**
+   * v1.12.2 — BUG FIX: this used to be
+   *   `if (!map || !map.isStyleLoaded()) return;`
+   * which DROPPED the payload whenever the style happened to be mid-settle.
+   * A finished analysis pushes `hexGrid` in as a new prop exactly once; if that
+   * instant collided with style loading, the grid was discarded and nothing
+   * ever retried it — `hexGrid` never changes again and `styleEpoch` does not
+   * bump — so the H3 surface simply never appeared over the basemap.
+   *
+   * Every payload is now remembered and re-applied once the style is ready, so
+   * the last write always wins regardless of arrival timing.
+   */
+  const pendingRef = useRef<Record<string, GeoJSON.FeatureCollection>>({});
+  /** The style URL currently applied — see the basemap-swap effect. */
+  const appliedStyleRef = useRef<string | null>(null);
+
   const setData = useCallback((id: string, data: GeoJSON.FeatureCollection) => {
+    pendingRef.current[id] = data;               // always keep the latest
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map || !map.isStyleLoaded()) return;    // flushed by installLayers()
     const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
     if (src) src.setData(data);
+  }, []);
+
+  /** Re-apply every buffered payload — after first load and after each style swap. */
+  const flushPending = useCallback((map: mapboxgl.Map) => {
+    for (const [id, data] of Object.entries(pendingRef.current)) {
+      const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
+      if (src) src.setData(data);
+    }
   }, []);
 
   // ── Initialise map ──
@@ -228,6 +253,7 @@ export const MapView: React.FC<MapViewProps> = ({
       // used to hide the corner outright (acceptable for OSM/CARTO, not here).
       attributionControl: false,
     });
+    appliedStyleRef.current = bm.style;
     // v1.12.1 — the full native Mapbox control set. v1.12.0 passed
     // showCompass:false, which reduced NavigationControl to a bare +/- pair
     // visually indistinguishable from the Leaflet control it replaced — the
@@ -247,9 +273,14 @@ export const MapView: React.FC<MapViewProps> = ({
       'bottom-left',
     );
     map.on('click', () => onDeselectAll());
-    map.on('load', () => { installLayers(map); setStyleEpoch(e => e + 1); });
+    // installLayers() recreates the (empty) sources; flushPending() then
+    // re-applies whatever data has arrived so far — this is what makes a grid
+    // that landed while the style was busy actually show up, and what restores
+    // it after a basemap swap wipes every custom source.
+    const ready = () => { installLayers(map); flushPending(map); setStyleEpoch(e => e + 1); };
+    map.on('load', ready);
     // Fires after every setStyle() — the style reload wiped our layers, rebuild.
-    map.on('style.load', () => { installLayers(map); setStyleEpoch(e => e + 1); });
+    map.on('style.load', ready);
 
     mapRef.current = map;
     setTimeout(() => map.resize(), 100);
@@ -272,8 +303,12 @@ export const MapView: React.FC<MapViewProps> = ({
     const map = mapRef.current;
     if (!map) return;
     const bm = config.basemaps.find(b => b.id === basemapId) ?? config.basemaps[0];
-    const current = map.getStyle()?.sprite;   // cheap identity check, avoids redundant reloads
-    if (current === undefined && !map.isStyleLoaded()) return;
+    // v1.12.2 — track what we actually applied. The previous guard inspected
+    // `getStyle()?.sprite`, which says nothing about WHICH of our styles is
+    // live, so the effect both fired a redundant setStyle on mount (the initial
+    // style is already basemapId's) and could skip a real swap.
+    if (appliedStyleRef.current === bm.style) return;
+    appliedStyleRef.current = bm.style;
     map.setStyle(bm.style);
   }, [basemapId]);
 

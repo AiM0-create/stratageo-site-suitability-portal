@@ -4,6 +4,39 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.2] — 2026-08-06 — H3 grid visible again (frontend-only)
+
+Live report: the H3 suitability surface never appeared over the Mapbox basemap,
+and the "Map" button sat on top of the Mapbox control stack.
+
+### Fixed — the hex grid was being silently discarded
+- `setData()` opened with `if (!map || !map.isStyleLoaded()) return;` — it
+  **dropped the payload** whenever the style happened to be mid-settle. A
+  finished analysis pushes `hexGrid` in as a new prop exactly *once*; if that
+  instant collided with style loading, the grid was discarded and nothing ever
+  retried it (`hexGrid` never changes again, `styleEpoch` doesn't bump), so the
+  H3 surface simply never rendered.
+- Every payload is now buffered per source and re-applied once the style is
+  ready, so the last write always wins regardless of arrival timing. The same
+  flush restores all layers after a basemap swap wipes them.
+
+### Fixed — basemap-swap guard
+- The swap effect tested `getStyle()?.sprite`, which says nothing about *which*
+  of our styles is live: it fired a redundant `setStyle` on mount and could skip
+  a real swap. It now tracks the applied style URL directly.
+
+### Fixed — "Map" button overlapped the Mapbox controls
+- `top: 130px` was calculated for Leaflet's 2-button zoom control. Mapbox's
+  stack is taller — measured in-browser at **50px→198px** (96px navigation group
+  incl. compass, then a 32px fullscreen group) — so the button landed *inside*
+  the navigation group. Moved to `206px`, verified non-overlapping with an 8px
+  gap against the real stylesheet.
+- Note: Mapbox GL JS ships **no built-in basemap-switcher control**. The five
+  styles are Mapbox's own (`light-v11`, `dark-v11`, `outdoors-v12`,
+  `satellite-streets-v12`, `streets-v12`); only the picker UI is ours.
+
+---
+
 ## [1.12.1] — 2026-08-06 — Native map controls (frontend-only)
 
 Live report: *"why are there still old navigation buttons and not mapbox native

@@ -4,7 +4,7 @@
 
 > **Live portal:** [aim0-create.github.io/stratageo-site-suitability-portal](https://aim0-create.github.io/stratageo-site-suitability-portal/)
 
-**Current version: v1.12.1 — Mapbox GL JS**
+**Current version: v1.12.2 — Mapbox GL JS**
 
 > One prompt → one plan → one click. Results lead with the
 > verdict, a plain-English reason, and what to do next; every technical
@@ -30,7 +30,7 @@ The product journey: **broad geography → spatial screening → priority invest
 
 ## What's New
 
-The current release is **v1.12.0 — Mapbox GL JS**: the map is now GPU-rendered vector
+The current release is **v1.12.2 — Mapbox GL JS**: the map is now GPU-rendered vector
 tiles instead of raster tiles, so the suitability grid recolours instantly and pan/zoom
 is smooth. All five basemaps are preserved and the PDF figure uses the same style. The
 map token is served by the engine at runtime rather than compiled into the bundle.

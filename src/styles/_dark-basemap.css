@@ -175,7 +175,14 @@
 
 .sg-basemap-control {
   position: absolute;
-  top: 130px;      /* below Leaflet zoom bottom (~124px) + 6px gap */
+  /* v1.12.2 — clears the Mapbox control stack. The old 130px was computed for
+     Leaflet's 2-button zoom control; Mapbox's stack is taller (3-button
+     navigation group incl. compass = 96px, then a 32px fullscreen group), so
+     130px landed INSIDE the navigation group. Measured in-browser: the stack
+     spans 50px→198px, so 206px clears it with an 8px gap.
+     Mapbox GL JS ships no built-in basemap-switcher control — the styles are
+     Mapbox's, the picker UI has to be ours. */
+  top: 206px;
   right: 10px;
   z-index: 500;
   display: flex;
