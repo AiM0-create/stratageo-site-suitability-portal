@@ -48,7 +48,7 @@ GATED_STAGES = (
 # ── Relevance regexes (deterministic, prompt/spec text) ───────────────────────
 _WATER_RE = re.compile(
     r"\briver(?:side|front|bank)?\b|\bwater(?:front|body|side)?\b|\blake(?:front|side)?\b"
-    r"|\bcoast(?:al|line)?\b|\bsea\s?(?:front|side|facing)\b|\bbeach\b|\bghat\b"
+    r"|\bcoast(?:al|line)?\b|\bsea\s?(?:front|side|facing)\b|\bbeach(?:front|side|es)?\b|\bghat\b"
     r"|\bhooghly\b|\bganga\b|\bganges\b|\bflood\b|\bwetland\b|\bcreek\b|\bcanal.?front\b",
     re.I,
 )
@@ -127,13 +127,51 @@ def _buildability_flags(spec) -> dict:
     is_commercial = bool(_COMMERCIAL_RE.search(text))
     avoid_rail = bool(_AVOID_RAIL_RE.search(text))
     base = is_wf or is_commercial
+    # v1.12.4 — the ghat mask is gated on WATER relevance, not on "is commercial".
+    # A ghat is a water-access structure: there is no such thing as a ghat without
+    # a river, lake or sea, so a landlocked brief can never need this check.
+    # Measured on the live Indiranagar (Bengaluru) run: the ghat fetch is an
+    # Overpass name-regex scan with no tag filter, which costs 41.7s — more than
+    # the 19-tag protected_area query that returns 460 features — and it returned
+    # exactly one match, "Dhobi Ghat", an open-air laundry. Two of those scans
+    # monopolised both concurrency slots and exhausted the 90s stage budget, so
+    # protected_area (the check that actually matters) was dropped and the run
+    # was reported to the customer as provider-degraded with reduced confidence.
+    # The raw prompt is included because water intent is stated by the USER; a
+    # planner-templated objective may not echo it.
+    water_text = " ".join([
+        text,
+        (getattr(getattr(spec, "rawIntent", None), "rawPrompt", "") or "").lower(),
+        (getattr(spec, "normalizedPrompt", "") or "").lower(),
+    ])
+    water_relevant = is_wf or bool(_WATER_RE.search(water_text))
     return {
         "railway": base or avoid_rail,
-        "ghat": base,
+        "ghat": water_relevant,
         "protected": base,
         "park_exception": bool(_PARK_USE_RE.search(text)),
         "commercial_proxy": is_commercial or is_wf,
     }
+
+
+# v1.12.4 — the open-ground ("...Maidan") name scan is a FALLBACK for grounds
+# mapped without a usable area tag. It is the single most expensive buildability
+# fetch measured (68.4s for the Indiranagar bbox, returning 0 features) because
+# an Overpass ["name"~...] selector carries no tag filter and therefore scans
+# every named element in the bbox instead of using a tag index.
+#
+# Running it unconditionally spends that on every commercial brief. Running it
+# only where the tag-based protected_area fetch came back thin preserves exactly
+# the coverage it exists for — a poorly-mapped area — while skipping it where
+# the tag data already describes the open space (Bengaluru returned 460
+# polygons). Deterministic, and disclosed as a resource decision, never as a
+# provider degradation.
+OPEN_GROUND_FALLBACK_MAX_TAGGED = 10
+
+
+def should_run_open_ground_fallback(protected_feature_count: int) -> bool:
+    """True when the tag-based open-space data is too thin to rely on alone."""
+    return protected_feature_count <= OPEN_GROUND_FALLBACK_MAX_TAGGED
 
 # ── v1.5-Lite: intelligence classification regexes ────────────────────────────
 _LARGE_FORMAT_RE = re.compile(

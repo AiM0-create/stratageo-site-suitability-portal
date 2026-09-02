@@ -403,6 +403,26 @@ v1.12.3: Unrequested Exclusions & the Stranded Grid (live run: "Find 3 best
   — measured live at 53 features buffered against 0 in the sg-hex source.
   Writes now arm their own map.once("idle") retry instead of trusting an event
   that may already be in the past.
+v1.12.4: Buildability Relevance (live: every Indiranagar run reported "Provider
+  degraded — no-build mask check(s) were skipped: ghat, protected_area",
+  capping confidence on an otherwise clean analysis).
+  Measured against Overpass for that bbox with the real fetch code: ghat 41.7s
+  -> 1 feature ("Dhobi Ghat", a laundry); maidan 68.4s -> 0 features;
+  protected_area 33.0s -> 460 features; railway_area 28.6s -> 20. The two name
+  scans monopolised both concurrency slots and exhausted the 90s stage budget,
+  starving the one check that mattered — and because a timed-out fetch caches
+  nothing, the same area degraded on every subsequent run forever.
+  (1) The ghat mask is gated on WATER relevance instead of "is commercial": a
+  ghat cannot exist without a river, lake or sea. (2) The "...Maidan" name scan
+  becomes a FALLBACK, running only where the tag-based open-space fetch came
+  back thin (<=10 features) — it exists for poorly-mapped areas, and Bengaluru
+  returned 460 polygons. (3) An Overpass endpoint that fails is de-prioritised
+  for a 5-minute cooldown instead of being re-tried on every call: both
+  non-canonical mirrors were failing, so each fetch paid two doomed attempts
+  plus sleep(0.5) before reaching the working endpoint. Also widens _WATER_RE's
+  `beach` term to its -side/-front/plural variants, a gap the new tests exposed
+  — every other water term already had them, so "beachside" read as landlocked
+  and gated the water mask itself (the v1.11.3 failure class).
 """
 from functools import lru_cache
 from typing import Literal
@@ -410,7 +430,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.3"
+APP_VERSION     = "1.12.4"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -425,7 +445,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Unrequested exclusions dropped; stranded hex grid delivered"
+RELEASE_NAME    = "Buildability spends its budget only on checks that can apply"
 
 
 class Settings(BaseSettings):

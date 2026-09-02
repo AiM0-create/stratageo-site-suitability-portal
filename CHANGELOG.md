@@ -4,6 +4,72 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.4] — 2026-09-02 — Buildability relevance
+
+Every Indiranagar run reported *"Requested but not enforced: Buildability Lite
+(no-build masks) — Provider degraded — no-build mask check(s) were skipped:
+ghat, protected_area"*, capping the customer-visible confidence on an otherwise
+clean analysis.
+
+Measured against Overpass for that bbox, running the real fetch code:
+
+| check | elapsed | returned |
+|---|---|---|
+| `ghat` (name regex) | **41.7s** | 1 — "Dhobi Ghat", an open-air laundry |
+| `maidan` (name regex) | **68.4s** | **0** |
+| `protected_area` (19 tags) | 33.0s | 460 — the check that matters |
+| `railway_area` | 28.6s | 20 |
+
+The two name scans monopolised both concurrency slots and exhausted the 90s
+stage budget, starving `protected_area`. And it never self-healed: a timed-out
+fetch caches nothing, so the same area degraded on every subsequent run.
+
+### Fixed — the ghat mask followed commerce instead of water
+- `_buildability_flags()` fired `ghat` from `base = is_waterfront or
+  is_commercial`, so any commercial brief ran it. A ghat is a water-access
+  structure — it cannot exist without a river, lake or sea — so on a landlocked
+  brief the check is guaranteed worthless. PlannerLite already models water
+  relevance (`_WATER_RE` even contains `\bghat\b`); the flags never consulted it.
+- Relevance is judged against the user's raw prompt as well as the objective,
+  because the planner-templated objective may not echo the user's water wording.
+- Deliberately **not** extended to `_COASTAL_METRO_RE`: a coastal city justifies
+  the water *mask* (a hex in the sea is a serious error) but not a 42s name scan
+  for a structure that requires a river.
+
+### Fixed — the open-ground name scan ran as a default, not a fallback
+- The `"…Maidan"` scan exists to catch grounds mapped without a usable area tag.
+  It now runs only where the tag-based `protected_area` fetch came back thin
+  (≤10 features) — precisely the poorly-mapped case it was written for. Bengaluru
+  returned 460 polygons, so it adds nothing there.
+- Reported as a resource decision, never as a provider degradation, so it no
+  longer costs the customer confidence.
+
+### Fixed — a dead Overpass mirror was re-tried on every single call
+- Both non-canonical mirrors were failing (`kumi` 502 / disconnect, `mail.ru`
+  error), so every fetch paid two doomed attempts plus `sleep(0.5)` before
+  reaching the working endpoint — indefinitely, because nothing remembered.
+- A failing endpoint now moves to the back of the order for a 5-minute cooldown,
+  restored automatically on expiry or on its next success. No mirror is ever
+  dropped: the ordering is deliberate (`kumi` throttles least) and mirrors do
+  recover.
+
+### Fixed — "beachside" read as a landlocked brief
+- Exposed by the new tests: every water term in `_WATER_RE` carried its
+  `-side`/`-front` variants except `beach`. That gap gated the water mask too —
+  the same failure class as v1.11.3, where zones landed in the Arabian Sea.
+
+### Tests
+- `backend-py/tests/test_v1124_buildability_relevance.py` — 18 tests across all
+  three causes: the exact landlocked reproduction, five water briefs that must
+  still run the scan, raw-prompt water intent, the fallback threshold and its
+  boundary, and the endpoint memo (ordering, no-endpoint-dropped, recovery,
+  cooldown expiry).
+- `test_v162_smart_masks.py` — the concurrency guard is unchanged; only its
+  premise was updated, since the brief it uses now makes 5 buildability calls
+  rather than 6. Still 3 batches, so the timing threshold still holds.
+
+---
+
 ## [1.12.3] — 2026-09-02 — Unrequested exclusions & the stranded grid
 
 Live run: *"Find 3 best locations for a premium cafe in Indiranagar, Bengaluru"*

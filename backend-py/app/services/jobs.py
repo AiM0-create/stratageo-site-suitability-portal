@@ -63,6 +63,7 @@ from ..engine.metro import (
 from ..engine.route_policy import validate_strict_route_constraints
 from ..engine.planner_lite import (
     create_analysis_plan, _factor_family, _buildability_flags, _COMMERCIAL_RE,
+    should_run_open_ground_fallback,
 )
 from ..engine.stability import compute_ranking_stability
 from ..engine.hard_constraints import (
@@ -1564,8 +1565,33 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             _fp["protected_area"] = asyncio.ensure_future(
                 _safe_fetch("area", _protected_tags, "protected_area"))
             if not bflags.get("park_exception"):
-                _fp["maidan"] = asyncio.ensure_future(
-                    _safe_fetch("named", buildability.OPEN_GROUND_NAME_RE, "maidan"))
+                async def _open_ground_fallback():
+                    """v1.12.4 — run the "...Maidan" name scan only where the
+                    tag-based open-space data is too thin to rely on.
+
+                    This is the most expensive fetch in the stage: measured at
+                    68.4s for the Indiranagar bbox, returning 0 features, because
+                    an Overpass ["name"~...] selector carries no tag filter and
+                    scans every named element in the bbox. It exists to catch
+                    grounds mapped without a usable area tag — so where the tag
+                    query already returned plenty (Bengaluru: 460 polygons) it
+                    adds nothing and simply starves the stage budget. Awaiting
+                    the protected task here does NOT hold a semaphore slot; the
+                    slot is only taken inside _safe_fetch.
+                    """
+                    tagged = await _fp["protected_area"]
+                    if not should_run_open_ground_fallback(len(tagged)):
+                        notes.append(
+                            f"Open-ground name check skipped — tag-based open-space data "
+                            f"is well mapped here ({len(tagged)} feature(s)), so the slower "
+                            "name scan adds no coverage. Resource decision, not a "
+                            "provider failure."
+                        )
+                        return []
+                    return await _safe_fetch(
+                        "named", buildability.OPEN_GROUND_NAME_RE, "maidan")
+
+                _fp["maidan"] = asyncio.ensure_future(_open_ground_fallback())
         if bflags.get("commercial_proxy"):
             _fp["road_frontage"] = asyncio.ensure_future(
                 _safe_fetch("line", buildability.ROAD_LINE_TAGS, "road_frontage"))

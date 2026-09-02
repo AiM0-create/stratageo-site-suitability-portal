@@ -237,8 +237,13 @@ def test_water_and_buildability_fetches_run_concurrently_not_sequentially():
     and buildability both fire for "high-end gym in Mumbai" (confirmed by the
     plan-level test above). With every Overpass call delayed by `delay_s`:
 
-    - buildability alone makes 6 calls (railway area+line, ghat, protected,
-      maidan, road_frontage) bounded by concurrency=2 -> ceil(6/2)=3 batches.
+    - buildability makes 5 calls (railway area+line, protected, road_frontage,
+      then the maidan fallback which waits on protected) — bounded by
+      concurrency=2, that is still 3 batches. v1.12.4 removed a 6th call: the
+      ghat scan is now gated on WATER relevance, and this brief has no water
+      wording. (Mumbai being coastal enables the water MASK by geography, but
+      not the ghat scan — a mis-sited hex in the sea is a serious error, while
+      a missed ghat is a 42s name scan for a structure that needs a river.)
     - water makes 1 separate call.
 
     If sequential (the bug this test guards against): total >= water + 3
@@ -255,7 +260,7 @@ def test_water_and_buildability_fetches_run_concurrently_not_sequentially():
     # buildability's own 2 area calls) and buildability (line + named calls).
     assert calls["area"] >= 3   # water + railway_area + protected_area
     assert calls["line"] >= 2   # railway_lines + road_frontage
-    assert calls["named"] >= 2  # ghat + maidan
+    assert calls["named"] >= 1  # maidan fallback; ghat is water-gated (v1.12.4)
     sequential_bound = 4 * delay_s
     concurrent_bound = 3 * delay_s
     threshold = (sequential_bound + concurrent_bound) / 2

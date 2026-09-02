@@ -22,6 +22,38 @@ OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",  # fast mirror
     "https://overpass-api.de/api/interpreter",                  # canonical (strict)
 ]
+
+# ── v1.12.4 — per-endpoint health memo ────────────────────────────────────────
+# Measured live while diagnosing the buildability degradation: overpass.kumi
+# returned 502 / disconnected and maps.mail.ru failed on EVERY call, so each
+# fetch paid two doomed attempts plus their sleep(0.5) before reaching the
+# canonical endpoint — on every request, indefinitely, because nothing
+# remembered the failure. The ordering here is deliberate (kumi throttles
+# least), so the fix is not to delete mirrors but to stop re-trying a mirror
+# that just failed: a failing endpoint moves to the BACK of the order for a
+# short cooldown and is restored automatically once it expires, or on its next
+# success. Process-local by design — max-instances is 1, so this is accurate.
+_ENDPOINT_COOLDOWN_S = 300.0
+_endpoint_failed_at: dict[str, float] = {}
+
+
+def _ordered_endpoints() -> list[str]:
+    """Preferred order first, endpoints that failed within the cooldown last."""
+    now = time.time()
+    fresh, cooling = [], []
+    for ep in OVERPASS_ENDPOINTS:
+        (cooling if now - _endpoint_failed_at.get(ep, 0.0) < _ENDPOINT_COOLDOWN_S
+         else fresh).append(ep)
+    return fresh + cooling
+
+
+def _note_endpoint_failure(endpoint: str) -> None:
+    _endpoint_failed_at[endpoint] = time.time()
+
+
+def _note_endpoint_success(endpoint: str) -> None:
+    _endpoint_failed_at.pop(endpoint, None)
+
 HTTP_TIMEOUT = 25          # per endpoint; one attempt each → worst case ~77s (was 50s/152s)
 USER_AGENT = "stratageo-engine/1.0.2 (site-suitability analysis; stratageo.in)"
 FALLBACK_CONCURRENCY = 2   # parallel per-layer fetches if the union query fails
@@ -126,7 +158,7 @@ async def fetch_line_geometries(
     query = _build_geom_query(tags, bbox)
     logger.debug("Overpass geom query (%d tag(s)): %s", len(tags), query[:400])
     last_err: Exception | None = None
-    for endpoint in OVERPASS_ENDPOINTS:
+    for endpoint in _ordered_endpoints():
         try:
             async with httpx.AsyncClient(
                 timeout=HTTP_TIMEOUT,
@@ -149,9 +181,11 @@ async def fetch_line_geometries(
             _cache[key] = (time.time(), ways)
             if storage.enabled():
                 await storage.put_json(gcs_key, {"ts": time.time(), "ways": ways})
+            _note_endpoint_success(endpoint)
             logger.info("Overpass geom: %d ways for %d tag(s) via %s", len(ways), len(tags), endpoint)
             return ways
         except Exception as e:
+            _note_endpoint_failure(endpoint)
             last_err = e
             logger.warning("Overpass geom attempt failed (%s): %s", endpoint, e)
             await asyncio.sleep(0.5)
@@ -207,7 +241,7 @@ async def fetch_area_geometries(
     query = _build_area_query(tags, bbox)
     logger.debug("Overpass area query (%d tag(s)): %s", len(tags), query[:400])
     last_err: Exception | None = None
-    for endpoint in OVERPASS_ENDPOINTS:
+    for endpoint in _ordered_endpoints():
         try:
             async with httpx.AsyncClient(
                 timeout=HTTP_TIMEOUT,
@@ -232,9 +266,11 @@ async def fetch_area_geometries(
             _cache[key] = (time.time(), feats)
             if storage.enabled():
                 await storage.put_json(gcs_key, {"ts": time.time(), "feats": feats})
+            _note_endpoint_success(endpoint)
             logger.info("Overpass area: %d features for %d tag(s) via %s", len(feats), len(tags), endpoint)
             return feats
         except Exception as e:
+            _note_endpoint_failure(endpoint)
             last_err = e
             logger.warning("Overpass area attempt failed (%s): %s", endpoint, e)
             await asyncio.sleep(0.5)
@@ -273,7 +309,7 @@ async def fetch_named_features(
     )
     logger.debug("Overpass named query (%r): %s", name_regex, query[:400])
     last_err: Exception | None = None
-    for endpoint in OVERPASS_ENDPOINTS:
+    for endpoint in _ordered_endpoints():
         try:
             async with httpx.AsyncClient(
                 timeout=HTTP_TIMEOUT, headers={"User-Agent": USER_AGENT},
@@ -294,9 +330,11 @@ async def fetch_named_features(
             _cache[key] = (time.time(), feats)
             if storage.enabled():
                 await storage.put_json(gcs_key, {"ts": time.time(), "feats": feats})
+            _note_endpoint_success(endpoint)
             logger.info("Overpass named(%r): %d features via %s", name_regex, len(feats), endpoint)
             return feats
         except Exception as ex:
+            _note_endpoint_failure(endpoint)
             last_err = ex
             logger.warning("Overpass named fetch failed (%s): %s", endpoint, ex)
             await asyncio.sleep(0.5)
@@ -330,7 +368,7 @@ async def fetch_layer_pois(
     query = _build_query(tags, bbox)
     logger.debug("Overpass POI query (%d tag(s)): %s", len(tags), query[:400])
     last_err: Exception | None = None
-    for endpoint in OVERPASS_ENDPOINTS:
+    for endpoint in _ordered_endpoints():
         try:
             async with httpx.AsyncClient(
                 timeout=HTTP_TIMEOUT,
@@ -352,9 +390,11 @@ async def fetch_layer_pois(
             _cache[key] = (time.time(), pois)
             if storage.enabled():
                 await storage.put_json(gcs_key, {"ts": time.time(), "pois": pois})
+            _note_endpoint_success(endpoint)
             logger.info("Overpass: %d POIs for %d tag(s) via %s", len(pois), len(tags), endpoint)
             return pois
         except Exception as e:
+            _note_endpoint_failure(endpoint)
             last_err = e
             logger.warning("Overpass attempt failed (%s): %s", endpoint, e)
             await asyncio.sleep(0.5)
