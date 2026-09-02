@@ -548,11 +548,33 @@ def apply_deterministic_plan(
     # 2, then 3 constraints while the engine underneath returned identical
     # zones and scores. Anything a customer reads as a commitment has to be
     # computed or derived; only conversation may be authored.
-    from .derived_plan import build_assumptions, build_constraints
+    from .derived_plan import (
+        build_assumptions, build_constraints, build_scenarios,
+        build_unvalidatable, derive_business_type,
+    )
     try:
+        # v1.12.9 — businessType FIRST: the templated objective and the
+        # constraints table are both built from it, so one authored string was
+        # re-introducing variance into two otherwise deterministic fields
+        # ("premium cafe" on one run, "premium cafe in Indiranagar, Bengaluru"
+        # on the next).
+        spec["businessType"] = derive_business_type(
+            intent, canonical, fallback=llm_spec.get("businessType", ""),
+        )
         if isinstance(spec.get("plan"), dict):
             spec["plan"]["assumptions"] = build_assumptions(spec, intent)
+            # Derived names, so every chip is applicable by construction —
+            # v1.12.6 left model-authored names like "Quiet premium street"
+            # mapping to no factor family, and therefore inert.
+            _derived_scenarios = build_scenarios(merged_layers)
+            if _derived_scenarios:
+                spec["plan"]["scenarios"] = _derived_scenarios
         spec["constraints"] = build_constraints(spec, intent)
+        # The third channel for the same fact — the feasibility card's own
+        # "Cannot be validated from data: ..." line. Derived from the same
+        # rules over the same customer-words text, so all three agree.
+        if isinstance(spec.get("feasibility"), dict):
+            spec["feasibility"]["unvalidatable"] = build_unvalidatable(spec, intent)
     except Exception:                       # never block planning on a projection
         logger.exception("derived plan projection failed — keeping LLM text")
 
@@ -642,7 +664,10 @@ def apply_deterministic_plan(
     # inputs: resolved topN (regex-parsed), the business type, and the study
     # area. Water/riverside cues are NOT lost by this rewrite: waterfront
     # detection also reads rawIntent.rawPrompt (see models/spec.py).
-    _biz = (llm_spec.get("businessType") or canonical.display_name or "business").strip()
+    # v1.12.9 — read the derived label set above, not the model's, so the
+    # templated objective is stable for identical prompts.
+    _biz = (spec.get("businessType") or llm_spec.get("businessType")
+            or canonical.display_name or "business").strip()
     _places = [p for p in ((llm_spec.get("studyArea") or {}).get("places") or []) if p]
     _where = f" in {_places[0]}" if _places else ""
     spec["objective"] = (

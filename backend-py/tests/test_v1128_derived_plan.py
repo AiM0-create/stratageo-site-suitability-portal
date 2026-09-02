@@ -195,3 +195,95 @@ def test_every_constraint_has_a_computed_status():
 def test_degenerate_specs_are_survivable(spec):
     assert isinstance(build_assumptions(spec, _intent()), list)
     assert isinstance(build_constraints(spec, _intent()), list)
+
+
+# ── v1.12.9 (option 3): the last authored commitments ────────────────────────
+#
+# v1.12.8 left one authored string that propagated: spec.businessType. Two clean
+# runs of the same prompt agreed on assumptions and factors but labelled the
+# search subject "premium cafe" on one and "premium cafe in Indiranagar,
+# Bengaluru" on the other — and the templated objective and the constraints
+# table are both built from it.
+
+from app.engine.canonical_archetypes import resolve_canonical_archetype
+from app.engine.derived_plan import (
+    build_scenarios, build_unvalidatable, derive_business_type,
+)
+
+
+def _canonical(prompt=PROMPT):
+    intent = _intent(prompt)
+    return intent, resolve_canonical_archetype(intent.businessTypeKey, prompt)
+
+
+@pytest.mark.parametrize("prompt,expected", [
+    ("Find 3 best locations for a premium cafe in Indiranagar, Bengaluru", "premium cafe"),
+    ("high-end gym in South Mumbai", "high-end gym"),
+    ("Find 3 dark kitchen locations in Ballygunge", "dark kitchen"),
+])
+def test_business_type_is_the_customers_words_not_the_whole_prompt(prompt, expected):
+    intent, canonical = _canonical(prompt)
+    assert derive_business_type(intent, canonical) == expected
+
+
+def test_business_type_ignores_what_the_model_wrote():
+    intent, canonical = _canonical()
+    a = derive_business_type(intent, canonical, fallback="premium cafe")
+    b = derive_business_type(intent, canonical, fallback="premium cafe in Indiranagar, Bengaluru")
+
+    assert a == b == "premium cafe"
+
+
+def test_qualifier_is_never_duplicated():
+    intent, canonical = _canonical("a premium cafe in Indiranagar")
+    assert derive_business_type(intent, canonical, fallback="premium cafe").count("premium") == 1
+
+
+# ── Scenarios: derived names mean every chip is applicable ───────────────────
+
+LAYERS4 = [
+    {"id": "f", "name": "Pedestrian footfall"},
+    {"id": "t", "name": "Transit / metro access"},
+    {"id": "c", "name": "Direct cafe competition"},
+    {"id": "o", "name": "Commercial co-tenancy"},
+]
+
+
+def test_every_scenario_except_balanced_can_actually_be_applied():
+    """v1.12.6 left model-authored names like "Quiet premium street" mapping to
+    no factor family, so no multiplier could be derived and the chip was inert.
+    Name and multiplier now come from the same source."""
+    out = build_scenarios(LAYERS4)
+
+    assert out[0]["name"] == "Balanced" and out[0]["weightMultipliers"] == {}
+    assert len(out) > 1
+    for sc in out[1:]:
+        assert sc["weightMultipliers"], sc["name"]
+
+
+def test_scenarios_are_deterministic():
+    first = build_scenarios(LAYERS4)
+    for _ in range(5):
+        assert build_scenarios(LAYERS4) == first
+
+
+def test_scenarios_are_skipped_when_there_is_nothing_to_emphasise():
+    """One family covering every layer renormalises to a no-op."""
+    assert build_scenarios([{"id": "a", "name": "Pedestrian footfall"}]) == []
+    assert build_scenarios([]) == []
+
+
+# ── The third "cannot be validated" channel ──────────────────────────────────
+
+def test_feasibility_unvalidatable_follows_the_customers_words():
+    assert build_unvalidatable({}, _intent()) == []
+    stated = build_unvalidatable({}, _intent("a cafe in Indiranagar under 2 lakh rent"))
+    assert any("Rent" in u for u in stated)
+
+
+def test_all_three_channels_agree_on_an_ordinary_brief():
+    """Planner list, constraints table and feasibility line are one fact stated
+    three times; they must not disagree."""
+    intent = _intent()
+    assert build_unvalidatable({}, intent) == []
+    assert not [c for c in build_constraints(_spec(), intent) if c["status"] == "unvalidatable"]

@@ -7,8 +7,8 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def test_version_is_120():
-    # Updated to v1.12.8 — commitments are derived, not re-authored
-    assert APP_VERSION == "1.12.8"
+    # Updated to v1.12.9 — every plan-card commitment is derived
+    assert APP_VERSION == "1.12.9"
     assert ENGINE_VERSION == "stratageo-engine-00078"
 
 

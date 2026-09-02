@@ -4,6 +4,53 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.9] — 2026-09-02 — The last authored commitments
+
+v1.12.8 got two clean runs of the same prompt to agree on assumptions, factors
+and `planningFingerprint`. One string still moved: the subject was labelled
+*"premium cafe"* on one run and *"premium cafe in Indiranagar, Bengaluru"* on
+the next. That is `spec.businessType` — and the templated objective and the
+constraints table are both built from it, so a single authored string was
+re-introducing variance into two otherwise deterministic fields.
+
+### `businessType` is derived
+- From the parser's business-type **key** (`cafe`, `dark_kitchen`, `gym`) plus
+  any qualifier in the customer's own words → *"premium cafe"*, *"high-end
+  gym"*, *"dark kitchen"*.
+- Not from `businessTypeRaw`, which is the entire prompt; not from the
+  archetype's `display_name`, which is clunky (*"QSR / Quick-Service Cafe
+  (General Market)"*) and drops the qualifier that makes a brief specific.
+- Set **before** the objective template, which now reads it.
+- An unrecognised business keeps the model's label rather than inventing a
+  worse one.
+
+### Scenario names are derived
+- Built from the factor families actually present, so **every chip is applicable
+  by construction**. v1.12.6 derived the multipliers but left the model
+  authoring the names, and *"Quiet premium street"* mapped to no family — no
+  multiplier, inert chip.
+- Now: Balanced, Access-led, Co-tenancy-led, Competition-averse — whichever the
+  spec's factors support.
+
+### The third "cannot be validated" channel
+- `feasibility.unvalidatable` is a third place the same fact is stated, separate
+  from the planner's unsupported list (v1.12.7) and the constraints table — and
+  it was the one still authored, which is why two identical runs said *"rent"*
+  and *"rent; parcel availability"*.
+- Derived from the same rules over the same customer-words text, so all three
+  agree by construction.
+
+### Still authored, deliberately
+The conversational reply, per-factor rationale and executive narrative.
+
+### Tests
+- `test_v1128_derived_plan.py` grows to 28: business-type derivation across
+  three archetypes, indifference to what the model wrote, no duplicated
+  qualifier, every non-Balanced scenario applicable, scenario determinism and
+  the no-op guard, and all three unvalidatable channels agreeing.
+
+---
+
 ## [1.12.8] — 2026-09-02 — Commitments are derived, only conversation is authored
 
 Three runs of the **same** prompt, minutes apart, same deployed version:

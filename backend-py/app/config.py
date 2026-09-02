@@ -511,6 +511,29 @@ v1.12.8: Commitments Are Derived (live: three runs of the same prompt minutes
   not as an assumption.
   Conversational reply, per-factor rationale and executive narrative stay
   authored — variety there is fine.
+v1.12.9: The Last Authored Commitments (option 3). v1.12.8 left one authored
+  string that propagated: spec.businessType. Two clean runs of the same prompt
+  agreed on assumptions and factors but labelled the subject "premium cafe" on
+  one and "premium cafe in Indiranagar, Bengaluru" on the next — and the
+  templated objective and the constraints table are both built from it, so one
+  string re-introduced variance into two otherwise deterministic fields.
+  (1) businessType is derived from the parser's business-type KEY plus any
+  qualifier in the customer's words ("premium cafe", "high-end gym", "dark
+  kitchen"), not from businessTypeRaw (the whole prompt) or the archetype's
+  display_name (clunky, and drops the qualifier). It is set BEFORE the objective
+  template, which now reads it. An unrecognised business keeps the model's label
+  rather than inventing a worse one.
+  (2) Scenario names are derived from the factor families present, so every chip
+  is applicable BY CONSTRUCTION — v1.12.6 derived multipliers but left the model
+  authoring names, and "Quiet premium street" mapped to no family and rendered
+  inert.
+  (3) feasibility.unvalidatable — a THIRD channel for the same fact, separate
+  from the planner's unsupported list and the constraints table, and the one
+  still authored (two identical runs said "rent" and "rent; parcel
+  availability"). Derived from the same rules over the same customer-words text,
+  so all three agree by construction.
+  Still authored, deliberately: the conversational reply, per-factor rationale
+  and executive narrative.
 """
 from functools import lru_cache
 from typing import Literal
@@ -518,7 +541,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.8"
+APP_VERSION     = "1.12.9"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -533,7 +556,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Commitments are derived; only conversation is authored"
+RELEASE_NAME    = "Every commitment on the plan card is now derived"
 
 
 class Settings(BaseSettings):

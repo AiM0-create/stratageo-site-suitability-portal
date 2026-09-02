@@ -225,3 +225,103 @@ def _user_text_of(spec: dict, intent: RawIntent) -> str:
         normalizedPrompt = spec.get("normalizedPrompt") or ""
         rawIntent = None
     return _user_text(_S()) or ""
+
+
+# ── v1.12.9 (option 3) — the remaining authored commitments ───────────────────
+#
+# v1.12.8 derived assumptions and constraints, and two clean runs then agreed on
+# both. What still moved was the label: "premium cafe" on one run, "premium cafe
+# in Indiranagar, Bengaluru" on the next. That is spec.businessType, and it
+# propagates — the templated objective is built from it, and the constraints
+# table names it as the search subject, so one authored string re-introduced
+# variance into two fields that were otherwise deterministic.
+
+# Ordered, so the same prompt always picks the same qualifier.
+_QUALIFIERS = (
+    "high-end", "fine-dining", "small-format", "large-format",
+    "premium", "luxury", "upscale", "boutique", "budget", "organic",
+)
+
+
+def derive_business_type(intent, canonical, fallback: str = "") -> str:
+    """A stable label for what is being sited, from the customer's own words.
+
+    Built from the parser's business-type KEY (deterministic: "cafe",
+    "dark_kitchen", "gym") plus any qualifier the customer used, rather than
+    from `businessTypeRaw` — which is the whole prompt — or the archetype's
+    display_name, which is both clunky ("QSR / Quick-Service Cafe (General
+    Market)") and drops the qualifier that makes the brief specific.
+    """
+    key = (getattr(intent, "businessTypeKey", "") or "").strip()
+    label = key.replace("_", " ").strip() if key and key != "generic" else ""
+    if not label:
+        # Nothing deterministic to lean on; keep what the model wrote rather
+        # than inventing a worse label.
+        label = (fallback or getattr(canonical, "display_name", "") or "site").strip()
+    prompt = (getattr(intent, "rawPrompt", "") or "").lower()
+    qualifier = next((q for q in _QUALIFIERS if q in prompt), "")
+    if qualifier and qualifier not in label.lower():
+        label = f"{qualifier} {label}"
+    return label
+
+
+_SCENARIO_SPECS = (
+    ("demand",      "Demand-led",         "Weights resident and workplace demand higher."),
+    ("access",      "Access-led",         "Weights passing footfall and ease of access higher."),
+    ("cotenancy",   "Co-tenancy-led",     "Weights the surrounding business mix higher."),
+    ("competition", "Competition-averse", "Weights avoiding saturated areas higher."),
+)
+
+
+def build_scenarios(layers: list[dict]) -> list[dict]:
+    """The plan card's scenario chips, derived from the factors that exist.
+
+    Also fixes what v1.12.6 left behind: when the model authored the names, a
+    chip like "Quiet premium street" mapped to no factor family, so no
+    multiplier could be derived and it rendered as an inert label. Every chip
+    produced here is applicable by construction, because the name and the
+    multiplier come from the same source.
+    """
+    from .planner_lite import SCENARIO_EMPHASIS_MULTIPLIER, _factor_family
+
+    by_family: dict[str, list[str]] = {}
+    for l in layers or []:
+        lid = str(l.get("id") or "")
+        if lid:
+            by_family.setdefault(_factor_family(str(l.get("name") or "")), []).append(lid)
+
+    out = [{
+        "name": "Balanced",
+        "description": "The archetype's default weighting.",
+        "emphasis": "",
+        "weightMultipliers": {},
+    }]
+    for family, name, description in _SCENARIO_SPECS:
+        ids = by_family.get(family) or []
+        # A scenario that emphasises every factor renormalises to a no-op.
+        if not ids or len(ids) >= len(layers or []):
+            continue
+        out.append({
+            "name": name,
+            "description": description,
+            "emphasis": family,
+            "weightMultipliers": {i: SCENARIO_EMPHASIS_MULTIPLIER for i in ids},
+        })
+    return out if len(out) > 1 else []
+
+
+def build_unvalidatable(spec: dict, intent) -> list[str]:
+    """The feasibility card's "Cannot be validated from data: …" line.
+
+    A THIRD channel for the same fact, separate from the planner's unsupported
+    list (v1.12.7) and from the constraints table — and the one still authored,
+    which is why two identical runs said "rent" and "rent; parcel availability".
+    Derived here from the same rules over the same customer-words text, so all
+    three now agree by construction.
+    """
+    text = _user_text_of(spec, intent)
+    return [
+        label.split(":")[0].strip()
+        for rx, _key, _reason, label in _UNSUPPORTED_RULES
+        if rx.search(text)
+    ]
