@@ -112,11 +112,32 @@ _BIZ_PATTERNS: list[tuple[str, re.Pattern]] = [
 # These phrases require real routing (ORS/Google) — Euclidean fallback is not
 # acceptable. When detected, the engine must withhold recommendations if routing
 # is unavailable.
+# v1.12.5 — "outside X" is an EXCLUSION, not a routing constraint.
+#
+# Live failure: "Find 3 dark kitchen locations in Ballygunge, Kolkata, strictly
+# outside 1 km of any metro station" returned "No reliable recommendation". The
+# planner had encoded the rule correctly as an exclusions[] buffer (the result
+# card even showed "Hard exclusions: Metro station buffer exclusion (1000m)"),
+# but `strictly\s+outside` matched here, so route_policy looked for a
+# routeConstraint to back a "strict route constraint", correctly found none —
+# there is no route constraint in this brief — declared the rule unenforceable
+# and withheld the whole ranking. This is the README's own headline example.
+#
+# The distinction that matters: a KEEP-AWAY rule is a buffer the engine masks
+# with straight-line geometry, which is exact and needs no routing. A GET-TO
+# rule ("within 500 m of X") is a routeConstraint, where the engine measures
+# real network distance and Euclidean would understate it — that asymmetry is
+# why the "within" alternatives below stay unqualified while the "outside" ones
+# now require a travel-time qualifier. "strictly outside a 15-minute drive"
+# genuinely needs routing; "strictly outside 1 km" never does.
 _STRICT_ROUTE_RE = re.compile(
     r"\b(exactly\s+within|strictly\s+within|must\s+be\s+within|must\s+not\s+exceed"
     r"|delivery\s+drive|10.?minute\s+drive|within\s+\d+.?min(?:ute)?s?\s+(?:drive|walk)"
-    r"|walking\s+radius|drive.?time\s+radius|strictly\s+outside|must\s+be\s+outside"
-    r"|no\s+more\s+than\s+\d+\s*min(?:ute)?s?\s+(?:drive|walk))\b",
+    r"|walking\s+radius|drive.?time\s+radius"
+    r"|no\s+more\s+than\s+\d+\s*min(?:ute)?s?\s+(?:drive|walk))\b"
+    # keep-away phrasing counts ONLY when it is expressed in travel time
+    r"|\b(?:strictly\s+outside|must\s+be\s+outside)\b[^.;]{0,40}?"
+    r"\b(?:min(?:ute)?s?|drive|walk(?:ing)?)\b",
     re.I,
 )
 

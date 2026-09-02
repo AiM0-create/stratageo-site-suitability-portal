@@ -423,6 +423,25 @@ v1.12.4: Buildability Relevance (live: every Indiranagar run reported "Provider
   `beach` term to its -side/-front/plural variants, a gap the new tests exposed
   — every other water term already had them, so "beachside" read as landlocked
   and gated the water mask itself (the v1.11.3 failure class).
+v1.12.5: Keep-Away Is Not Routing (live: "Find 3 dark kitchen locations in
+  Ballygunge, Kolkata, strictly outside 1 km of any metro station" — the
+  README's own headline example — returned "No reliable recommendation").
+  (1) The planner had encoded the rule CORRECTLY as an exclusions[] buffer
+  (the card showed "Hard exclusions: Metro station buffer exclusion (1000m)"),
+  but _STRICT_ROUTE_RE matched `strictly outside`, so route_policy looked for a
+  routeConstraint to back a "strict route constraint", correctly found none,
+  declared the rule unenforceable and withheld the whole ranking. A KEEP-AWAY
+  rule is a buffer masked with straight-line geometry — exact, no routing
+  needed. A GET-TO rule ("within 500 m of X") is a routeConstraint measured on
+  the real network, where Euclidean understates distance. So "within" phrasing
+  still implies routing unqualified; "outside" phrasing now counts only when
+  expressed in travel time ("strictly outside a 15-minute drive"), which
+  genuinely does need the network.
+  (2) The explanation is 238 chars and was stored with a hard entry[:120],
+  cutting at "but the " — the sentence lost its subject — after which the
+  reason builder appended ". Ranking without them...", adding a stray full stop
+  to a fragment. Clipping is now sentence-aware (clip_to_sentence) and the
+  builder no longer double-punctuates.
 """
 from functools import lru_cache
 from typing import Literal
@@ -430,7 +449,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.4"
+APP_VERSION     = "1.12.5"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -445,7 +464,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Buildability spends its budget only on checks that can apply"
+RELEASE_NAME    = "Keep-away rules are exclusions, not routing constraints"
 
 
 class Settings(BaseSettings):

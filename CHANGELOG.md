@@ -4,6 +4,50 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.5] — 2026-09-02 — Keep-away is not routing
+
+Live: *"Find 3 dark kitchen locations in Ballygunge, Kolkata, strictly outside
+1 km of any metro station"* — the README's own headline example — returned
+**No reliable recommendation**, with this on the card:
+
+> Required input(s) could not be verified: Strict route constraint phrase
+> detected in prompt ('exactly within', 'strictly within', 'delivery drive',
+> etc.) but the **.** Ranking without them would be a guess, so it is withheld.
+
+### Fixed — a keep-away rule was treated as a routing constraint
+- The planner encoded the rule **correctly** as an `exclusions[]` buffer; the
+  plan card even showed *"Hard exclusions: Metro station buffer exclusion
+  (1000m)"*. But `_STRICT_ROUTE_RE` matched `strictly outside`, so `route_policy`
+  went looking for a `routeConstraint` to back a strict route constraint,
+  correctly found none — there is no route constraint in this brief — declared
+  the rule unenforceable, and withheld the entire ranking.
+- The distinction now encoded: a **keep-away** rule is a buffer masked with
+  straight-line geometry, which is exact and needs no routing. A **get-to** rule
+  (`within 500 m of X`) is a `routeConstraint` measured on the real network,
+  where Euclidean would understate the distance. That asymmetry is why "within"
+  phrasing still implies routing unqualified, while "outside" phrasing now
+  counts only when expressed in travel time — `"strictly outside a 15-minute
+  drive"` genuinely does need the network, `"strictly outside 1 km"` never does.
+
+### Fixed — the explanation was cut mid-sentence
+- The message is 238 characters and was stored with a hard `entry[:120]`,
+  cutting at `"but the "` so the sentence lost its subject; the reason builder
+  then appended `". Ranking without them…"`, adding a stray full stop to a
+  fragment.
+- Clipping is now sentence-aware (`clip_to_sentence`, cap 260) — it falls on a
+  sentence break, else a word break, and adds an ellipsis only when something
+  was actually removed. The builder no longer double-punctuates and separates
+  multiple causes with `;`.
+
+### Tests
+- `backend-py/tests/test_v1125_keepaway_not_routing.py` — 23 tests: the live
+  prompt through both the regex and the parser, three keep-away-by-distance
+  cases that must not fire, two keep-away-by-travel-time cases that must, seven
+  get-to constraints that must remain untouched, and the clipping/rendering
+  contract including the exact `"but the . Ranking"` string.
+
+---
+
 ## [1.12.4] — 2026-09-02 — Buildability relevance
 
 Every Indiranagar run reported *"Requested but not enforced: Buildability Lite

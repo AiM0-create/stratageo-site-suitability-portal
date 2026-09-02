@@ -410,6 +410,30 @@ def usable_exclusion_bbox(
     return bbox
 
 
+# v1.12.5 — customer-facing explanations must never be cut mid-sentence.
+# Live: the strict-route explanation is 238 chars and was stored with a hard
+# `entry[:120]`, so the withheld-reason card read "...('exactly within',
+# 'strictly within', 'delivery drive', etc.) but the . Ranking without them
+# would be a guess" — the sentence lost its subject and gained a stray full
+# stop. A cap is still wanted (this text goes in a small card), but it has to
+# fall on a boundary, and the caller must not append a second full stop.
+WITHHELD_REASON_MAX_CHARS = 260
+
+
+def clip_to_sentence(text: str, limit: int = WITHHELD_REASON_MAX_CHARS) -> str:
+    """Trim to `limit` on a sentence break, else a word break; ellipsis only
+    when something was actually removed. Never cuts mid-word."""
+    t = (text or "").strip()
+    if len(t) <= limit:
+        return t
+    window = t[:limit]
+    cut = max(window.rfind(". "), window.rfind("! "), window.rfind("? "))
+    if cut >= limit // 2:
+        return window[:cut + 1]
+    cut = window.rfind(" ")
+    return (window[:cut] if cut >= limit // 2 else window).rstrip(" ,;:") + "\u2026"
+
+
 def build_plain_withheld_reason(
     required_missing: list[str],
     no_eligible: bool,
@@ -421,9 +445,10 @@ def build_plain_withheld_reason(
     why not'). Built only from computed values; None when no clear single
     cause exists (the UI falls back to the generic wording)."""
     if required_missing:
+        listed = "; ".join(m.rstrip(" .") for m in required_missing[:2] if m and m.strip())
         return (
             "Required input(s) could not be verified: "
-            + ", ".join(required_missing[:2])
+            + listed
             + (" (and more)" if len(required_missing) > 2 else "")
             + ". Ranking without them would be a guess, so it is withheld."
         )
@@ -2354,7 +2379,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     )
     if not _strict_route_check.ok:
         for entry in _strict_route_check.to_route_unavailable_entries():
-            route_unavailable.append(entry[:120])
+            route_unavailable.append(clip_to_sentence(entry))
         # fallbacks already populated by to_route_unavailable_entries content;
         # add a summary note so the user sees it in the methodology.
         fallbacks.append(
