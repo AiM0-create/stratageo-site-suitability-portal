@@ -7,8 +7,8 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def test_version_is_120():
-    # Updated to v1.12.7 — unverifiable requirements come from the customer
-    assert APP_VERSION == "1.12.7"
+    # Updated to v1.12.8 — commitments are derived, not re-authored
+    assert APP_VERSION == "1.12.8"
     assert ENGINE_VERSION == "stratageo-engine-00078"
 
 

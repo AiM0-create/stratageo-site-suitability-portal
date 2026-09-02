@@ -376,10 +376,19 @@ async def chat_turn(
     # When STRATAGEO_DETERMINISTIC_PLANNING=true, override structural spec fields
     # (factor keys, weights, catchment) with the canonical archetype schema.
     # LLM output is preserved for explanation text and study area place names.
+    # v1.12.8 — the stage gate is gone. `stage` describes what the UI is showing
+    # (chat / framework / ready), not whether the spec is structural, and on a
+    # first turn it defaults to "chat" whenever the model omits or mis-labels
+    # its own stage. When that happened the canonical override was skipped and
+    # the model's own layers survived: the SAME prompt produced four
+    # cafe-specific factors on one run (footfall, transit, cafe competition,
+    # co-tenancy) and three generic ones on another (demand density proxy, road
+    # transit accessibility, generic competition density) — a materially weaker
+    # analysis from identical input. Overriding earlier is harmless: nothing is
+    # executed until "ready", and later turns re-apply it anyway.
     if (settings.stratageo_deterministic_planning
             and isinstance(new_spec, dict)
-            and new_spec.get("layers")
-            and stage in ("framework", "ready")):
+            and new_spec.get("layers")):
         try:
             # v1.2.0 fix: in multi-turn conversations (e.g. turn 2 = "yes"),
             # last_user is the follow-up, NOT the original business prompt.

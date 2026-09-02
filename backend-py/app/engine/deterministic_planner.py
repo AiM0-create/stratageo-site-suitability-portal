@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from typing import Optional
 
@@ -30,6 +31,8 @@ from ..engine.canonical_archetypes import (
     CanonicalArchetype, resolve_canonical_archetype, get_canonical,
 )
 from ..engine.intent_parser import RawIntent
+
+logger = logging.getLogger(__name__)
 
 
 # ── Constraint enforcement levels ─────────────────────────────────────────────
@@ -538,6 +541,20 @@ def apply_deterministic_plan(
     from .planner_lite import build_clarifying_questions
     if isinstance(spec.get("plan"), dict):
         spec["plan"]["clarifyingQuestions"] = build_clarifying_questions(merged_layers)
+
+    # v1.12.8 — assumptions and the constraints table become DERIVED projections
+    # of the spec instead of prose the model re-authors each turn. Measured
+    # live: the same prompt produced 7, then 5, then 4 assumptions and 1, then
+    # 2, then 3 constraints while the engine underneath returned identical
+    # zones and scores. Anything a customer reads as a commitment has to be
+    # computed or derived; only conversation may be authored.
+    from .derived_plan import build_assumptions, build_constraints
+    try:
+        if isinstance(spec.get("plan"), dict):
+            spec["plan"]["assumptions"] = build_assumptions(spec, intent)
+        spec["constraints"] = build_constraints(spec, intent)
+    except Exception:                       # never block planning on a projection
+        logger.exception("derived plan projection failed — keeping LLM text")
 
     # v1.7.1 — apply explicit prompt weights (deterministic; audited).
     _stated = parse_prompt_weights(intent.rawPrompt or "")

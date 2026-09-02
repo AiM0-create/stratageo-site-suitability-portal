@@ -484,6 +484,33 @@ v1.12.7: Requirements Come From The Customer (live: two identical runs of "Find
   The fallback is deliberately asymmetric: with no user text to compare against
   the full spec text is scanned exactly as before, because losing a genuine
   "rent cannot be verified" disclosure is a worse failure than a spurious one.
+v1.12.8: Commitments Are Derived (live: three runs of the same prompt minutes
+  apart produced 7 -> 5 -> 4 assumptions, 1 -> 2 -> 3 constraints, a reworded
+  objective each time, and on one run 3 generic factors where the others gave 4
+  cafe-specific ones — while the engine returned identical zones, scores,
+  centroids and factor values. Only the text around the numbers moved).
+  temperature=0.0 and seed=42 were ALREADY set, so this was never a settings
+  problem: an LLM is not made deterministic by asking more firmly, only by
+  shrinking what it decides. The rule adopted here — anything a customer could
+  read as a COMMITMENT must be computed by the engine or derived from what it
+  computed; only conversation may be authored.
+  (1) The canonical-archetype override no longer depends on `stage`. `stage`
+  describes what the UI is showing, not whether the spec is structural, and on
+  a first turn it defaults to "chat" whenever the model omits or mis-labels its
+  own stage — skipping the override entirely and letting the model's generic
+  layers survive. That is the 4-vs-3 factor divergence.
+  (2) engine/derived_plan.py projects assumptions and the constraints table from
+  the spec (same posture as screening_contract.py: a projection, never a new
+  source of truth). Assumptions are replaced outright — each is a statement
+  about a default the spec already records. Constraints are MERGED, because the
+  parser cannot extract everything a person can state ("must have parking") and
+  losing a stated constraint is worse than an unstable list; a constraint with
+  no basis in the customer's words is dropped as the fabrication v1.12.3/v1.12.7
+  removed. Constraint status is computed from whether a real gate exists, never
+  asserted. An answered clarifying question appears as "You told us this",
+  not as an assumption.
+  Conversational reply, per-factor rationale and executive narrative stay
+  authored — variety there is fine.
 """
 from functools import lru_cache
 from typing import Literal
@@ -491,7 +518,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.7"
+APP_VERSION     = "1.12.8"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -506,7 +533,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Unverifiable requirements must come from the customer"
+RELEASE_NAME    = "Commitments are derived; only conversation is authored"
 
 
 class Settings(BaseSettings):

@@ -4,6 +4,69 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.8] — 2026-09-02 — Commitments are derived, only conversation is authored
+
+Three runs of the **same** prompt, minutes apart, same deployed version:
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| assumptions | 7 | 5 | 4 |
+| constraints | 1 | 2 | 3 |
+| factors | 4 cafe-specific | 4 cafe-specific | **3 generic** |
+| objective | reworded each time | | |
+
+…while the engine underneath returned identical zones, identical scores to one
+decimal, identical centroids and factor values. Only the text around the
+numbers moved — and a client running the same brief twice sees two different
+sets of commitments and concludes the tool is guessing.
+
+`temperature=0.0` and `seed=42` were **already set** when that was measured.
+This was never a settings problem: an LLM is not made deterministic by asking it
+more firmly, only by shrinking what it decides.
+
+**The rule adopted:** anything a customer could read as a commitment must be
+*computed* by the engine or *derived* from what it computed. Only conversation
+may be authored.
+
+### Fixed — the canonical override depended on which screen was showing
+- It ran only when `stage in ("framework","ready")`. But `stage` describes what
+  the UI is displaying, not whether the spec is structural, and on a first turn
+  it defaults to `"chat"` whenever the model omits or mis-labels its own stage.
+  When that happened the override was skipped and the model's own layers
+  survived — the 4-vs-3 factor divergence above.
+- Overriding earlier is harmless: nothing executes until `ready`, and later
+  turns re-apply it anyway.
+
+### Added — `engine/derived_plan.py`
+- **Assumptions are replaced outright.** Every one is a statement about a
+  default the spec already records — study area, grid level, top-N and why,
+  hull buffer, isochrone refinement, adjusted weights.
+- **Constraints are merged, not replaced.** The parser cannot extract everything
+  a person can state ("must have parking"), and losing a stated constraint is a
+  worse failure than an unstable list. A model-written constraint the customer's
+  words support is kept; one with no basis in them is dropped — the fabrication
+  v1.12.3 and v1.12.7 removed, now closed at the table itself.
+- **Status is computed, never asserted:** a stated phrase that maps to a real
+  spec gate is `satisfiable`; one that does not is `unvalidatable`.
+- An answered clarifying question (v1.12.6) appears as *"You told us this"*
+  rather than as an assumption.
+- Same posture as `screening_contract.py` — a projection of computed state,
+  never a new source of truth. Wrapped so a projection failure can never block
+  planning.
+
+### Still authored
+The conversational reply, per-factor rationale and executive narrative. Variety
+there is fine, and arguably good.
+
+### Tests
+- `backend-py/tests/test_v1128_derived_plan.py` — 18 tests: repeated calls are
+  byte-identical, two specs differing only in authored prose agree, defaults vs
+  customer choices are distinguished, fabricated constraints dropped while
+  supported ones and a genuinely-stated rent cap survive, and degenerate specs
+  never raise.
+
+---
+
 ## [1.12.7] — 2026-09-02 — Unverifiable requirements come from the customer
 
 Two identical runs of *"Find 3 best locations for a premium cafe in Indiranagar,
