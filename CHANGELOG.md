@@ -4,6 +4,69 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.3] — 2026-09-02 — Unrequested exclusions & the stranded grid
+
+Live run: *"Find 3 best locations for a premium cafe in Indiranagar, Bengaluru"*
+— the PR checklist's own smoke prompt — returned **no recommendation at all**,
+and no hex surface was drawn over the basemap. Three defects, two of them
+stacked on the same result.
+
+### Fixed — the planner invented a hard constraint nobody asked for
+- The run was withheld with: *"Metro exclusion 'strictly outside 1km of any
+  metro station': no station data — exclusion not applied."* The brief never
+  mentioned metro. That exact string is the **illustrative example** in rule
+  P7d of `services/prompts.py`, and the planner copied the illustration
+  straight into a real `exclusions[]` entry.
+- The resulting spec contradicted itself: a 25%-weighted *"Transit / metro
+  access"* factor rewarded proximity to the very thing the exclusion banned.
+- Because an unresolvable hard exclusion withholds the **entire** ranking, one
+  fabricated gate silently destroyed an otherwise answerable analysis.
+- P7d now teaches with `<feature>` / `<distance>` placeholders instead of a
+  complete, paste-ready constraint, and states outright that an exclusion the
+  user did not ask for must never be emitted.
+
+### Fixed — traceability only ever ran in one direction
+- `intent_parser.validate_hard_constraints_in_spec()` checks that every
+  constraint the **user stated** has a matching gate. Its docstring says a
+  non-empty return "should block execution" — but nothing checked the inverse,
+  so a gate the planner **invented** passed through completely unguarded.
+- `jobs.drop_unrequested_exclusions()` closes that direction, following the
+  existing `drop_anchor_double_encoded_exclusions()` precedent. Deliberately
+  conservative: an exclusion is dropped only when the user's own words contain
+  **no avoidance phrasing at all** *and* none of the exclusion's signal words
+  appear in the prompt. Avoidance language in the brief keeps every exclusion,
+  because the planner may legitimately rename what the user avoided
+  ("my existing branches" → "Colaba"). Every drop is disclosed in `notes`.
+- It reads `rawIntent.rawPrompt`, never `spec.objective` — the objective is
+  planner-templated prose and would happily "justify" the planner's own
+  invention.
+
+### Fixed — the hex grid was buffered and then stranded
+- v1.12.0 **dropped** a GeoJSON write that arrived while `isStyleLoaded()` was
+  false. v1.12.2 **buffered** it instead — but drained the buffer only from the
+  `load` / `style.load` handlers. Those fire once at startup and never again
+  unless the basemap is swapped; an analysis finishes minutes later, during the
+  camera move to the study area, when the style is busy. So the payload was
+  buffered and then sat there forever: different mechanism, identical outcome.
+- Measured on the live portal: the component buffer held **53 features** while
+  the `sg-hex` source held **0**.
+- A write that cannot be applied now arms its own `map.once('idle')` retry
+  rather than trusting an event that may already be in the past. The logic
+  moved into `services/mapSourceBuffer.ts` so it is testable without a real
+  GL context; `flush()` is still used for the style-swap restore path.
+
+### Tests
+- `backend-py/tests/test_v1123_unrequested_exclusions.py` — 9 tests: the exact
+  live reproduction, disclosure-not-silence, four must-not-over-fire cases
+  (user-requested metro exclusion, prompt naming the feature, planner-renamed
+  exclusion under avoidance language, mixed spec), two fail-safes, plus a guard
+  that the prompt template carries no paste-ready exclusion literal.
+- `src/__tests__/mapSourceBuffer.test.ts` — 8 tests pinning the write contract,
+  including the regression itself (a write during a busy style lands with no
+  further `load` event) and the basemap-swap restore.
+
+---
+
 ## [1.12.2] — 2026-08-06 — H3 grid visible again (frontend-only)
 
 Live report: the H3 suitability surface never appeared over the Mapbox basemap,

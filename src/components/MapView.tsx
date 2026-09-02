@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type { LocationData, HeatmapType, UserPoint, HexGridCell, CatchmentOutline } from '../types';
 import { config } from '../config';
+import { createSourceBuffer, type SourceBuffer, type BufferableMap } from '../services/mapSourceBuffer';
 import {
   toLngLatRing, circleRingLngLat, boundsOfLatLng, stretch, rampColor,
 } from '../services/mapGeo';
@@ -216,24 +217,35 @@ export const MapView: React.FC<MapViewProps> = ({
    * Every payload is now remembered and re-applied once the style is ready, so
    * the last write always wins regardless of arrival timing.
    */
-  const pendingRef = useRef<Record<string, GeoJSON.FeatureCollection>>({});
   /** The style URL currently applied — see the basemap-swap effect. */
   const appliedStyleRef = useRef<string | null>(null);
 
+  /**
+   * v1.12.3 — BUG FIX: buffering a write is not the same as delivering it.
+   * v1.12.2 stopped DROPPING payloads that arrived while the style was
+   * mid-settle and started buffering them, but the buffer was only ever
+   * drained from the `load` / `style.load` handlers. Those fire once, long
+   * before an analysis finishes, and never again unless the basemap changes —
+   * so a hexGrid that landed during the post-analysis camera move was
+   * buffered and then stranded. Measured live: the buffer held all 53 cells
+   * while the `sg-hex` source held 0 features, and the H3 surface never
+   * appeared. The buffer now arms its own `idle` retry per write, so a write
+   * never depends on an event that may already be in the past.
+   */
+  const bufferRef = useRef<SourceBuffer | null>(null);
+  if (!bufferRef.current) {
+    bufferRef.current = createSourceBuffer(
+      () => mapRef.current as unknown as BufferableMap | null,
+    );
+  }
+
   const setData = useCallback((id: string, data: GeoJSON.FeatureCollection) => {
-    pendingRef.current[id] = data;               // always keep the latest
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;    // flushed by installLayers()
-    const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
-    if (src) src.setData(data);
+    bufferRef.current!.setData(id, data);
   }, []);
 
   /** Re-apply every buffered payload — after first load and after each style swap. */
-  const flushPending = useCallback((map: mapboxgl.Map) => {
-    for (const [id, data] of Object.entries(pendingRef.current)) {
-      const src = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
-      if (src) src.setData(data);
-    }
+  const flushPending = useCallback((_map: mapboxgl.Map) => {
+    bufferRef.current!.flush();
   }, []);
 
   // ── Initialise map ──

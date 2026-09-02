@@ -125,12 +125,22 @@ P7c. CONSTRAINTS ARE NOT SCORING FACTORS — NEVER DOUBLE-ENCODE A SINGLE ANCHOR
     not re-litigate the constraint.
 
 P7d. "MUST NOT BE WITHIN X OF Y" IS A HARD EXCLUSION, NOT A NEGATIVE SCORING LAYER.
-    "strictly outside 1km of any metro", "not within 500m of a competitor", "avoid
-    flood zones" → emit an exclusions[] entry with the buffer in METRES (bufferM=1000
-    for "outside 1km"), so the engine MASKS OUT every hex inside the buffer. A negative
-    scoring layer only DISCOUNTS those hexes (a site 200m from a metro could still win
-    on other factors) — that violates a "strictly outside" rule. Reserve negative
-    layers for soft "prefer less of X" preferences, never for hard "must avoid".
+    When — and ONLY when — the user's own words state an avoidance rule of the shape
+    "strictly outside <distance> of <feature>" / "not within <distance> of <feature>" /
+    "avoid <feature>", emit an exclusions[] entry with the buffer in METRES
+    (<distance> of 1km → bufferM=1000), so the engine MASKS OUT every hex inside the
+    buffer. A negative scoring layer only DISCOUNTS those hexes (a site 200m from
+    <feature> could still win on other factors) — that violates a "strictly outside"
+    rule. Reserve negative layers for soft "prefer less of X" preferences, never for
+    hard "must avoid".
+
+    <feature> AND <distance> ARE PLACEHOLDERS, NOT DEFAULTS — fill them from the
+    user's brief and from nothing else. NEVER emit an exclusion the user did not ask
+    for. An invented gate (a metro, competitor or flood buffer nobody requested) is
+    a hard mask: if its data cannot be resolved at run time the engine must withhold
+    the ENTIRE ranking, so a fabricated exclusion turns a perfectly answerable brief
+    into "no reliable recommendation". If the brief states no avoidance rule,
+    exclusions[] MUST be an empty list.
 
 P7e. RESOLVE SUB-CITY AREAS TIGHTLY — don't let a vague region sprawl. A request for
     "South Kolkata", "West Bangalore", "South Delhi" etc. must NOT be passed as a single

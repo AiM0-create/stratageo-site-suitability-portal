@@ -262,6 +262,95 @@ def drop_anchor_double_encoded_exclusions(spec, notes: list[str]) -> int:
     return dropped
 
 
+# v1.12.3 — signal words for "did the user actually ask for this exclusion?".
+# Deliberately NOT _ANCHOR_STOP_WORDS: that set strips "metro"/"station" because
+# they are noise when MATCHING an anchor by name. Here they are exactly the
+# nouns that carry the meaning, so this check needs its own, much smaller list.
+_EXCLUSION_STOP_WORDS = {
+    "the", "and", "any", "all", "from", "with", "within", "outside", "strictly",
+    "must", "near", "away", "avoid", "buffer", "zone", "zones", "area", "areas",
+    "exclusion", "exclusions", "constraint", "meters", "metres", "radius",
+    "around", "that", "this", "have", "should", "site", "sites", "location",
+    "locations", "best", "find", "want", "need", "open", "suggest",
+}
+
+# Any avoidance phrasing in the user's own words. Its PRESENCE makes us keep
+# every exclusion (the planner may legitimately rename what the user avoided,
+# e.g. "my existing branches" -> "Colaba"); its ABSENCE means the brief asked
+# to avoid nothing at all, so a hard exclusion cannot have come from the user.
+_AVOIDANCE_RE = _re.compile(
+    r"\b(?:outside|away\s+from|avoid(?:ing)?|excluding|exclude[sd]?|"
+    r"not\s+(?:within|near|close)|no\s+closer|far\s+from|beyond|"
+    r"clear\s+of|free\s+of|without)\b",
+    _re.I,
+)
+
+
+def _exclusion_sig_words(text: str) -> set[str]:
+    return {
+        w for w in _re.split(r"[^a-z]+", (text or "").lower())
+        if len(w) > 3 and w not in _EXCLUSION_STOP_WORDS
+    }
+
+
+def drop_unrequested_exclusions(spec, notes: list[str]) -> int:
+    """v1.12.3 — an exclusion the user never asked for must never gate a run.
+
+    Live failure this exists for: the prompt "Find 3 best locations for a
+    premium cafe in Indiranagar, Bengaluru" came back as "No reliable
+    recommendation — Metro exclusion 'strictly outside 1km of any metro
+    station': no station data — exclusion not applied." Nobody asked about
+    metro. The planner had copied the illustrative example out of rule P7d in
+    the system prompt into a real exclusions[] entry, and because a hard
+    exclusion whose data cannot be resolved withholds the ENTIRE ranking, one
+    fabricated gate silently destroyed an otherwise answerable analysis. The
+    spec even contradicted itself: a 25%-weighted "Transit / metro access"
+    factor rewarded the very thing the exclusion banned.
+
+    intent_parser.validate_hard_constraints_in_spec() only checks the forward
+    direction — every constraint the USER stated must have a gate. Nothing
+    checked the inverse, so a gate with no basis in the prompt passed through
+    unguarded. This closes that direction.
+
+    Deliberately conservative — it only drops an exclusion when BOTH hold:
+      1. the user's own words contain no avoidance phrasing at all, and
+      2. none of the exclusion's signal words appear in the prompt.
+    Anything less certain is kept and left to the existing disclosure paths.
+    Drops in place, returns how many were dropped, never raises.
+    """
+    excs = getattr(spec, "exclusions", None) or []
+    if not excs:
+        return 0
+    # The USER's words only. spec.objective is planner-templated prose and
+    # would happily "justify" an exclusion the planner itself invented.
+    raw = (
+        getattr(getattr(spec, "rawIntent", None), "rawPrompt", "")
+        or getattr(spec, "normalizedPrompt", "")
+        or ""
+    )
+    if not raw.strip():
+        return 0                      # nothing to compare against — never guess
+    if _AVOIDANCE_RE.search(raw):
+        return 0                      # user did ask to avoid something — keep all
+    prompt_words = _exclusion_sig_words(raw)
+    kept, dropped = [], 0
+    for e in excs:
+        name = getattr(e, "name", "") or ""
+        if _exclusion_sig_words(name) & prompt_words:
+            kept.append(e)
+            continue
+        dropped += 1
+        notes.append(
+            f"Exclusion '{name}' was dropped: the brief states no avoidance "
+            "constraint and nothing in it refers to this exclusion, so it was "
+            "not requested. An unrequested hard gate would withhold the whole "
+            "ranking if its data could not be resolved."
+        )
+    if dropped:
+        spec.exclusions = kept
+    return dropped
+
+
 def route_gate_envelope_m(rc, walk_speed_m_per_min: float, drive_speed_m_per_min: float) -> float:
     """v1.9.0 — the straight-line envelope (metres) inside which a candidate
     could plausibly satisfy a proximity route constraint. Network distance is
@@ -1021,6 +1110,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # ── vNext (v1.9.0): anchor double-encoding guard ─────────────────────────
     # Must run BEFORE exclusion tag-sets are built from spec.exclusions.
     drop_anchor_double_encoded_exclusions(spec, notes)
+
+    # ── v1.12.3: inverse traceability — drop exclusions the user never asked
+    # for. Must also run BEFORE exclusion tag-sets are built below.
+    drop_unrequested_exclusions(spec, notes)
 
     # v1.4.0: Resolve metro stations early so we can override exclusion_pois below.
     _metro_result = resolve_metro_stations(

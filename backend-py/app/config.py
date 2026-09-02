@@ -375,6 +375,34 @@ v1.11.3: Coastline & Quiet Detail (live run: a South Mumbai gym analysis put
   in the score column; all five moved into that card's expander under "Score
   details", relabelled in words ("Rank vs peers", "Absolute viability", "Data
   confidence") instead of "R:10.0 V:7.4 C:8.1". Nothing removed, one click away.
+v1.12.3: Unrequested Exclusions & the Stranded Grid (live run: "Find 3 best
+  locations for a premium cafe in Indiranagar, Bengaluru" returned NO
+  recommendation at all, and no hex surface was drawn).
+  (1) PROMPT LEAKAGE — the result was withheld because of a "Metro exclusion:
+  strictly outside 1km of any metro station" that the brief never mentioned.
+  That exact string was the illustrative example in rule P7d of
+  services/prompts.py; the planner copied the illustration into a real
+  exclusions[] entry. The spec then contradicted itself — a 25%-weighted
+  "Transit / metro access" factor rewarded the very thing the exclusion banned
+  — and because an unresolvable hard exclusion withholds the ENTIRE ranking,
+  one fabricated gate destroyed an answerable analysis. P7d now teaches with
+  <feature>/<distance> placeholders and states outright that an exclusion the
+  user did not ask for must never be emitted.
+  (2) ONE-WAY TRACEABILITY — intent_parser.validate_hard_constraints_in_spec()
+  only ever checked that every constraint the USER stated has a gate. Nothing
+  checked the inverse, so an invented gate passed unguarded.
+  jobs.drop_unrequested_exclusions() closes that direction, deliberately
+  conservative: it drops an exclusion only when the user's own words contain no
+  avoidance phrasing at all AND none of the exclusion's signal words appear in
+  the prompt. Every drop is disclosed in notes, never silent.
+  (3) STRANDED GRID — v1.12.2 stopped DROPPING GeoJSON writes that arrived
+  while the Mapbox style was mid-settle and buffered them instead, but drained
+  the buffer only from the load / style.load handlers. Those fire once at
+  startup and never again unless the basemap is swapped, so a hexGrid arriving
+  during the post-analysis camera move was buffered and then stranded forever
+  — measured live at 53 features buffered against 0 in the sg-hex source.
+  Writes now arm their own map.once("idle") retry instead of trusting an event
+  that may already be in the past.
 """
 from functools import lru_cache
 from typing import Literal
@@ -382,7 +410,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.0"
+APP_VERSION     = "1.12.3"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -397,7 +425,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Mapbox GL JS (vector map, runtime-served map token)"
+RELEASE_NAME    = "Unrequested exclusions dropped; stranded hex grid delivered"
 
 
 class Settings(BaseSettings):
