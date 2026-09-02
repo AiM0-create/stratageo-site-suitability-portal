@@ -362,6 +362,40 @@ class Scenario(BaseModel):
     name: str
     description: str = ""
     emphasis: str = ""                            # which layers gain weight in this scenario
+    # v1.12.6 — the machine-readable form of `emphasis`: layer id -> weight
+    # multiplier. Derived DETERMINISTICALLY by the planner from factor families
+    # (see planner_lite.derive_scenario_multipliers), never authored by the LLM,
+    # so the same brief always yields the same shift. Empty = the scenario is
+    # descriptive only and its chip stays non-interactive rather than pretending
+    # to do something.
+    weightMultipliers: dict[str, float] = {}
+
+
+class ClarifyingOption(BaseModel):
+    id: str
+    label: str
+    # Layer id -> weight multiplier, exactly like Scenario.weightMultipliers, so
+    # answering a question and picking a scenario go through one mechanism.
+    weightMultipliers: dict[str, float] = {}
+
+
+class ClarifyingQuestion(BaseModel):
+    """v1.12.6 — one question whose answer CHANGES A NUMBER.
+
+    The rule that keeps this from becoming a quiz: a question is only offered
+    when its answer moves weights, and only when the spec actually contains the
+    factors it would move. Anything that would merely reword the report is not
+    asked. Questions are built deterministically from the spec's own layers
+    (planner_lite.build_clarifying_questions), never authored per run — the
+    model already varies its prose between identical prompts, and a question
+    set that changed run to run would make that worse, not better.
+
+    Always optional: the plan is runnable with none of them answered.
+    """
+    id: str
+    question: str
+    why: str = ""                                 # what changes if you answer
+    options: list[ClarifyingOption] = []
 
 
 class ConsultantPlan(BaseModel):
@@ -373,6 +407,7 @@ class ConsultantPlan(BaseModel):
     assumptions: list[PlanAssumption] = []
     misleadingVariables: list[MisleadingVariable] = []
     scenarios: list[Scenario] = []
+    clarifyingQuestions: list[ClarifyingQuestion] = []
     validation: list[str] = []
     modelFailureRisks: list[str] = []
 

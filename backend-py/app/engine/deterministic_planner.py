@@ -521,6 +521,24 @@ def apply_deterministic_plan(
         l["name"]: round(float(l.get("weight", 0.0)), 4) for l in merged_layers
     }
 
+    # v1.12.6 — make the plan card's scenario chips applicable. Each scenario's
+    # prose is mapped to a deterministic per-layer multiplier so the customer can
+    # apply an emphasis before running, instead of reading about one.
+    from .planner_lite import derive_scenario_multipliers
+    _scenarios = ((spec.get("plan") or {}).get("scenarios") or [])
+    for _sc in _scenarios:
+        if not isinstance(_sc, dict):
+            continue
+        _text = " ".join(str(_sc.get(k) or "") for k in ("name", "emphasis", "description"))
+        _sc["weightMultipliers"] = derive_scenario_multipliers(_text, merged_layers)
+
+    # v1.12.6 — optional, deterministic questions whose answers move weights.
+    # Attached to the plan so the card can offer them before Run; the analysis
+    # is fully runnable with none of them answered.
+    from .planner_lite import build_clarifying_questions
+    if isinstance(spec.get("plan"), dict):
+        spec["plan"]["clarifyingQuestions"] = build_clarifying_questions(merged_layers)
+
     # v1.7.1 — apply explicit prompt weights (deterministic; audited).
     _stated = parse_prompt_weights(intent.rawPrompt or "")
     if _stated:

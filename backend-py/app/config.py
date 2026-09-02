@@ -442,6 +442,34 @@ v1.12.5: Keep-Away Is Not Routing (live: "Find 3 dark kitchen locations in
   reason builder appended ". Ranking without them...", adding a stray full stop
   to a fragment. Clipping is now sentence-aware (clip_to_sentence) and the
   builder no longer double-punctuates.
+v1.12.6: The Plan Card Asks (customer idea: "why not question the user what
+  their idea actually is... this narrows the idea, giving us more room to
+  pinpoint variables and candidates").
+  Motivation from live testing: twice the planner INVENTED a requirement nobody
+  stated — a metro exclusion, then a rent requirement — because it fills gaps in
+  a one-line brief on its own. A question turns a guess into a stated fact, so
+  this is a correctness mechanism, not a UX nicety.
+  (1) Scenario chips become applicable. They already sat on the plan card at the
+  right moment carrying an `emphasis` naming which factors matter more, and
+  rendered as <span>: readable and inert. Scenario.weightMultipliers (layer id
+  -> multiplier) is derived DETERMINISTICALLY by the planner from factor
+  families, reusing engine/stability.py's families and x1.5 convention. Not
+  asked of the LLM: it already produces three chips one run and one the next for
+  an identical prompt, and letting it author the numbers would deepen exactly
+  the non-determinism v1.12.x has been removing. A scenario that emphasises
+  nothing, or everything (a uniform boost renormalises to a no-op), yields {}
+  and its chip stays a label rather than a button that does nothing.
+  (2) Optional clarifying questions, built from the spec's own layers, shown
+  directly above Run. Two rules keep them from becoming a quiz: only ask when
+  the answer moves a weight, and only offer options referencing factors the spec
+  actually measures. Never blocking — the plan runs with none answered.
+  (3) Answers are recorded in meta.clarificationsResolved, so the report can say
+  "you told us X" instead of "we assumed X". An answered question stops being an
+  assumption, which is where much of the run-to-run variance came from (the
+  same prompt produced 7, then 5, then 4 assumptions across runs).
+  Scenarios and answers compose through ONE path, always recomputed from the
+  weights captured before any emphasis, so selections are order-independent and
+  never compound.
 """
 from functools import lru_cache
 from typing import Literal
@@ -449,7 +477,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.5"
+APP_VERSION     = "1.12.6"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -464,7 +492,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Keep-away rules are exclusions, not routing constraints"
+RELEASE_NAME    = "The plan card asks, instead of assuming"
 
 
 class Settings(BaseSettings):

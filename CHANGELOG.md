@@ -4,6 +4,63 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.6] — 2026-09-02 — The plan card asks, instead of assuming
+
+Customer idea: *"when one types the initial prompt it directly shows the
+variables and run analysis — why not question the user what their idea actually
+is… this narrows the idea, giving us more room to pinpoint variables."*
+
+The stronger case for it came out of this week's testing: **twice the planner
+invented a requirement nobody stated** — a metro exclusion, then a rent
+requirement — because it fills gaps in a one-line brief by itself. A question
+turns a guess into a stated fact, so this is a correctness mechanism, not a
+UX nicety.
+
+### The choice was already on screen, and inert
+- The plan card rendered scenario chips ("Balanced premium cafe",
+  "Destination-led premium", "White-space premium"), each carrying an `emphasis`
+  naming which factors should matter more — as `<span>`s. Readable, at exactly
+  the right moment, doing nothing.
+- `Scenario.weightMultipliers` (layer id → multiplier) makes them applicable.
+
+### Derived, never authored
+- Multipliers come from `planner_lite.derive_scenario_multipliers`, reusing the
+  factor families and ×1.5 convention already in `engine/stability.py`.
+- **Not asked of the LLM.** It already produces three chips on one run and one
+  on the next for an identical prompt; letting it author the numbers would
+  deepen the very non-determinism this series has been removing.
+- A scenario emphasising nothing, or *everything* (a uniform boost renormalises
+  straight back), yields `{}` — its chip stays a label rather than a button that
+  changes nothing.
+
+### Optional questions, directly above Run
+- Built from the spec's own layers. Two rules keep them from becoming a quiz:
+  **only ask when the answer moves a weight**, and **only offer options that
+  reference factors the spec actually measures**.
+- Never blocking. The plan runs with none of them answered.
+
+### Answers become provenance
+- Recorded in `meta.clarificationsResolved`, so the report can say *"you told us
+  X"* rather than *"we assumed X"*. An answered question stops being an
+  assumption — and assumption lists were a main source of run-to-run variance
+  (the same prompt produced 7, then 5, then 4).
+
+### One mechanism
+- Scenarios and answers compose through a single path, always recomputed from
+  the weights captured *before* any emphasis, so selections are
+  order-independent and never compound. Weight changes flow through the existing
+  audited `weightsAdjustedByUser` route.
+
+### Tests
+- `test_v1126_scenario_multipliers.py` — 20 tests: family targeting, the two
+  inert-chip cases, determinism, id-keying, and the question rules (every
+  question offers a mover and an opt-out; no option references a factor the spec
+  lacks; questions vanish when there is no real choice).
+- `scenarioWeights.test.ts` — 10 tests: renormalisation, ratio preservation, and
+  the order-independence/no-compounding contract.
+
+---
+
 ## [1.12.5] — 2026-09-02 — Keep-away is not routing
 
 Live: *"Find 3 dark kitchen locations in Ballygunge, Kolkata, strictly outside

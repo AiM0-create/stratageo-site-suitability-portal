@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { SpecV2 } from '../types/chat';
 import {
   weightPercents, setLayerWeightPercent, toggleLayerDirection, removeLayer,
-  buildAddFactorPrompt,
+  buildAddFactorPrompt, applyScenarioWeights, restoreWeights,
 } from '../services/factorEditing';
 
 interface SpecSummaryCardProps {
@@ -82,6 +82,103 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
   const [addingFactor, setAddingFactor] = useState(false);
   const [newFactorName, setNewFactorName] = useState('');
   const [newFactorDir, setNewFactorDir] = useState<'positive' | 'negative'>('positive');
+
+  /**
+   * v1.12.6 — scenario chips are now applicable, not decorative.
+   *
+   * They already sat on the plan card at exactly the right moment — after the
+   * methodology is visible, before anything is spent — carrying an `emphasis`
+   * describing which factors should matter more. They rendered as <span>s, so
+   * the choice was readable and inert. Clicking one now re-weights the factor
+   * framework through the same audited path as the sliders
+   * (weightsAdjustedByUser -> preserved across chat turns, reported in the
+   * weight audit as user-adjusted).
+   *
+   * `baseWeightsRef` snapshots the weights BEFORE the first scenario is applied
+   * so switching between scenarios always recomputes from the archetype
+   * defaults rather than compounding, and clicking the active chip again
+   * restores them.
+   */
+  const baseWeightsRef = React.useRef<Record<string, number> | null>(null);
+  const [activeScenario, setActiveScenario] = useState<string | null>(null);
+  /** v1.12.6 — questionId -> optionId. Answering is optional throughout. */
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  const scenarioIsApplicable = (sc: { weightMultipliers?: Record<string, number> }) =>
+    Boolean(onSpecEdit && sc.weightMultipliers && Object.keys(sc.weightMultipliers).length > 0);
+
+  /**
+   * A scenario chip and a question answer are the same operation — both say
+   * "these factors matter more" — so they compose through one path instead of
+   * fighting each other. Everything is recomputed from `base` (the weights
+   * before any emphasis), so selections are order-independent and never
+   * compound.
+   */
+  const combineMultipliers = (
+    scenarioName: string | null,
+    picked: Record<string, string>,
+  ): Record<string, number> => {
+    const acc: Record<string, number> = {};
+    const add = (m?: Record<string, number>) => {
+      if (!m) return;
+      for (const [id, v] of Object.entries(m)) {
+        if (Number.isFinite(v)) acc[id] = (acc[id] ?? 1) * v;
+      }
+    };
+    add(plan?.scenarios?.find(x => x.name === scenarioName)?.weightMultipliers);
+    for (const q of plan?.clarifyingQuestions ?? []) {
+      add(q.options.find(o => o.id === picked[q.id])?.weightMultipliers);
+    }
+    return acc;
+  };
+
+  /** v1.12.6 (step 3) — what the customer TOLD us, so the report can say
+   *  "you told us X" instead of "we assumed X". An answered question stops
+   *  being an assumption, which is where the run-to-run variance came from. */
+  const resolvedClarifications = (picked: Record<string, string>): string[] =>
+    (plan?.clarifyingQuestions ?? [])
+      .map(q => {
+        const opt = q.options.find(o => o.id === picked[q.id]);
+        return opt ? `${q.question} — ${opt.label}` : null;
+      })
+      .filter((v): v is string => v !== null);
+
+  const applyEmphasis = (scenarioName: string | null, picked: Record<string, string>) => {
+    if (!onSpecEdit) return;
+    if (!baseWeightsRef.current) {
+      baseWeightsRef.current = Object.fromEntries(spec.layers.map(l => [l.id, l.weight]));
+    }
+    const base = baseWeightsRef.current;
+    const combined = combineMultipliers(scenarioName, picked);
+    const layers = Object.keys(combined).length
+      ? applyScenarioWeights(spec.layers, base, combined)
+      : restoreWeights(spec.layers, base);
+    const resolved = resolvedClarifications(picked);
+    onSpecEdit({
+      ...spec,
+      layers,
+      weightsAdjustedByUser: true,
+      meta: { ...(spec.meta ?? {}), clarificationsResolved: resolved },
+    });
+  };
+
+  const handleScenarioClick = (sc: {
+    name: string; weightMultipliers?: Record<string, number>;
+  }) => {
+    if (!onSpecEdit || !scenarioIsApplicable(sc)) return;
+    const next = activeScenario === sc.name ? null : sc.name;   // click again = off
+    setActiveScenario(next);
+    applyEmphasis(next, answers);
+  };
+
+  const handleAnswer = (questionId: string, optionId: string) => {
+    if (!onSpecEdit) return;
+    const next = { ...answers };
+    if (next[questionId] === optionId) delete next[questionId];  // click again = unset
+    else next[questionId] = optionId;
+    setAnswers(next);
+    applyEmphasis(activeScenario, next);
+  };
 
   // v1.11.4 — BUG FIX. This used to do `weight: pct`, writing the typed
   // PERCENTAGE straight onto the layer while the card renders weight/sum*100.
@@ -406,11 +503,36 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
       {/* ── Scenarios ── */}
       {(plan?.scenarios?.length ?? 0) > 0 && (
         <div className="spec-scenarios">
-          {plan!.scenarios!.map((s, i) => (
-            <span key={i} className="spec-scenario-chip" title={[s.description, s.emphasis].filter(Boolean).join(' — ')}>
-              {s.name}
+          {plan!.scenarios!.map((sc, i) => {
+            const applicable = scenarioIsApplicable(sc);
+            const active = activeScenario === sc.name;
+            const hint = [sc.description, sc.emphasis].filter(Boolean).join(' — ');
+            // A scenario with no derived multipliers cannot change anything, so
+            // it stays a plain label rather than a button that does nothing.
+            if (!applicable) {
+              return (
+                <span key={i} className="spec-scenario-chip" title={hint}>{sc.name}</span>
+              );
+            }
+            return (
+              <button
+                key={i}
+                type="button"
+                className={`spec-scenario-chip is-applicable${active ? ' is-active' : ''}`}
+                aria-pressed={active}
+                title={[hint, active ? 'Click to restore the default weights' : 'Click to apply this emphasis']
+                  .filter(Boolean).join(' — ')}
+                onClick={() => handleScenarioClick(sc)}
+              >
+                {sc.name}
+              </button>
+            );
+          })}
+          {activeScenario && (
+            <span className="spec-scenario-note">
+              Weights re-balanced for “{activeScenario}” — click it again to restore defaults.
             </span>
-          ))}
+          )}
         </div>
       )}
 
@@ -486,6 +608,37 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
           {unsupported.map((u, i) => (
             <div key={i} className="spec-card-unsupported-item">
               ⚠ <em>{u.requested}</em>: {u.fallback}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Optional refinement (v1.12.6) ──
+          Placed here on purpose: after the methodology is visible and directly
+          above Run, so it reads as "sharpen this before spending" rather than a
+          gate in front of the answer. Every question is skippable. */}
+      {onSpecEdit && (plan?.clarifyingQuestions?.length ?? 0) > 0 && !blocked && (
+        <div className="spec-clarify">
+          <div className="spec-clarify-head">
+            Optional — narrows the ranking. Skip and run if you'd rather.
+          </div>
+          {plan!.clarifyingQuestions!.map(q => (
+            <div key={q.id} className="spec-clarify-q">
+              <div className="spec-clarify-question">{q.question}</div>
+              {q.why && <div className="spec-clarify-why">{q.why}</div>}
+              <div className="spec-clarify-options">
+                {q.options.map(o => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    className={`spec-clarify-option${answers[q.id] === o.id ? ' is-active' : ''}`}
+                    aria-pressed={answers[q.id] === o.id}
+                    onClick={() => handleAnswer(q.id, o.id)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
             </div>
           ))}
         </div>

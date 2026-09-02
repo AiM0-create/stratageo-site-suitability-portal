@@ -77,6 +77,43 @@ export function setLayerWeightPercent(
   return layers.map(l => (l.id === layerId ? { ...l, weight: w } : l));
 }
 
+/**
+ * v1.12.6 — apply a plan-card scenario's emphasis to the factor weights.
+ *
+ * Always computed from `base` (the weights before any scenario was applied),
+ * never from the current weights, so clicking through Destination-led ->
+ * White-space -> Destination-led lands on the same numbers every time instead
+ * of compounding. Ratios are preserved and renormalised to sum 1 — the same
+ * rule as the sliders, and the v1.0.0 postmortem's invariant: never clamp a
+ * layer, scale it.
+ *
+ * Returns `layers` unchanged when there is nothing applicable, so callers can
+ * treat "no multipliers" and "no-op" identically.
+ */
+export function applyScenarioWeights(
+  layers: Layer[],
+  base: Record<string, number>,
+  multipliers: Record<string, number> | undefined,
+): Layer[] {
+  if (!multipliers || Object.keys(multipliers).length === 0) return layers;
+
+  const scaled = layers.map(l => {
+    const b = Number.isFinite(base[l.id]) ? base[l.id] : (l.weight || 0);
+    const m = Number.isFinite(multipliers[l.id]) ? multipliers[l.id] : 1;
+    return { layer: l, w: Math.max(MIN_WEIGHT, b * m) };
+  });
+
+  const total = scaled.reduce((s, x) => s + x.w, 0);
+  if (!(total > 0)) return layers;
+
+  return scaled.map(({ layer, w }) => ({ ...layer, weight: w / total }));
+}
+
+/** Restore the weights captured before any scenario was applied. */
+export function restoreWeights(layers: Layer[], base: Record<string, number>): Layer[] {
+  return layers.map(l => (Number.isFinite(base[l.id]) ? { ...l, weight: base[l.id] } : l));
+}
+
 /** Flip a factor between "more is better" and "less is better". */
 export function toggleLayerDirection(layers: Layer[], layerId: string): Layer[] {
   return layers.map(l =>

@@ -7,8 +7,8 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def test_version_is_120():
-    # Updated to v1.12.5 — keep-away rules are exclusions, not routing
-    assert APP_VERSION == "1.12.5"
+    # Updated to v1.12.6 — the plan card asks instead of assuming
+    assert APP_VERSION == "1.12.6"
     assert ENGINE_VERSION == "stratageo-engine-00078"
 
 

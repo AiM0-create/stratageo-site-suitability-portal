@@ -47,9 +47,26 @@ export interface ConsultantPlan {
   methodology?: string;
   assumptions?: Array<{ assumption: string; basis?: string }>;
   misleadingVariables?: Array<{ variable: string; risk?: string }>;
-  scenarios?: Array<{ name: string; description?: string; emphasis?: string }>;
+  scenarios?: Array<{
+    name: string;
+    description?: string;
+    emphasis?: string;
+    /** v1.12.6 — layer id -> weight multiplier, derived deterministically
+     *  by the planner. Absent/empty means the scenario is descriptive only
+     *  and its chip is not applicable. */
+    weightMultipliers?: Record<string, number>;
+  }>;
   validation?: string[];
   modelFailureRisks?: string[];
+  /** v1.12.6 — optional, deterministic questions whose answers move factor
+   *  weights. Built from the spec's own layers by the planner; the analysis is
+   *  fully runnable with none of them answered. */
+  clarifyingQuestions?: Array<{
+    id: string;
+    question: string;
+    why?: string;
+    options: Array<{ id: string; label: string; weightMultipliers?: Record<string, number> }>;
+  }>;
 }
 
 export interface SpecV2 {

@@ -228,6 +228,114 @@ def _factor_family(name: str) -> str:
     return "other"
 
 
+# v1.12.6 — turn a scenario's prose `emphasis` into an applicable weight shift.
+#
+# The plan card already rendered scenario chips ("Balanced premium cafe",
+# "Destination-led premium", "White-space premium") carrying an `emphasis`
+# string naming which factors matter more. They were <span>s: the choice was on
+# screen, at the right moment, and did nothing. This makes them applicable.
+#
+# The multiplier is derived here, not asked of the LLM, for the reason live
+# testing exposed: running the same prompt twice produced three chips one run
+# and one the next. If the model also authored the NUMBERS, picking a scenario
+# would shift weights differently each time — the same non-determinism we are
+# trying to remove. Families and the x1.5 convention are shared with
+# engine/stability.py, so an emphasis here means what it means there.
+SCENARIO_EMPHASIS_MULTIPLIER = 1.5
+
+
+def derive_scenario_multipliers(scenario_text: str, layers: list[dict]) -> dict[str, float]:
+    """Map a scenario's wording to {layer id: multiplier} over the spec's layers.
+
+    Returns {} when the wording names no known factor family, and also when it
+    would emphasise EVERY layer — a uniform boost renormalises back to the
+    original weights, so applying it would be a no-op dressed up as a choice.
+    """
+    families = {fam for fam, rx in _FAMILY_RES if rx.search(scenario_text or "")}
+    if not families:
+        return {}
+    hits = {
+        str(l.get("id") or ""): SCENARIO_EMPHASIS_MULTIPLIER
+        for l in layers
+        if l.get("id") and _factor_family(str(l.get("name") or "")) in families
+    }
+    if not hits or len(hits) >= len(layers):
+        return {}
+    return hits
+
+
+# v1.12.6 — questions the customer can answer BEFORE anything is spent.
+#
+# Motivation from live testing: twice the planner invented a requirement nobody
+# stated — a metro exclusion, then a rent requirement — because it was filling
+# gaps in a one-line brief on its own. A question turns a guess into a stated
+# fact, which is a correctness mechanism, not a UX nicety.
+#
+# Two rules keep it from becoming a quiz:
+#   1. Only ask when the answer moves a weight. A question that merely rewords
+#      the report is theatre and is not offered.
+#   2. Only ask what this spec can actually act on — every option is built from
+#      the layers the spec really has, so no option can reference a factor that
+#      is not being measured.
+# Everything here is derived from the spec; nothing is authored per run.
+_QUESTION_FAMILY_LABELS = {
+    "access":    "Passing footfall and ease of access",
+    "cotenancy": "The businesses already around it",
+    "demand":    "Resident and workplace demand nearby",
+}
+
+
+def build_clarifying_questions(layers: list[dict]) -> list[dict]:
+    """Deterministic, spec-derived questions. Empty list is a valid answer."""
+    by_family: dict[str, list[str]] = {}
+    for l in layers or []:
+        lid = str(l.get("id") or "")
+        if not lid:
+            continue
+        by_family.setdefault(_factor_family(str(l.get("name") or "")), []).append(lid)
+
+    questions: list[dict] = []
+
+    # Q1 — which driver should dominate. Needs at least two real alternatives,
+    # otherwise there is no choice to make.
+    driver_options = [
+        {
+            "id": fam,
+            "label": _QUESTION_FAMILY_LABELS[fam],
+            "weightMultipliers": {lid: SCENARIO_EMPHASIS_MULTIPLIER for lid in by_family[fam]},
+        }
+        for fam in ("access", "cotenancy", "demand")
+        if by_family.get(fam)
+    ]
+    if len(driver_options) >= 2:
+        questions.append({
+            "id": "primary_driver",
+            "question": "What should matter most for this site?",
+            "why": "Shifts weight onto that group of factors, which changes the ranking.",
+            "options": driver_options + [
+                {"id": "balanced", "label": "Keep them balanced", "weightMultipliers": {}},
+            ],
+        })
+
+    # Q2 — competition posture. Only when a competition factor exists to move.
+    comp_ids = by_family.get("competition") or []
+    if comp_ids:
+        questions.append({
+            "id": "competition_posture",
+            "question": "How should nearby competitors count?",
+            "why": "Changes how strongly competition pushes a zone up or down the ranking.",
+            "options": [
+                {"id": "avoid", "label": "Prefer uncontested areas",
+                 "weightMultipliers": {lid: SCENARIO_EMPHASIS_MULTIPLIER for lid in comp_ids}},
+                {"id": "cluster", "label": "Happy to sit near competitors",
+                 "weightMultipliers": {lid: 0.5 for lid in comp_ids}},
+                {"id": "neutral", "label": "No preference", "weightMultipliers": {}},
+            ],
+        })
+
+    return questions
+
+
 @dataclass
 class SkippedStage:
     stage: str

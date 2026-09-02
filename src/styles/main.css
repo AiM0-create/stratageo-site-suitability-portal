@@ -1681,6 +1681,46 @@ button.spec-dir-toggle:hover { filter: brightness(0.95); }
 .spec-scenario-chip {
   padding: 2px 8px; font-size: 10px; font-weight: 600; border-radius: 999px;
   background: #ede9fe; color: #6d28d9; cursor: help;
+  border: 1px solid transparent;          /* reserve the active border's space */
+  font-family: inherit; line-height: 1.5;  /* <button> resets */
+}
+/* v1.12.6 — a scenario that can actually re-weight the framework reads as a
+   control, not a label: pointer cursor, hover feedback, pressed state. Chips
+   with no derived multipliers keep the inert style above. */
+.spec-scenario-chip.is-applicable { cursor: pointer; }
+.spec-scenario-chip.is-applicable:hover { background: #ddd6fe; }
+.spec-scenario-chip.is-applicable:focus-visible {
+  outline: 2px solid #6d28d9; outline-offset: 1px;
+}
+.spec-scenario-chip.is-active {
+  background: #6d28d9; color: #fff; border-color: #5b21b6;
+}
+/* v1.12.6 — optional refinement questions, directly above Run. Deliberately
+   quiet: this is a "sharpen it if you like" affordance, not a gate in front of
+   the answer, so it must not compete with the Run button. */
+.spec-clarify {
+  margin: 8px 0 6px; padding: 8px; border-radius: 8px;
+  background: #f8fafc; border: 1px solid #e2e8f0;
+}
+.spec-clarify-head { font-size: 10px; color: #64748b; margin-bottom: 6px; }
+.spec-clarify-q + .spec-clarify-q { margin-top: 8px; }
+.spec-clarify-question { font-size: 11px; font-weight: 600; color: #0f172a; }
+.spec-clarify-why { font-size: 10px; color: #64748b; margin-top: 1px; }
+.spec-clarify-options { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.spec-clarify-option {
+  padding: 3px 9px; font-size: 10px; font-weight: 600; border-radius: 999px;
+  font-family: inherit; line-height: 1.5; cursor: pointer;
+  background: #fff; color: #334155; border: 1px solid #cbd5e1;
+}
+.spec-clarify-option:hover { background: #f1f5f9; }
+.spec-clarify-option:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.spec-clarify-option.is-active {
+  background: #1d4ed8; color: #fff; border-color: #1e40af;
+}
+
+.spec-scenario-note {
+  display: block; width: 100%; margin-top: 4px;
+  font-size: 10px; color: #6d28d9;
 }
 .spec-card-weak-banner {
   margin: 6px 0; padding: 5px 8px; font-size: 10px; border-radius: 6px;
