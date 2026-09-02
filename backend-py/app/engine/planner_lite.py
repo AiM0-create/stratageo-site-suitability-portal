@@ -433,6 +433,34 @@ class AnalysisPlan:
         }
 
 
+def _user_text(spec) -> str:
+    """v1.12.7 — ONLY what the customer actually said.
+
+    _spec_text() deliberately includes spec.objective, spec.businessType and
+    spec.constraints so relevance checks can see the planner's framing. That is
+    right for "is water relevant here", and wrong for "did the customer state a
+    requirement we cannot verify" — those fields are LLM-authored, so scanning
+    them lets an invented requirement justify itself.
+
+    Live failure: two identical runs of "Find 3 best locations for a premium
+    cafe in Indiranagar, Bengaluru" minutes apart. The second decided rent was a
+    requirement — the word never appears in the prompt — so every zone came back
+    "PROVISIONAL — field validation required: Rent / lease price cap cannot be
+    verified", and the headline next action became "verify rent with brokers".
+    The first run said "walk the zone". Same family as the invented metro
+    exclusion, through a different door.
+    """
+    parts = [
+        getattr(spec, "normalizedPrompt", "") or "",
+    ]
+    ri = getattr(spec, "rawIntent", None)
+    if ri is not None:
+        parts.append(getattr(ri, "rawPrompt", "") or "")
+        # Parser-derived FROM the prompt, so still the customer's own words.
+        parts.extend(getattr(ri, "hardConstraintPhrases", None) or [])
+    return " ".join(p for p in parts if p).strip()
+
+
 def _spec_text(spec) -> str:
     """All prompt-derived text worth scanning for relevance signals."""
     parts = [
@@ -823,9 +851,16 @@ def create_analysis_plan(spec, raw_intent=None, study_area_hint=None) -> Analysi
             saved_cost="low",
         ))
 
-    # E. Unsupported constraints — visible, never scored, never provider-checked
+    # E. Unsupported constraints — visible, never scored, never provider-checked.
+    #
+    # v1.12.7 — matched against the CUSTOMER's words, not the planner's framing.
+    # Disclosure is protective, so the fallback is deliberately asymmetric: with
+    # no user text to compare against we scan everything, exactly as before —
+    # losing a genuine "rent cannot be verified" disclosure would be a worse
+    # failure than showing a spurious one.
+    _unsupported_text = _user_text(spec) or text
     for rx, key, reason, label in _UNSUPPORTED_RULES:
-        if rx.search(text):
+        if rx.search(_unsupported_text):
             plan.unsupported_constraints.append(UnsupportedConstraint(
                 constraint=key, reason=reason, display_label=label,
             ))

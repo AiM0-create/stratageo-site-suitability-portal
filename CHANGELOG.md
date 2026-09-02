@@ -4,6 +4,43 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.12.7] — 2026-09-02 — Unverifiable requirements come from the customer
+
+Two identical runs of *"Find 3 best locations for a premium cafe in Indiranagar,
+Bengaluru"*, minutes apart on the same deployed version. The second decided
+**rent** was a requirement — the word appears nowhere in the prompt — so every
+zone came back stamped *"PROVISIONAL — field validation required: Rent / lease
+price cap cannot be verified"*, and the headline next action became *"verify
+current rent and lease terms with local brokers"*. The first run said *"walk the
+zone"*.
+
+### Fixed — an invented requirement could justify itself
+- `_UNSUPPORTED_RULES` matched against `_spec_text()`, which deliberately folds
+  in `spec.objective`, `spec.businessType` and `spec.constraints` so relevance
+  checks can see the planner's framing. That is right for *"is water relevant
+  here"* and wrong for *"did the customer state something we cannot verify"* —
+  those fields are LLM-authored, so the planner writing "rent" into its own
+  framing was enough to stamp the whole run unverifiable.
+- They now match `_user_text()`: `rawPrompt`, `normalizedPrompt`, and the
+  parser's `hardConstraintPhrases` (derived from the prompt, so still the
+  customer's words).
+- Same family as the invented metro exclusion in v1.12.3, through a different
+  door, and the same remedy: judge the customer's requirements by the
+  customer's words.
+
+### The fallback is asymmetric on purpose
+Disclosure is protective. With no user text to compare against, the full spec
+text is scanned exactly as before — losing a genuine *"rent cannot be verified"*
+warning is a worse failure than showing a spurious one.
+
+### Tests
+- `backend-py/tests/test_v1127_unrequested_unsupported.py` — 9 tests: the live
+  reproduction, planner-authored fields excluded from the customer text, three
+  genuinely-stated requirements that must still fire, requirements arriving via
+  a hard-constraint phrase or a later turn, and the protective fallback.
+
+---
+
 ## [1.12.6] — 2026-09-02 — The plan card asks, instead of assuming
 
 Customer idea: *"when one types the initial prompt it directly shows the

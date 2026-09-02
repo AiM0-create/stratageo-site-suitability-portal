@@ -470,6 +470,20 @@ v1.12.6: The Plan Card Asks (customer idea: "why not question the user what
   Scenarios and answers compose through ONE path, always recomputed from the
   weights captured before any emphasis, so selections are order-independent and
   never compound.
+v1.12.7: Requirements Come From The Customer (live: two identical runs of "Find
+  3 best locations for a premium cafe in Indiranagar, Bengaluru" minutes apart;
+  the second decided RENT was a requirement — a word absent from the prompt — so
+  every zone was stamped "PROVISIONAL — field validation required: Rent / lease
+  price cap cannot be verified" and the headline next action became "verify rent
+  with brokers", where the first run said "walk the zone").
+  _UNSUPPORTED_RULES matched against _spec_text(), which folds in spec.objective,
+  spec.businessType and spec.constraints — all LLM-authored — so an invented
+  requirement could justify itself. They now match _user_text(): rawPrompt,
+  normalizedPrompt and the parser's hardConstraintPhrases. Same family as the
+  invented metro exclusion (v1.12.3) through a different door, same remedy.
+  The fallback is deliberately asymmetric: with no user text to compare against
+  the full spec text is scanned exactly as before, because losing a genuine
+  "rent cannot be verified" disclosure is a worse failure than a spurious one.
 """
 from functools import lru_cache
 from typing import Literal
@@ -477,7 +491,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.6"
+APP_VERSION     = "1.12.7"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -492,7 +506,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "The plan card asks, instead of assuming"
+RELEASE_NAME    = "Unverifiable requirements must come from the customer"
 
 
 class Settings(BaseSettings):
