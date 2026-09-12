@@ -706,9 +706,13 @@ const App: React.FC = () => {
    */
   const [pendingClarification, setPendingClarification] =
     useState<(ClarifyResponse & { brief: string }) | null>(null);
+  // True once the current brief has been through the clarification turn
+  // (answered or skipped), so the plan card does not ask again.
+  const [briefClarified, setBriefClarified] = useState(false);
 
   const handleClarifyThenChat = useCallback(async (rawPrompt: string) => {
     setError(null);
+    setBriefClarified(false);
     addMessage('user', rawPrompt, { intent: 'query' });
     setIsLoading(true);
     setAnalysisStatus({ message: 'Reading your brief…', progress: 20 });
@@ -738,6 +742,7 @@ const App: React.FC = () => {
     const pending = pendingClarification;
     if (!pending) return;
     setPendingClarification(null);
+    setBriefClarified(true);
     // The customer's answers travel with the brief; the backend routes them
     // deterministically. An empty list is "use your judgement" — still valid.
     return handleChatTurn(pending.brief, { clarifications: answers, echoUser: false });
@@ -1074,6 +1079,7 @@ const App: React.FC = () => {
     setChatStage('chat');
     setAnalysisPhase('idle');
     setPendingClarification(null);      // v1.13.1 — open questions belong to the old brief
+    setBriefClarified(false);
     newSession();
   }, [newSession, result, spec, customWeights, userPoints, currentSession.id, resetAnalysisExecutionState]);
 
@@ -1990,6 +1996,7 @@ const App: React.FC = () => {
           chatSpecStatus={chatSpecStatus}
           clarification={pendingClarification}
           onClarificationSubmit={handleClarificationSubmit}
+          briefClarified={briefClarified}
           chatReady={chatReady}
           chatStage={chatStage}
           isExecuting={isExecuting}

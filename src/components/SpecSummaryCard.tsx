@@ -20,6 +20,9 @@ interface SpecSummaryCardProps {
    *  nothing or silently measures the wrong thing. So "add factor" asks the
    *  planner, while weight/direction/remove stay instant client-side edits. */
   onSendMessage?: (prompt: string) => void;
+  /** v1.13.1 — the brief already went through the clarification turn; the
+   *  v1.12.6 plan-card questions would ask the same things a second time. */
+  hideClarifyingQuestions?: boolean;
 }
 
 function catchmentLabel(l: SpecV2['layers'][number]): string {
@@ -76,6 +79,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
   onConfirmExecute,
   onSpecEdit,
   onSendMessage,
+  hideClarifyingQuestions = false,
 }) => {
   const plan = spec.plan;
   const pcts = weightPercents(spec.layers);
@@ -617,7 +621,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
           Placed here on purpose: after the methodology is visible and directly
           above Run, so it reads as "sharpen this before spending" rather than a
           gate in front of the answer. Every question is skippable. */}
-      {onSpecEdit && (plan?.clarifyingQuestions?.length ?? 0) > 0 && !blocked && (
+      {onSpecEdit && !hideClarifyingQuestions && (plan?.clarifyingQuestions?.length ?? 0) > 0 && !blocked && (
         <div className="spec-clarify">
           <div className="spec-clarify-head">
             Optional — narrows the ranking. Skip and run if you'd rather.

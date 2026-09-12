@@ -36,6 +36,8 @@ interface FloatingAssistantProps {
   /** v1.13.1 — a clarification turn awaiting answers; rendered in place of the plan card. */
   clarification?: ClarifyResponse | null;
   onClarificationSubmit?: (answers: ClarificationAnswer[]) => void;
+  /** v1.13.1 — this brief was clarified at the front door. */
+  briefClarified?: boolean;
   chatReady?: boolean;
   /** Staged flow: the plan card stays hidden while the conversation is exploratory */
   chatStage?: 'chat' | 'framework' | 'ready';
@@ -80,6 +82,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   chatSpecStatus = 'empty',
   clarification = null,
   onClarificationSubmit,
+  briefClarified = false,
   chatReady = false,
   chatStage = 'chat',
   isExecuting = false,
@@ -314,6 +317,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 onConfirmExecute={onConfirmExecute ?? (() => {})}
                 onSpecEdit={onSpecEdit}
                 onSendMessage={onRunAnalysis}
+                hideClarifyingQuestions={briefClarified}
               />
             )}
 

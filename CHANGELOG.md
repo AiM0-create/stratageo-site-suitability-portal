@@ -38,6 +38,20 @@ from the answers.
 - Answers travel with the chat turn as `clarifications`; the brief is not
   echoed twice.
 
+### No asking twice
+Seen on the first live walk-through: after answering *"Who mostly comes in?"*
+at the front door, the plan card asked *"What should matter most for this
+site?"* again with near-identical options — the v1.12.6 block. Once a brief
+has been through the clarification turn (answered or skipped), the plan card
+no longer shows its own questions. One mechanism, asked once.
+
+### Also fixed on the way, backend
+- The chosen format now drives the label and objective (*"premium
+  restaurant"*, not *"cafe"* over premium factors).
+- Named localities keep their city (*"Indiranagar, Bengaluru"*), sourced from
+  the brief when the planner has already rewritten the scope.
+- The objective follows a scope answer (*"…across Indiranagar, Koramangala"*).
+
 ### Kept pure, kept tested
 `services/clarification.ts` holds what the frontend actually owns — the exact
 payload sent back, when the customer may continue, and what the strip says —
