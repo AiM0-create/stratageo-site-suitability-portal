@@ -21,7 +21,8 @@ from ..config import get_settings
 from ..engine.canonical_archetypes import resolve_canonical_archetype
 from ..engine.clarification import (
     ARCHETYPE_LABELS, ARCHETYPE_SIBLINGS, FAMILY_LABELS, KNOWN_ARCHETYPES,
-    build_slot_state, is_complete, understanding_strip, validate_questions,
+    build_slot_state, ensure_required_questions, is_complete, understanding_strip,
+    validate_questions,
 )
 from ..engine.intent_parser import parse_raw_intent
 from ..engine.planner_lite import _factor_family
@@ -125,14 +126,20 @@ async def clarify(brief: str) -> dict:
             "; ".join(f"{r.question_id}:{r.rule}" for r in result.rejections[:8]),
         )
 
+    # The AI got first go; the engine guarantees a question for any REQUIRED
+    # slot still open — the plan is never built on a guess the customer was
+    # never offered the chance to correct.
+    questions = ensure_required_questions(
+        result.accepted, slots, inputs["model_input"]["formats"])
+
     complete = is_complete(slots)
     if not reply:
-        reply = ("I have what I need — here's the plan." if complete and not result.accepted
+        reply = ("I have what I need — here's the plan." if complete and not questions
                  else "A couple of things would sharpen this:")
 
     return {
         "reply": reply,
-        "questions": result.accepted,
+        "questions": questions,
         "rejections": [r.to_dict() for r in result.rejections],
         "slots": {k: v.to_dict() for k, v in slots.items()},
         "understanding": understanding_strip(slots),

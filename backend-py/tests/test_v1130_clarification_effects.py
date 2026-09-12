@@ -446,7 +446,10 @@ class TestClarifyEndpoint:
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["complete"] is False
-        assert [q["slot"] for q in body["questions"]] == ["study_scope"]
+        # The AI's scope question is kept; the engine appends its own format
+        # question because `archetype` is still low_confidence and the model
+        # did not ask (live finding — see ensure_required_questions).
+        assert [q["id"] for q in body["questions"]] == ["where", "engine_kind"]
         assert any(u["slot"] == "top_n" and u["value"] == "4" for u in body["understanding"])
 
     def test_a_complete_brief_gets_no_questions_even_if_the_model_offers_them(self):
@@ -462,8 +465,11 @@ class TestClarifyEndpoint:
                                                  "options": [{"label": "Yes", "effect": {"type": "exclude", "target": "metro", "bufferM": 1000}}]}]}
         r = self._post(PROMPT, payload)
         body = r.json()
-        assert body["questions"] == []
         assert r.status_code == 200
+        # The bad question is gone; what remains is the engine's floor only,
+        # and nothing in it pre-fills a target.
+        assert [q["id"] for q in body["questions"]] == ["engine_where", "engine_kind"]
+        assert not any("target" in o["effect"] for q in body["questions"] for o in q["options"])
 
     def test_a_model_failure_is_fail_soft(self):
         from fastapi.testclient import TestClient
@@ -473,5 +479,100 @@ class TestClarifyEndpoint:
         with patch("app.services.clarify.AsyncOpenAI", return_value=broken):
             r = TestClient(app).post("/api/v2/clarify", json={"brief": PROMPT})
         assert r.status_code == 200
-        assert r.json()["questions"] == []
-        assert r.json()["reply"]
+        body = r.json()
+        # Fail-soft does not mean silent: the engine's required questions still
+        # stand, so a provider hiccup never leaves the plan built on a guess.
+        assert [q["id"] for q in body["questions"]] == ["engine_where", "engine_kind"]
+        assert body["reply"] == "A couple of things would sharpen this:"
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Two guards added from the first live call
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from app.engine.clarification import SlotState, ensure_required_questions, validate_questions
+
+CAFE_LAYERS_NO_DEMAND = [
+    {"id": "footfall",  "name": "Pedestrian footfall"},
+    {"id": "comp",      "name": "Direct cafe competition"},
+    {"id": "cotenancy", "name": "Commercial co-tenancy"},
+]
+
+
+class TestLabelFamilyGuard:
+    def test_the_live_mislabel_is_rejected(self):
+        """"People who live or work nearby" mapped to competition, because the
+        café framework has no demand family and the model picked the nearest."""
+        slots = {"customer_mode": SlotState()}
+        res = validate_questions([{"id": "who", "slot": "customer_mode", "question": "Who comes in?",
+            "options": [
+                {"label": "People walking past", "effect": {"type": "emphasize", "family": "access"}},
+                {"label": "People who live or work nearby", "effect": {"type": "emphasize", "family": "competition"}},
+            ]}], slots, CAFE_LAYERS_NO_DEMAND)
+
+        labels = [o["label"] for o in res.accepted[0]["options"]]
+        assert "People who live or work nearby" not in labels
+        assert any(r.rule == "label_family_mismatch" and "'demand'" in r.reason for r in res.rejections)
+
+    def test_a_correctly_paired_label_passes(self):
+        slots = {"customer_mode": SlotState()}
+        res = validate_questions([{"id": "who", "slot": "customer_mode", "question": "Who comes in?",
+            "options": [{"label": "People walking past", "effect": {"type": "emphasize", "family": "access"}}]}],
+            slots, CAFE_LAYERS_NO_DEMAND)
+        assert res.rejections == []
+
+    def test_a_neutral_label_is_not_second_guessed(self):
+        slots = {"customer_mode": SlotState()}
+        res = validate_questions([{"id": "who", "slot": "customer_mode", "question": "Who comes in?",
+            "options": [{"label": "Mostly regulars", "effect": {"type": "emphasize", "family": "cotenancy"}}]}],
+            slots, CAFE_LAYERS_NO_DEMAND)
+        assert res.rejections == []
+
+
+class TestRequiredFloor:
+    def _slots(self):
+        return {
+            "archetype":   SlotState("low_confidence", "prompt", "generic_qsr_cafe"),
+            "study_scope": SlotState("low_confidence", "prompt", "Bengaluru"),
+            "keep_away":   SlotState(), "must_be_near": SlotState(),
+            "customer_mode": SlotState(), "expectations": SlotState(),
+            "top_n":       SlotState("filled", "prompt", 4),
+        }
+
+    def test_the_live_omission_is_repaired(self):
+        """The model asked four things and not "where" — the engine adds it."""
+        ai = [{"id": "who", "slot": "customer_mode", "impact": "medium", "question": "Who?", "why": "",
+               "options": [{"id": "o1", "label": "Walk past", "effect": {"type": "emphasize", "family": "access"}, "free_text": False}]}]
+        out = ensure_required_questions(ai, self._slots(), formats=[
+            {"key": "generic_qsr_cafe", "label": "Quick-service café"},
+            {"key": "premium_restaurant", "label": "Premium sit-down"}])
+
+        assert [q["id"] for q in out] == ["engine_where", "engine_kind", "who"]   # high before medium
+        where = out[0]
+        assert "Bengaluru" in where["question"]
+        assert any(o["effect"] == {"type": "set_scope", "kind": "localities"} and o["free_text"] for o in where["options"])
+        assert any(o["effect"]["type"] == "none" for o in where["options"])
+
+    def test_the_ai_question_is_kept_when_it_did_ask(self):
+        ai = [{"id": "where", "slot": "study_scope", "impact": "high", "question": "Where?", "why": "",
+               "options": [{"id": "o1", "label": "City", "effect": {"type": "set_scope", "kind": "city"}, "free_text": False}]}]
+        out = ensure_required_questions(ai, self._slots(), formats=[{"key": "premium_restaurant", "label": "Premium"}])
+        assert [q["id"] for q in out] == ["where", "engine_kind"]
+
+    def test_nothing_is_added_for_a_complete_brief(self):
+        slots = self._slots()
+        slots["archetype"] = SlotState("filled", "prompt", "dark_kitchen")
+        slots["study_scope"] = SlotState("filled", "prompt", ["Ballygunge, Kolkata"])
+        assert ensure_required_questions([], slots, formats=[]) == []
+
+    def test_a_skipped_slot_is_not_re_asked(self):
+        slots = self._slots()
+        slots["study_scope"] = SlotState("skipped", "you", "Bengaluru")
+        slots["archetype"] = SlotState("skipped", "you", "generic_qsr_cafe")
+        assert ensure_required_questions([], slots, formats=[]) == []
+
+    def test_format_fallback_needs_known_formats(self):
+        slots = self._slots()
+        slots["study_scope"] = SlotState("filled", "prompt", ["Indiranagar, Bengaluru"])
+        assert ensure_required_questions([], slots, formats=[{"key": "speakeasy", "label": "?"}]) == []

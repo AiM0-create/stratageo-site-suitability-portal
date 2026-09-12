@@ -74,6 +74,15 @@ REQUIRED_SLOTS: tuple[str, ...] = ("archetype", "study_scope")
 # control, and top_n has a default plus a card control too.
 ASKABLE_SLOTS: frozenset[str] = frozenset(SLOTS) - {"top_n"}
 _IMPACT_RANK = {"high": 0, "medium": 1, "low": 2}
+# Tie-break within a tier, in the order an answer changes the result: where we
+# look changes everything, what kind changes what we measure, the gates add
+# rules, who it's for changes the weights, expectations change the promise.
+_SLOT_ORDER = {s: i for i, s in enumerate(
+    ("study_scope", "archetype", "keep_away", "must_be_near", "customer_mode", "expectations", "top_n"))}
+
+
+def _question_sort_key(q: dict) -> tuple:
+    return (_IMPACT_RANK.get(q.get("impact", "low"), 2), _SLOT_ORDER.get(q.get("slot"), 99))
 
 # ── The effect vocabulary — a closed set ─────────────────────────────────────
 FAMILIES: tuple[str, ...] = ("demand", "access", "cotenancy", "competition")
@@ -331,6 +340,27 @@ def _check_effect(effect: Any, slot: str, families: set[str]) -> Optional[str]:
     return None
 
 
+# v1.13.0 live finding: with no `demand` family in the café framework, the model
+# offered "People who live or work nearby" and mapped it to `competition` — the
+# nearest family it had. The validator only checked that the family existed. A
+# label that contradicts its own effect is exactly the kind of meaning the
+# engine owns, so the plainest mismatches are caught here.
+_LABEL_FAMILY_HINTS: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(r"\b(?:live|living|work(?:ing)?|residents?|households?|offices?|population)\b", re.I), "demand"),
+    (re.compile(r"\b(?:walk(?:ing)?\s+past|passing|foot(?:fall)?|commut|transit|metro|bus)\b", re.I), "access"),
+    (re.compile(r"\b(?:businesses?\s+(?:already|around|nearby)|shops?\s+around|anchor|co-?tenan|brand\s+mix)\b", re.I), "cotenancy"),
+    (re.compile(r"\b(?:crowded|competitors?|rivals?|saturat|similar\s+places)\b", re.I), "competition"),
+)
+
+
+def _label_contradicts_family(label: str, family: str) -> Optional[str]:
+    """The family a label plainly describes, when it is not the one attached."""
+    for rx, implied in _LABEL_FAMILY_HINTS:
+        if rx.search(label or ""):
+            return implied if implied != family else None
+    return None
+
+
 def _needs_free_text(effect: dict) -> bool:
     t = effect.get("type")
     return t in _NEEDS_FREE_TEXT or (
@@ -404,6 +434,13 @@ def validate_questions(
             if reason:
                 result.rejections.append(Rejection(oid, "illegal_effect", reason))
                 continue
+            if effect.get("type") in ("emphasize", "deemphasize"):
+                implied = _label_contradicts_family(str(opt.get("label") or ""), effect.get("family"))
+                if implied:
+                    result.rejections.append(Rejection(
+                        oid, "label_family_mismatch",
+                        f"label describes {implied!r} but the effect names {effect.get('family')!r}"))
+                    continue
             if _needs_free_text(effect) and not opt.get("free_text"):
                 result.rejections.append(Rejection(
                     oid, "needs_free_text",
@@ -439,7 +476,7 @@ def validate_questions(
 
     # 9. order by impact — highest first, input order within a tier. No cap:
     #    the stopping condition is completeness, not a count.
-    result.accepted.sort(key=lambda q: _IMPACT_RANK[q["impact"]])
+    result.accepted.sort(key=_question_sort_key)
     return result
 
 
@@ -840,4 +877,66 @@ def understanding_strip(slots: dict[str, SlotState]) -> list[dict]:
             "source": st.source or "",
             "status": st.status,
         })
+    return out
+
+
+# ── The floor the engine guarantees ─────────────────────────────────────────
+#
+# v1.13.0 live finding: on "open a cafe in Bengaluru, suggest me 4 best places"
+# the model asked about format, keep-away, must-be-near and customers — and
+# not where to look, the single highest-impact gap (a bare city is a guess
+# about scale, not an answer). The AI gets first go at every question; but
+# when a REQUIRED slot is still open and nothing accepted targets it, the
+# engine appends its own plain question so the plan is never built on a guess
+# the customer was never given the chance to correct.
+
+def _fallback_question(slot: str, st: SlotState, formats: list[dict]) -> Optional[dict]:
+    if slot == "study_scope":
+        city = st.value if isinstance(st.value, str) and st.value else "that area"
+        return {
+            "id": "engine_where", "slot": slot, "impact": SLOT_IMPACT[slot],
+            "question": f"{city} is a big area — where should we look?",
+            "why": "Changes every zone in the result.",
+            "options": [
+                {"id": "o1", "label": "All of it", "effect": {"type": "set_scope", "kind": "city"}, "free_text": False},
+                {"id": "o2", "label": "Specific areas — I'll name them", "effect": {"type": "set_scope", "kind": "localities"}, "free_text": True},
+                {"id": "o3", "label": "Around a point I'll mark", "effect": {"type": "set_scope", "kind": "point"}, "free_text": True},
+                {"id": "none", "label": "Not sure — use your judgement", "effect": {"type": "none"}, "free_text": False},
+            ],
+        }
+    if slot == "archetype":
+        opts = [
+            {"id": f"o{i + 1}", "label": f["label"],
+             "effect": {"type": "set_archetype", "key": f["key"]}, "free_text": False}
+            for i, f in enumerate(formats or []) if f.get("key") in KNOWN_ARCHETYPES
+        ]
+        if not opts:
+            return None
+        opts.append({"id": "none", "label": "Not sure — use your judgement", "effect": {"type": "none"}, "free_text": False})
+        return {
+            "id": "engine_kind", "slot": slot, "impact": SLOT_IMPACT[slot],
+            "question": "Which is closest to what you're opening?",
+            "why": "Changes what we measure.",
+            "options": opts,
+        }
+    return None
+
+
+def ensure_required_questions(
+    accepted: list[dict],
+    slots: dict[str, SlotState],
+    formats: Optional[list[dict]] = None,
+) -> list[dict]:
+    """Append an engine-built question for any REQUIRED slot that is still
+    open and has no accepted question. Returns a new, impact-ordered list."""
+    covered = {q.get("slot") for q in accepted}
+    out = list(accepted)
+    for slot in REQUIRED_SLOTS:
+        st = slots.get(slot)
+        if st is None or st.status in ("filled", "skipped") or slot in covered:
+            continue
+        q = _fallback_question(slot, st, formats or [])
+        if q:
+            out.append(q)
+    out.sort(key=_question_sort_key)
     return out
