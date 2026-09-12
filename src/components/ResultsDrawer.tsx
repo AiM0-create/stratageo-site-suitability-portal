@@ -1247,9 +1247,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             <button
               className="assumptions-toggle"
               onClick={() => setShowWeights(!showWeights)}
-              style={{ background: weightsAdjusted ? '#fffbeb' : undefined }}
+              style={{ background: (weightsAdjusted || result.weightAudit?.adjustedByUser) ? '#fffbeb' : undefined }}
             >
-              <span>⚖ Factor weights{weightsAdjusted ? ' — custom (adjusted by you)' : ' — defaults'}</span>
+              {/* v1.13.1 — `weightsAdjusted` only knows about the post-run sliders.
+                  Weights changed BEFORE the run — plan-card sliders, scenario
+                  chips, a clarifying answer ("The businesses already there")
+                  — are recorded by the engine in result.weightAudit, which the
+                  PDF already honoured and this header did not: it said
+                  "defaults" over a co-tenancy weight the customer had raised
+                  from 25% to 33%. */}
+              <span>⚖ Factor weights{
+                weightsAdjusted ? ' — custom (adjusted by you)'
+                : result.weightAudit?.adjustedByUser ? ' — adjusted by you before the run'
+                : ' — defaults'}</span>
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-xs" style={{ transform: showWeights ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
               </svg>

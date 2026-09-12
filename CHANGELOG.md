@@ -52,6 +52,22 @@ no longer shows its own questions. One mechanism, asked once.
   the brief when the planner has already rewritten the scope.
 - The objective follows a scope answer (*"…across Indiranagar, Koramangala"*).
 
+### Found by running a full analysis through the new path
+- **The results header said "Factor weights — defaults"** over a co-tenancy
+  weight the customer had just raised from 25% to 33% by answering "The
+  businesses already there". The header only knew about the post-run sliders;
+  pre-run changes (plan-card sliders, scenario chips, clarifying answers) are
+  recorded by the engine in `weightAudit`, which the PDF honoured and the
+  drawer did not. It now reads *"adjusted by you before the run"*.
+- **Hex-grid delivery no longer depends on the render loop.** v1.12.3 flushes
+  buffered GeoJSON on `idle`, which lives inside the loop browsers pause for a
+  hidden or occluded tab — and a customer who switches tabs during the
+  two-minute run is the ordinary case. Observed in an automation tab: buffer
+  54, source 0, `requestAnimationFrame` never firing. `setData` needs no
+  frame; only drawing does. A timer fallback (750 ms, up to 40 tries) now puts
+  the data in the source regardless, so it draws the instant a frame renders.
+  Giving up after the cap does not jam the buffer: the next write re-arms.
+
 ### Kept pure, kept tested
 `services/clarification.ts` holds what the frontend actually owns — the exact
 payload sent back, when the customer may continue, and what the strip says —

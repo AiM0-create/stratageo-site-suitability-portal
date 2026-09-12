@@ -183,3 +183,100 @@ describe('createSourceBuffer', () => {
     }).not.toThrow();
   });
 });
+
+// ── v1.13.1 — delivery must not depend on the render loop ──
+//
+// Observed while automating a background tab: the buffer held 54 features,
+// the source held 0, requestAnimationFrame never fired, and the basemap stayed
+// blank until a forced paint. `idle` lives inside the render loop, which the
+// browser pauses for a hidden or occluded tab — and a customer who switches
+// tabs during the two-minute run is the ordinary case, not the edge case.
+// setData does not need a frame; only drawing does.
+
+import { vi } from 'vitest';
+import { RETRY_INTERVAL_MS, RETRY_MAX_ATTEMPTS } from '../services/mapSourceBuffer';
+
+describe('createSourceBuffer — timer fallback when idle never comes', () => {
+  it('delivers a stranded write on a timer even if idle never fires', () => {
+    vi.useFakeTimers();
+    try {
+      const map = fakeMap({ styleLoaded: false });
+      map.addSource('sg-hex');
+      const buf = createSourceBuffer(() => map);
+
+      buf.setData('sg-hex', fc(54));
+      expect(map.applied['sg-hex']).toBeUndefined();
+
+      // The tab is hidden: no frames, so no idle. The style settles anyway.
+      map.setStyleLoaded(true);
+      vi.advanceTimersByTime(RETRY_INTERVAL_MS);
+
+      expect(map.applied['sg-hex'].features).toHaveLength(54);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps retrying while the style is busy, then delivers', () => {
+    vi.useFakeTimers();
+    try {
+      const map = fakeMap({ styleLoaded: false });
+      map.addSource('sg-hex');
+      const buf = createSourceBuffer(() => map);
+      buf.setData('sg-hex', fc(7));
+
+      vi.advanceTimersByTime(RETRY_INTERVAL_MS * 3);
+      expect(map.applied['sg-hex']).toBeUndefined();     // still busy — still waiting
+
+      map.setStyleLoaded(true);
+      vi.advanceTimersByTime(RETRY_INTERVAL_MS);
+      expect(map.applied['sg-hex'].features).toHaveLength(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('idle arriving first wins and the timer stands down', () => {
+    vi.useFakeTimers();
+    try {
+      const map = fakeMap({ styleLoaded: false });
+      map.addSource('sg-hex');
+      const buf = createSourceBuffer(() => map);
+      buf.setData('sg-hex', fc(3));
+
+      map.setStyleLoaded(true);
+      map.fire('idle');
+      expect(map.applied['sg-hex'].features).toHaveLength(3);
+
+      // A later write applies directly; the old timer must not double-apply stale data.
+      buf.setData('sg-hex', fc(9));
+      vi.advanceTimersByTime(RETRY_INTERVAL_MS * 2);
+      expect(map.applied['sg-hex'].features).toHaveLength(9);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up after the cap rather than retrying forever', () => {
+    vi.useFakeTimers();
+    try {
+      const map = fakeMap({ styleLoaded: false });      // never settles
+      map.addSource('sg-hex');
+      const buf = createSourceBuffer(() => map);
+      buf.setData('sg-hex', fc(1));
+
+      vi.advanceTimersByTime(RETRY_INTERVAL_MS * (RETRY_MAX_ATTEMPTS + 5));
+      expect(map.applied['sg-hex']).toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);               // nothing left ticking
+
+      // ...and giving up must not jam the buffer: a later write re-arms.
+      buf.setData('sg-hex', fc(2));
+      expect(vi.getTimerCount()).toBe(1);
+      map.setStyleLoaded(true);
+      vi.advanceTimersByTime(RETRY_INTERVAL_MS);
+      expect(map.applied['sg-hex'].features).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
