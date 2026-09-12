@@ -418,6 +418,9 @@ class SpecMeta(BaseModel):
     # v1.13.0 — plain-English records of an answer that could not be applied
     # (e.g. a point with no coordinates), so a typed answer is never lost.
     clarificationNotes: list[str] = []
+    # v1.13.1 — the format the customer chose, so the derived label and
+    # objective follow the framework rather than the parser's original key.
+    archetypeOverride: Optional[str] = None
 
 
 class WaterfrontMeta(BaseModel):

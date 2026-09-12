@@ -422,6 +422,8 @@ async def chat_turn(
                         canonical = _chosen
                 _meta = dict(new_spec.get("meta") or {})
                 _meta["clarificationsResolved"] = resolved_strings(_answers)
+                if _override:
+                    _meta["archetypeOverride"] = _override
                 new_spec["meta"] = _meta
 
             # Build a minimal RawIntent using the effective (original) prompt info

@@ -576,3 +576,59 @@ class TestRequiredFloor:
         slots = self._slots()
         slots["study_scope"] = SlotState("filled", "prompt", ["Indiranagar, Bengaluru"])
         assert ensure_required_questions([], slots, formats=[{"key": "speakeasy", "label": "?"}]) == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.13.1 live findings — label and city follow the customer's answers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from app.engine.derived_plan import derive_business_type
+
+
+class TestChosenFormatLabels:
+    def test_the_label_follows_the_chosen_format_not_the_parser_key(self):
+        """Live: "Premium sit-down" switched the framework but the label still
+        said "cafe", so the objective read "for a cafe" over premium factors."""
+        intent = parse_raw_intent(PROMPT)
+        canonical = resolve_canonical_archetype(intent.businessTypeKey, PROMPT)
+
+        assert derive_business_type(intent, canonical) == "cafe"
+        assert derive_business_type(intent, canonical, override_key="premium_restaurant") == "premium restaurant"
+        assert derive_business_type(intent, canonical, override_key="dark_kitchen") == "delivery-only kitchen"
+
+    def test_the_customers_qualifier_is_not_duplicated_onto_a_noun(self):
+        intent = parse_raw_intent("a premium cafe in Indiranagar")
+        canonical = resolve_canonical_archetype(intent.businessTypeKey, "a premium cafe in Indiranagar")
+        out = derive_business_type(intent, canonical, override_key="premium_restaurant")
+        assert out.count("premium") == 1
+
+    def test_the_planner_reads_the_override_from_meta(self):
+        intent = parse_raw_intent(PROMPT)
+        canonical = get_canonical_by_key("premium_restaurant")
+        llm_spec = _spec()
+        llm_spec["meta"] = {"archetypeOverride": "premium_restaurant"}
+        spec = apply_deterministic_plan(llm_spec, intent, canonical, "test", "low")
+
+        assert spec["businessType"] == "premium restaurant"
+        assert "premium restaurant" in spec["objective"]
+        assert spec["constraints"][0]["constraint"] == "premium restaurant"
+
+
+class TestLocalitiesKeepTheirCity:
+    def test_city_comes_from_the_brief_when_the_planner_rewrote_the_scope(self):
+        """Live: the planner had already rewritten studyArea, so the bare-city
+        rule found nothing and "Indiranagar" went out unqualified — ambiguous
+        across Indian cities."""
+        intent = parse_raw_intent(PROMPT)
+        rewritten = _spec(studyArea={"type": "places", "places": ["Bengaluru, Karnataka"]})
+        spec, _ = apply_answers_to_spec(rewritten, [
+            _answer("study_scope", {"type": "set_scope", "kind": "localities"},
+                    free_text="Indiranagar, Koramangala")], intent)
+
+        assert spec["studyArea"]["places"] == ["Indiranagar, Bengaluru", "Koramangala, Bengaluru"]
+
+    def test_no_city_anywhere_leaves_names_as_typed(self):
+        intent = parse_raw_intent("find me a spot")
+        spec, _ = apply_answers_to_spec(_spec(studyArea={"type": "places", "places": ["Somewhere, Else"]}), [
+            _answer("study_scope", {"type": "set_scope", "kind": "localities"}, free_text="Indiranagar")], intent)
+        assert spec["studyArea"]["places"] == ["Indiranagar"]

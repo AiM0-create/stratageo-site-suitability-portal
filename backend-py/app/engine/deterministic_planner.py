@@ -560,6 +560,7 @@ def apply_deterministic_plan(
         # on the next).
         spec["businessType"] = derive_business_type(
             intent, canonical, fallback=llm_spec.get("businessType", ""),
+            override_key=str(((llm_spec.get("meta") or {}).get("archetypeOverride")) or ""),
         )
         if isinstance(spec.get("plan"), dict):
             spec["plan"]["assumptions"] = build_assumptions(spec, intent)

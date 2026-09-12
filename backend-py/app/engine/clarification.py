@@ -522,6 +522,23 @@ ARCHETYPE_LABELS: dict[str, str] = {
     "large_format_retail": "Large-format / supermarket",
     "generic":             "Something else",
 }
+# v1.13.1 live finding: after choosing "Premium sit-down" the framework switched
+# correctly but businessType still read "cafe" (it derives from the parser key),
+# so the templated objective would say "for a cafe" over premium-restaurant
+# factors. The chosen format needs a noun that reads as a business.
+ARCHETYPE_NOUNS: dict[str, str] = {
+    "generic_qsr_cafe":    "quick-service café",
+    "student_qsr_cafe":    "student-focused café",
+    "premium_restaurant":  "premium restaurant",
+    "dark_kitchen":        "delivery-only kitchen",
+    "clinic_healthcare":   "clinic",
+    "warehouse_logistics": "warehouse",
+    "ev_charger":          "EV charging station",
+    "retail_store":        "neighbourhood store",
+    "preschool_school":    "preschool",
+    "large_format_retail": "large-format store",
+}
+
 UNVERIFIABLE_LABELS: dict[str, str] = {
     "rent":       "Rent / lease price",
     "floor_area": "Floor area / footprint",
@@ -764,6 +781,13 @@ def apply_answers_to_spec(spec: dict, answers: list[dict], intent=None) -> tuple
                 places_now = [str(p) for p in (sa.get("places") or []) if p]
                 if len(places_now) == 1 and "," not in places_now[0]:
                     city = places_now[0].strip()
+                if not city:
+                    # v1.13.1 live finding: by the time answers are applied the
+                    # planner may have rewritten the study area, so the bare
+                    # city is gone. The brief's own city is the safer source —
+                    # "Indiranagar" alone is ambiguous across Indian cities.
+                    geo = getattr(intent, "geography", None) or {}
+                    city = (geo.get("inferredCity") or "").strip()
                 names = [n.strip() for n in re.split(r"\s*(?:,|;|\band\b|\n)\s*", ft) if n.strip()]
                 # A comma before a city name is a qualifier, not a separator:
                 # "Indiranagar, Bengaluru" is one place. A city typed on its

@@ -245,7 +245,7 @@ _QUALIFIERS = (
 )
 
 
-def derive_business_type(intent, canonical, fallback: str = "") -> str:
+def derive_business_type(intent, canonical, fallback: str = "", override_key: str = "") -> str:
     """A stable label for what is being sited, from the customer's own words.
 
     Built from the parser's business-type KEY (deterministic: "cafe",
@@ -256,6 +256,11 @@ def derive_business_type(intent, canonical, fallback: str = "") -> str:
     """
     key = (getattr(intent, "businessTypeKey", "") or "").strip()
     label = key.replace("_", " ").strip() if key and key != "generic" else ""
+    # v1.13.1 — a format the customer chose in the clarification turn wins over
+    # the parser's key: they said "premium sit-down", the label says so.
+    if override_key:
+        from .clarification import ARCHETYPE_NOUNS
+        label = ARCHETYPE_NOUNS.get(override_key, label) or label
     if not label:
         # Nothing deterministic to lean on; keep what the model wrote rather
         # than inventing a worse label.
