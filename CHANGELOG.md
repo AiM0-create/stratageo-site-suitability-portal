@@ -4,6 +4,54 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.13.1] — 2026-09-12 — Narrow, then commit (frontend-only)
+
+v1.13.0 built the turn; this release puts it on screen. A fresh brief now goes
+to `/api/v2/clarify` first. The AI asks only about what the parser could not
+tell, the engine has already validated every question, and the plan is built
+from the answers.
+
+### The state between "sent" and "plan"
+- **`ClarificationCard`** sits exactly where the plan card will sit — after the
+  brief, before anything is spent. The plan card is not shown while questions
+  are open.
+- **The "So far" strip** is the confidence meter: the engine's slot table
+  rendered plainly, each line carrying where it came from (*from your brief* /
+  *you told us* / *assumed*). An answered question overwrites its line and is
+  marked as the customer's. An opt-out ("Either is fine") shows as a real
+  answer, not a gap.
+- **One button leaves.** "Skip — use your judgement" when nothing is answered;
+  "Continue" once anything is. Skipping is permission, not failure.
+- An invitation option ("Specific areas — I'll name them") opens a text box
+  and holds the button until something is typed — the backend would otherwise
+  disclose "chosen but nothing was named", and it is better not to send that.
+
+### Flow
+- A **fresh** brief (no spec, or a new brief after a completed run) clarifies
+  first. A **refinement** on an existing spec goes straight to the planner as
+  before. A confirmation phrase still executes directly.
+- A brief the parser already understood gets **no questions** — the reply says
+  so and the plan appears at once.
+- **Fail-soft:** if the clarification call fails, the brief proceeds exactly as
+  it did in v1.12.x.
+- A new message while questions are open abandons them; "New chat" clears them.
+- Answers travel with the chat turn as `clarifications`; the brief is not
+  echoed twice.
+
+### Kept pure, kept tested
+`services/clarification.ts` holds what the frontend actually owns — the exact
+payload sent back, when the customer may continue, and what the strip says —
+so all of it is tested without React. Nothing in the browser interprets an
+effect; it arrived already validated.
+
+### Tests
+- `src/__tests__/clarification.test.ts` — 18 tests: the payload contract
+  (effect untouched, free text trimmed and only for invitations, opt-out as a
+  real answer, empty list valid), the continue gate, the strip merge (order,
+  overwrite, skipped-not-gap), and the button label.
+
+---
+
 ## [1.13.0] — 2026-09-12 — The AI asks, the engine owns the meaning
 
 Product decision: *"the slots should be AI based, the portal should be smart

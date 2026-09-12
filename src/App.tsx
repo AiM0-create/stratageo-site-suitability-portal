@@ -4,10 +4,10 @@ import type { LocationData, AnalysisResult, AnalysisStatus, AnalysisSpec, Heatma
 import type { BasemapId } from './components/MapView';
 import { config } from './config';
 import { runDemoAnalysis, runServerAnalysis } from './services/analysisService';
-import { sendChatTurn, startAnalysis, pollAnalysis, cancelAnalysis, AnalysisCancelledError, AnalysisFailedError } from './services/chatService';
+import { sendChatTurn, clarifyBrief, startAnalysis, pollAnalysis, cancelAnalysis, AnalysisCancelledError, AnalysisFailedError } from './services/chatService';
 import { isAnalysisSpecWithPoints, isConfirmationPhrase, isFollowUpQuestion } from './services/analysisFlow';
 import { normalizeAnalysisResult } from './services/resultNormalizer';
-import type { SpecV2, AnalysisPhase } from './types/chat';
+import type { SpecV2, AnalysisPhase, ClarifyResponse, ClarificationAnswer } from './types/chat';
 import { getLastDiagnostics } from './services/llmIntentExtractor';
 import { recalculateWithWeights, reweightHexGrid, weightsDiffer, computeGridRanks, selectTopCellsFromGrid, type ScreeningCell } from './services/mcdaEngine';
 import { buildMethodologyComparison, buildExecutiveSummary } from './services/screeningPresentation';
@@ -299,9 +299,14 @@ const App: React.FC = () => {
   }, [addMessage, updateMemory]);
 
   // ─── Conversational turn (v1.0.1): chat with the methodology consultant ───
-  const handleChatTurn = useCallback(async (rawPrompt: string) => {
+  const handleChatTurn = useCallback(async (
+    rawPrompt: string,
+    opts: { clarifications?: ClarificationAnswer[]; echoUser?: boolean } = {},
+  ) => {
     setError(null);
-    addMessage('user', rawPrompt, { intent: 'query' });
+    // v1.13.1 — when the turn follows a clarification, the brief was already
+    // echoed when the questions were fetched; do not print it twice.
+    if (opts.echoUser !== false) addMessage('user', rawPrompt, { intent: 'query' });
     setIsLoading(true);
     setAnalysisStatus({ message: 'Thinking…', progress: 30 });
     // v1.4.4 — a planning turn that starts from an already-ready spec (e.g. a
@@ -321,7 +326,7 @@ const App: React.FC = () => {
       const resp = await sendChatTurn(history, chatSpec, {
         resultCount,
         csvPointCount: userPoints.length,
-      });
+      }, opts.clarifications ?? null);
       clearTimeout(coldStartTimer);
       addMessage('assistant', resp.reply);
       if (resp.usage?.totalTokens) chatTokensRef.current += resp.usage.totalTokens;
@@ -692,10 +697,59 @@ const App: React.FC = () => {
     handleConfirmExecute(specWithWeights);
   }, [chatSpec, customWeights, handleConfirmExecute, addMessage]);
 
+  /**
+   * v1.13.1 — narrow, then commit. A fresh brief goes to /clarify first: the
+   * AI asks only about what the parser could not tell, the engine validates
+   * every question, and the plan is built from the answers. A brief the
+   * parser already understood gets no questions and goes straight through.
+   * Fail-soft: if the clarification call fails, the brief proceeds as before.
+   */
+  const [pendingClarification, setPendingClarification] =
+    useState<(ClarifyResponse & { brief: string }) | null>(null);
+
+  const handleClarifyThenChat = useCallback(async (rawPrompt: string) => {
+    setError(null);
+    addMessage('user', rawPrompt, { intent: 'query' });
+    setIsLoading(true);
+    setAnalysisStatus({ message: 'Reading your brief…', progress: 20 });
+    setAnalysisPhase('planning');
+    try {
+      const c = await clarifyBrief(rawPrompt);
+      if (c.usage?.totalTokens) chatTokensRef.current += c.usage.totalTokens;
+      if (!c.questions.length) {
+        // Complete brief — nothing to ask. The reply says so; carry on.
+        if (c.reply) addMessage('assistant', c.reply);
+        setIsLoading(false);
+        return handleChatTurn(rawPrompt, { echoUser: false });
+      }
+      if (c.reply) addMessage('assistant', c.reply);
+      setPendingClarification({ ...c, brief: rawPrompt });
+      setAnalysisStatus({ message: '', progress: 0 });
+    } catch (err: any) {
+      console.warn('[clarify] failed — proceeding without questions', err?.message);
+      setIsLoading(false);
+      return handleChatTurn(rawPrompt, { echoUser: false });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [addMessage, handleChatTurn]);
+
+  const handleClarificationSubmit = useCallback((answers: ClarificationAnswer[]) => {
+    const pending = pendingClarification;
+    if (!pending) return;
+    setPendingClarification(null);
+    // The customer's answers travel with the brief; the backend routes them
+    // deterministically. An empty list is "use your judgement" — still valid.
+    return handleChatTurn(pending.brief, { clarifications: answers, echoUser: false });
+  }, [pendingClarification, handleChatTurn]);
+
   const handleRunAnalysis = useCallback(async (rawPrompt: string) => {
     // ─── Conversational mode: route to multi-turn chat, no immediate execution ───
     if (config.isConversationalMode) {
       setLastPrompt(rawPrompt);
+      // v1.13.1 — a new message while questions are open abandons them; the
+      // new text is the brief now.
+      if (pendingClarification) setPendingClarification(null);
 
       // v1.4.4 — requirement 6: a job already running must swallow further
       // input rather than kick off a second planning turn or execution.
@@ -741,6 +795,7 @@ const App: React.FC = () => {
         console.debug('[follow-up question — keeping existing results]', rawPrompt);
         return handleChatTurn(rawPrompt);
       }
+      const isFreshBrief = !chatSpec || analysisPhase === 'completed' || analysisPhase === 'failed';
       if (analysisPhase === 'completed' || analysisPhase === 'failed') {
         setChatSpec(null);
         setChatSpecStatus('empty');
@@ -757,6 +812,9 @@ const App: React.FC = () => {
         setAnalysisPhase('planning');
       }
 
+      // v1.13.1 — narrow first. A brief with an existing spec is a refinement
+      // and goes straight to the planner; a fresh brief gets the questions.
+      if (isFreshBrief) return handleClarifyThenChat(rawPrompt);
       return handleChatTurn(rawPrompt);
     }
 
@@ -1015,6 +1073,7 @@ const App: React.FC = () => {
     setChatReady(false);
     setChatStage('chat');
     setAnalysisPhase('idle');
+    setPendingClarification(null);      // v1.13.1 — open questions belong to the old brief
     newSession();
   }, [newSession, result, spec, customWeights, userPoints, currentSession.id, resetAnalysisExecutionState]);
 
@@ -1929,6 +1988,8 @@ const App: React.FC = () => {
           sessionTitle={currentSession.title}
           chatSpec={chatSpec}
           chatSpecStatus={chatSpecStatus}
+          clarification={pendingClarification}
+          onClarificationSubmit={handleClarificationSubmit}
           chatReady={chatReady}
           chatStage={chatStage}
           isExecuting={isExecuting}

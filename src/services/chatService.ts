@@ -1,7 +1,10 @@
 // ─── Conversational analysis client (v1.0.1, Python backend /api/v2) ───
 import { config } from '../config';
 import type { AnalysisResult, AnalysisStatus } from '../types';
-import type { AnalysisJobStatus, CancelAnalysisResponse, ChatTurnResponse, SpecV2 } from '../types/chat';
+import type {
+  AnalysisJobStatus, CancelAnalysisResponse, ChatTurnResponse, SpecV2,
+  ClarifyResponse, ClarificationAnswer,
+} from '../types/chat';
 
 const base = () => config.pyBackendUrl;
 
@@ -70,15 +73,36 @@ export async function sendChatTurn(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   spec: SpecV2 | null,
   context?: { resultCount?: number; csvPointCount?: number },
+  // v1.13.1 — answers from the clarification turn; the backend applies them
+  // deterministically after the planner (a chosen format, before it).
+  clarifications?: ClarificationAnswer[] | null,
 ): Promise<ChatTurnResponse> {
   const r = await fetch(`${base()}/api/v2/chat`, {
     method: 'POST',
     headers: await authJsonHeaders(),
-    body: JSON.stringify({ messages, spec, context: context ?? null }),
+    body: JSON.stringify({
+      messages, spec, context: context ?? null,
+      clarifications: clarifications && clarifications.length ? clarifications : null,
+    }),
   });
   if (!r.ok) {
     const body = await r.json().catch(() => null);
     throw buildApiError(r.status, body, `Chat failed (HTTP ${r.status})`);
+  }
+  return r.json();
+}
+
+/** v1.13.1 — the clarification turn: the brief in, validated questions and
+ *  the "So far" strip out. Spends a chat-model call, never an analysis credit. */
+export async function clarifyBrief(brief: string): Promise<ClarifyResponse> {
+  const r = await fetch(`${base()}/api/v2/clarify`, {
+    method: 'POST',
+    headers: await authJsonHeaders(),
+    body: JSON.stringify({ brief }),
+  });
+  if (!r.ok) {
+    const body = await r.json().catch(() => null);
+    throw buildApiError(r.status, body, `Clarification failed (HTTP ${r.status})`);
   }
   return r.json();
 }

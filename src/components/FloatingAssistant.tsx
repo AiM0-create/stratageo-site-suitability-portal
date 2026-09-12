@@ -3,12 +3,13 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AnalysisStatus } from '../types';
 import type { WorkingMemory } from '../types/session';
-import type { SpecV2, AnalysisPhase } from '../types/chat';
+import type { SpecV2, AnalysisPhase, ClarifyResponse, ClarificationAnswer } from '../types/chat';
 import { config } from '../config';
 import { demoScenarios } from '../data/demoScenarios';
 import { useAuth } from '../contexts/AuthContext';
 import { MAX_PROMPTS_PER_USER } from '../config/firebase';
 import { SpecSummaryCard } from './SpecSummaryCard';
+import { ClarificationCard } from './ClarificationCard';
 
 interface FloatingAssistantProps {
   messages: Array<{ role: 'user' | 'assistant'; text: string }>;
@@ -32,6 +33,9 @@ interface FloatingAssistantProps {
   // ─── Conversational mode (v1.0.1) ───
   chatSpec?: SpecV2 | null;
   chatSpecStatus?: 'empty' | 'draft' | 'complete';
+  /** v1.13.1 — a clarification turn awaiting answers; rendered in place of the plan card. */
+  clarification?: ClarifyResponse | null;
+  onClarificationSubmit?: (answers: ClarificationAnswer[]) => void;
   chatReady?: boolean;
   /** Staged flow: the plan card stays hidden while the conversation is exploratory */
   chatStage?: 'chat' | 'framework' | 'ready';
@@ -74,6 +78,8 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   sessionTitle,
   chatSpec,
   chatSpecStatus = 'empty',
+  clarification = null,
+  onClarificationSubmit,
   chatReady = false,
   chatStage = 'chat',
   isExecuting = false,
@@ -285,10 +291,21 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               </div>
             ))}
 
+            {/* v1.13.1 — the clarification turn sits exactly where the plan
+                card will: after the brief, before anything is spent. The plan
+                card is not shown while questions are open. */}
+            {config.isConversationalMode && clarification && !isLoading && onClarificationSubmit && (
+              <ClarificationCard
+                clarification={clarification}
+                onSubmit={onClarificationSubmit}
+                disabled={isExecuting}
+              />
+            )}
+
             {/* Conversational mode: agreed analysis plan + confirm chip.
                 Hidden during the exploratory "chat" stage — the framework only
                 appears once the user asks to move ahead. */}
-            {config.isConversationalMode && chatSpec && !isLoading && chatStage !== 'chat' && (
+            {config.isConversationalMode && chatSpec && !isLoading && chatStage !== 'chat' && !clarification && (
               <SpecSummaryCard
                 spec={chatSpec}
                 specStatus={chatSpecStatus}

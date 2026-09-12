@@ -159,3 +159,58 @@ export interface CancelAnalysisResponse {
   status?: string;
   message?: string;
 }
+
+
+// ─── v1.13.1 — the clarification turn (POST /api/v2/clarify) ───
+//
+// The AI chooses the questions; the engine owns what an answer can change. The
+// frontend's only job is to show the accepted questions, collect answers, and
+// hand them back with the chat turn as `clarifications`. Nothing here decides
+// meaning — every option's `effect` arrived already validated.
+
+export interface ClarifyOption {
+  id: string;
+  label: string;
+  effect: Record<string, unknown>;
+  /** The option is an invitation: the customer types the rest. */
+  free_text: boolean;
+}
+
+export interface ClarifyQuestion {
+  id: string;
+  slot: string;
+  impact: 'high' | 'medium' | 'low';
+  question: string;
+  why: string;
+  options: ClarifyOption[];
+}
+
+/** One line of the "So far:" strip — what we know and where it came from. */
+export interface UnderstandingItem {
+  slot: string;
+  label: string;
+  value: string;
+  source: string;     // prompt | you | assumed | default
+  status: string;     // filled | low_confidence | skipped
+}
+
+export interface ClarifyResponse {
+  ok: boolean;
+  reply: string;
+  questions: ClarifyQuestion[];
+  understanding: UnderstandingItem[];
+  slots: Record<string, unknown>;
+  complete: boolean;
+  archetypeKey: string;
+  model: string;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
+}
+
+/** An answered question, exactly as the customer gave it. */
+export interface ClarificationAnswer {
+  slot: string;
+  effect: Record<string, unknown>;
+  free_text?: string | null;
+  question?: string;
+  label?: string;
+}

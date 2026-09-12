@@ -1695,6 +1695,66 @@ button.spec-dir-toggle:hover { filter: brightness(0.95); }
 .spec-scenario-chip.is-active {
   background: #6d28d9; color: #fff; border-color: #5b21b6;
 }
+/* ─── v1.13.1 — the clarification turn ───
+   Sits where the plan card will sit, before it exists. Quiet on purpose: a
+   consultant sharpening a brief, not a form. The strip is the confidence
+   meter — each line carries where it came from. */
+.clarify-card {
+  margin: 8px 0 4px; padding: 10px 12px; border-radius: 10px;
+  background: #fff; border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.clarify-strip {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin: 0 0 10px; padding-bottom: 8px; border-bottom: 1px dashed #e2e8f0;
+}
+.clarify-strip-head {
+  font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: #64748b; margin-right: 2px;
+}
+.clarify-strip-item {
+  display: inline-flex; gap: 5px; align-items: baseline;
+  padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  background: #f1f5f9; color: #0f172a; border: 1px solid transparent;
+}
+.clarify-strip-item.is-you     { background: #eff6ff; border-color: #bfdbfe; }
+.clarify-strip-item.is-assumed { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.clarify-strip-label { color: #64748b; font-size: 10px; }
+.clarify-strip-value { font-weight: 600; }
+.clarify-q + .clarify-q { margin-top: 10px; }
+.clarify-question { font-size: 12px; font-weight: 600; color: #0f172a; }
+.clarify-why { font-size: 10px; color: #64748b; margin-top: 1px; }
+.clarify-options { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.clarify-option {
+  padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 999px;
+  font-family: inherit; line-height: 1.5; cursor: pointer;
+  background: #fff; color: #334155; border: 1px solid #cbd5e1;
+}
+.clarify-option:hover:not(:disabled) { background: #f1f5f9; }
+.clarify-option:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.clarify-option.is-active { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+.clarify-option.is-optout { color: #64748b; border-style: dashed; }
+.clarify-option.is-optout.is-active { background: #475569; border-color: #334155; color: #fff; }
+.clarify-option:disabled { opacity: .55; cursor: default; }
+.clarify-freetext {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 6px;
+  padding: 6px 9px; font-size: 12px; font-family: inherit;
+  border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc;
+}
+.clarify-freetext:focus { outline: 2px solid #1d4ed8; outline-offset: 0; border-color: #1d4ed8; }
+.clarify-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0;
+}
+.clarify-hint { font-size: 10px; color: #94a3b8; }
+.clarify-continue {
+  padding: 7px 14px; font-size: 12px; font-weight: 600; border-radius: 8px;
+  font-family: inherit; cursor: pointer;
+  background: #1d4ed8; color: #fff; border: 1px solid #1e40af;
+}
+.clarify-continue:hover:not(:disabled) { background: #1e40af; }
+.clarify-continue:disabled { opacity: .5; cursor: not-allowed; }
+
 /* v1.12.6 — optional refinement questions, directly above Run. Deliberately
    quiet: this is a "sharpen it if you like" affordance, not a gate in front of
    the answer, so it must not compete with the Run button. */
