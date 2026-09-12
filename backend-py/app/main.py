@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings, APP_VERSION
-from .routers import analyses, chat, health
+from .routers import analyses, chat, clarify, health
 from .security import SecurityMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
@@ -23,4 +23,5 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(chat.router)
+app.include_router(clarify.router)
 app.include_router(analyses.router)

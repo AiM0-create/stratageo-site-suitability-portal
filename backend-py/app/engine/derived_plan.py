@@ -216,6 +216,8 @@ def _user_text_of(spec: dict, intent: RawIntent) -> str:
         str(getattr(intent, "rawPrompt", "") or ""),
     ]
     parts.extend(str(p) for p in (getattr(intent, "hardConstraintPhrases", None) or []))
+    # v1.13.0 — an answered clarifying question IS the customer speaking.
+    parts.extend(str(x) for x in ((spec.get("meta") or {}).get("clarificationsResolved") or []))
     joined = " ".join(p for p in parts if p).strip()
     if joined:
         return joined

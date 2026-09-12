@@ -26,7 +26,10 @@ async def chat(req: ChatRequest, request: Request) -> ChatResponse:
     # log line without exposing key fragments or stack traces to the client.
     request_id = uuid.uuid4().hex[:12]
     try:
-        return await chat_turn(req.messages, req.spec, req.context.model_dump() if req.context else None)
+        return await chat_turn(
+            req.messages, req.spec, req.context.model_dump() if req.context else None,
+            clarifications=[a.model_dump() for a in (req.clarifications or [])] or None,
+        )
     except HTTPException:
         raise
     # v1.4.5 — distinguish provider-side failure modes instead of collapsing

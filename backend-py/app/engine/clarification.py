@@ -441,3 +441,403 @@ def validate_questions(
     #    the stopping condition is completeness, not a count.
     result.accepted.sort(key=lambda q: _IMPACT_RANK[q["impact"]])
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Effect → spec — the deterministic step from filled slots to SpecV2 changes
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Every effect maps onto machinery that already exists: the canonical registry,
+# the layer-weight scaling shared with the scenario chips, exclusions[] /
+# namedExclusions, routeConstraints[], and the unsupported list all three
+# disclosure channels read. Nothing new is invented here; the customer's
+# answers are routed to the same places the parser would have written.
+
+import copy as _copy
+
+# Plain-language labels. These are what the customer sees and what the AI is
+# handed; the engine words (archetype, family) never reach either.
+SLOT_LABELS: dict[str, str] = {
+    "archetype":     "What kind of business",
+    "study_scope":   "Where to look",
+    "customer_mode": "Who it's for",
+    "keep_away":     "Keep away from",
+    "must_be_near":  "Must be near",
+    "expectations":  "Can't check from map data",
+    "top_n":         "How many zones",
+}
+FAMILY_LABELS: dict[str, str] = {
+    "access":      "people walking past and ease of getting there",
+    "demand":      "people who live or work nearby",
+    "cotenancy":   "the businesses already around",
+    "competition": "how many similar places are already there",
+}
+ARCHETYPE_LABELS: dict[str, str] = {
+    "generic_qsr_cafe":    "Quick-service café",
+    "student_qsr_cafe":    "Student-focused café",
+    "premium_restaurant":  "Premium sit-down",
+    "dark_kitchen":        "Delivery-only kitchen",
+    "clinic_healthcare":   "Clinic / healthcare",
+    "warehouse_logistics": "Warehouse / logistics",
+    "ev_charger":          "EV charging",
+    "retail_store":        "Neighbourhood store",
+    "preschool_school":    "Preschool / school",
+    "large_format_retail": "Large-format / supermarket",
+    "generic":             "Something else",
+}
+UNVERIFIABLE_LABELS: dict[str, str] = {
+    "rent":       "Rent / lease price",
+    "floor_area": "Floor area / footprint",
+    "zoning":     "Zoning / licensing",
+    "parcel":     "Parcel availability",
+    "ownership":  "Ownership / title",
+}
+
+# Shared with engine/stability.py and the scenario chips (planner_lite).
+EMPHASIS_UP = 1.5
+EMPHASIS_DOWN = 0.5
+
+# Common keep-away / must-be-near targets that are OSM feature classes rather
+# than place names. Anything not matched here is treated as a named place and
+# geocoded (namedExclusions / targetKeyword) — never guessed.
+FEATURE_CLASS_TAGS: tuple[tuple[re.Pattern, list[str], str], ...] = (
+    (re.compile(r"\bmetro\b|\bsubway\b", re.I),
+     ["station=subway", "railway=station", "public_transport=station"], "metro station"),
+    (re.compile(r"\brailway\s+station\b|\btrain\s+station\b|\bstation\b", re.I),
+     ["railway=station", "public_transport=station"], "railway station"),
+    (re.compile(r"\brailway\b|\brail\s+line\b|\btracks?\b", re.I),
+     ["railway=rail"], "railway line"),
+    (re.compile(r"\bschools?\b", re.I), ["amenity=school"], "school"),
+    (re.compile(r"\bcolleges?\b|\buniversit(?:y|ies)\b", re.I),
+     ["amenity=college", "amenity=university"], "college"),
+    (re.compile(r"\bhospitals?\b", re.I), ["amenity=hospital"], "hospital"),
+    (re.compile(r"\btemples?\b|\bmosques?\b|\bchurch(?:es)?\b|\bplaces?\s+of\s+worship\b", re.I),
+     ["amenity=place_of_worship"], "place of worship"),
+    (re.compile(r"\bliquor\b|\bbars?\b|\bpubs?\b", re.I),
+     ["shop=alcohol", "amenity=bar", "amenity=pub"], "liquor outlet"),
+    (re.compile(r"\bhighways?\b|\barterial\b|\bmain\s+roads?\b", re.I),
+     ["highway=primary", "highway=trunk"], "main road"),
+    (re.compile(r"\bparks?\b|\bgardens?\b", re.I), ["leisure=park", "leisure=garden"], "park"),
+    (re.compile(r"\bmalls?\b|\bshopping\s+cent(?:re|er)s?\b", re.I), ["shop=mall"], "mall"),
+    (re.compile(r"\bbus\s+(?:stop|stand|station)s?\b", re.I),
+     ["highway=bus_stop", "amenity=bus_station"], "bus stop"),
+)
+
+_DIST_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(km|kilomet(?:er|re)s?|m\b|met(?:er|re)s?)", re.I)
+_MIN_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:-\s*)?min(?:ute)?s?\b", re.I)
+_DRIVE_RE = re.compile(r"\bdriv(?:e|ing)\b|\bcar\b|\bcab\b|\bauto\b", re.I)
+_FILLER_RE = re.compile(
+    r"\b(?:any|all|every|the|a|an|of|from|within|to|at|least|about|around|roughly|"
+    r"and|or|please|nearby|near|away|outside|inside|walk(?:ing)?|drive|driving|"
+    r"minutes?|mins?|distance|radius|by|foot|max|maximum|under|less|than)\b",
+    re.I,
+)
+_LATLNG_RE = re.compile(r"(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)")
+_DEFAULT_BUFFER_M = 500
+_DEFAULT_POINT_RADIUS_M = 1500
+_DEFAULT_WALK_MINUTES = 10.0
+
+
+def get_canonical_by_key(key: str):
+    """A deep copy of a registry archetype by its registry key (the answer to a
+    set_archetype effect), or None when unknown."""
+    arch = _REGISTRY.get(key)
+    return _copy.deepcopy(arch) if arch is not None else None
+
+
+def parse_distance_m(text: str) -> Optional[int]:
+    m = _DIST_RE.search(text or "")
+    if not m:
+        return None
+    value, unit = float(m.group(1)), m.group(2).lower()
+    return int(round(value * 1000)) if unit.startswith("k") else int(round(value))
+
+
+def _names_a_specific_place(target: str, class_label: Optional[str]) -> bool:
+    """"Indiranagar metro" is a specific station to geocode; "any metro" is a
+    feature class to route to the nearest of. A capitalised token that is not
+    part of the class label is the tell."""
+    if not target or not class_label:
+        return False
+    class_words = set(class_label.lower().split())
+    for tok in target.split():
+        if tok[:1].isupper() and tok.lower() not in class_words:
+            return True
+    return False
+
+
+def parse_gate_free_text(text: str) -> dict:
+    """"any metro station, 1 km" → what the engine needs, deterministically.
+
+    Returns {target, tags|None, class_label|None, bufferM|None, mode,
+    maxMinutes|None, maxDistanceM|None}. Target is the customer's phrase with
+    distance and filler words removed; tags are set only when the phrase names
+    a known feature class, otherwise the target is a place to geocode.
+    """
+    raw = (text or "").strip()
+    dist = parse_distance_m(raw)
+    mins = _MIN_RE.search(raw)
+    minutes = float(mins.group(1)) if mins else None
+    mode = "drive" if _DRIVE_RE.search(raw) else "walk"
+
+    cleaned = _DIST_RE.sub(" ", raw)
+    cleaned = _MIN_RE.sub(" ", cleaned)
+    cleaned = _DRIVE_RE.sub(" ", cleaned)
+    cleaned = _FILLER_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"[^\w\s'&-]", " ", cleaned)
+    target = re.sub(r"\s+", " ", cleaned).strip(" -")
+
+    tags, class_label = None, None
+    for rx, class_tags, label in FEATURE_CLASS_TAGS:
+        if rx.search(raw):
+            tags, class_label = list(class_tags), label
+            break
+    if tags and _names_a_specific_place(target, class_label):
+        tags = None                       # geocode the named place instead
+
+    return {
+        "target": target or (class_label or ""),
+        "tags": tags,
+        "class_label": class_label,
+        "bufferM": dist,
+        "mode": mode,
+        "maxMinutes": minutes,
+        "maxDistanceM": dist,
+    }
+
+
+def archetype_override(answers: list[dict]) -> Optional[str]:
+    """The registry key a set_archetype answer selects, if any. Applied by the
+    caller BEFORE the deterministic planner runs, since the planner resolves
+    the whole framework from it."""
+    for a in answers or []:
+        eff = (a or {}).get("effect") or {}
+        if eff.get("type") == "set_archetype" and eff.get("key") in KNOWN_ARCHETYPES:
+            return eff["key"]
+    return None
+
+
+def resolved_strings(answers: list[dict]) -> list[str]:
+    """What the customer told us, as the strings every disclosure channel reads.
+
+    Built BEFORE the planner runs so build_assumptions renders them as "You
+    told us this" and _user_text sees them as the customer's own words. Each
+    string deliberately contains the words the downstream rules key on: a
+    keep-away answer contains "away from" so drop_unrequested_exclusions keeps
+    the exclusion it produced; an expectations answer contains the kind's label
+    so the unsupported rules disclose it.
+    """
+    out: list[str] = []
+    for a in answers or []:
+        if not isinstance(a, dict):
+            continue
+        slot = a.get("slot")
+        eff = a.get("effect") or {}
+        etype = eff.get("type")
+        q = (a.get("question") or SLOT_LABELS.get(slot, slot or "")).strip()
+        label = (a.get("label") or "").strip()
+        ft = (a.get("free_text") or "").strip()
+        if etype == "none":
+            out.append(f"{q} — {label or 'No preference'}")
+        elif etype == "exclude":
+            out.append(f"{q} — keep away from {ft or label}".rstrip())
+        elif etype == "require_near":
+            out.append(f"{q} — must be near {ft or label}".rstrip())
+        elif etype == "set_scope":
+            kind = eff.get("kind")
+            detail = ft or label or kind
+            out.append(f"{q} — {detail}")
+        elif etype == "set_archetype":
+            out.append(f"{q} — {ARCHETYPE_LABELS.get(eff.get('key'), label or eff.get('key', ''))}")
+        elif etype in ("emphasize", "deemphasize"):
+            out.append(f"{q} — {label or FAMILY_LABELS.get(eff.get('family'), '')}")
+        elif etype == "flag_unverifiable":
+            kind = eff.get("kind")
+            out.append(f"{q} — {UNVERIFIABLE_LABELS.get(kind, kind or '')}: flag for field validation")
+        elif label or ft:
+            out.append(f"{q} — {ft or label}")
+    return out
+
+
+def _scale_family(layers: list[dict], family: str, factor: float) -> tuple[list[dict], int]:
+    hit = 0
+    out = []
+    for l in layers or []:
+        l2 = dict(l)
+        if _factor_family(str(l2.get("name") or "")) == family:
+            l2["weight"] = float(l2.get("weight") or 0.0) * factor
+            hit += 1
+        out.append(l2)
+    total = sum(float(l.get("weight") or 0.0) for l in out)
+    if total > 0:
+        for l in out:                     # renormalise preserving ratios (v1.0.0 invariant)
+            l["weight"] = float(l.get("weight") or 0.0) / total
+    return out, hit
+
+
+def apply_answers_to_spec(spec: dict, answers: list[dict], intent=None) -> tuple[dict, list[str]]:
+    """Route the customer's answers into the spec. Deterministic; never raises.
+
+    Called AFTER apply_deterministic_plan (the archetype override is handled
+    before it — see archetype_override). Returns (spec, notes). Notes are
+    plain-English records of anything that could not be applied, so a typed
+    answer is never silently lost.
+    """
+    spec = dict(spec or {})
+    notes: list[str] = []
+    families_present = _families_present(spec.get("layers") or [])
+
+    for a in answers or []:
+        if not isinstance(a, dict):
+            continue
+        slot = a.get("slot")
+        eff = a.get("effect") or {}
+        etype = eff.get("type")
+        ft = (a.get("free_text") or "").strip()
+
+        # Defence in depth: the same legality check the validator ran, in case
+        # an answer arrives from a client that skipped it.
+        reason = _check_effect(eff, slot, families_present) if slot in SLOT_IMPACT else "unknown slot"
+        if reason and etype != "none":
+            notes.append(f"Answer for '{slot}' not applied: {reason}.")
+            continue
+
+        if etype in ("none", "set_archetype"):
+            continue                      # nothing to write / handled pre-planner
+
+        if etype in ("emphasize", "deemphasize"):
+            factor = EMPHASIS_UP if etype == "emphasize" else EMPHASIS_DOWN
+            layers, hit = _scale_family(spec.get("layers") or [], eff["family"], factor)
+            if hit:
+                spec["layers"] = layers
+                spec["weightsAdjustedByUser"] = True
+            else:
+                notes.append(f"No factor in this framework measures '{eff['family']}' — emphasis not applied.")
+
+        elif etype == "set_scope":
+            kind = eff.get("kind")
+            sa = dict(spec.get("studyArea") or {})
+            if kind == "city":
+                pass                      # the parsed city stands, now confirmed
+            elif kind == "localities":
+                if not ft:
+                    notes.append("Localities were chosen but none were named — scope unchanged.")
+                    continue
+                city = ""
+                places_now = [str(p) for p in (sa.get("places") or []) if p]
+                if len(places_now) == 1 and "," not in places_now[0]:
+                    city = places_now[0].strip()
+                names = [n.strip() for n in re.split(r"\s*(?:,|;|\band\b|\n)\s*", ft) if n.strip()]
+                # A comma before a city name is a qualifier, not a separator:
+                # "Indiranagar, Bengaluru" is one place. A city typed on its
+                # own adds nothing the scope did not already have.
+                places: list[str] = []
+                for n in names:
+                    if _MAJOR_CITY_RE.match(n):
+                        if places and "," not in places[-1]:
+                            places[-1] = f"{places[-1]}, {n}"
+                        continue
+                    places.append(n)
+                places = [n if ("," in n or not city) else f"{n}, {city}" for n in places]
+                if places:
+                    spec["studyArea"] = {**sa, "type": "places", "places": places}
+                    spec.pop("searchRadiusOverrideM", None)
+            elif kind == "point":
+                m = _LATLNG_RE.search(ft)
+                if not m:
+                    notes.append("A point was chosen but no coordinates were given — scope unchanged.")
+                    continue
+                lat, lng = float(m.group(1)), float(m.group(2))
+                radius = parse_distance_m(ft) or _DEFAULT_POINT_RADIUS_M
+                spec["studyArea"] = {
+                    "type": "point_radius", "name": f"{lat:.4f}, {lng:.4f}",
+                    "point": {"lat": lat, "lng": lng}, "radiusM": int(radius),
+                    "hullBufferM": sa.get("hullBufferM", 500),
+                }
+
+        elif etype == "exclude":
+            if not ft:
+                notes.append("A keep-away rule was chosen but nothing was named — no exclusion added.")
+                continue
+            g = parse_gate_free_text(ft)
+            buffer_m = g["bufferM"] or _DEFAULT_BUFFER_M
+            if g["tags"]:
+                excs = list(spec.get("exclusions") or [])
+                excs.append({
+                    "name": f"{g['class_label']} buffer ({buffer_m} m)",
+                    "source": {"provider": "osm", "tags": g["tags"]},
+                    "bufferM": int(buffer_m),
+                })
+                spec["exclusions"] = excs
+            elif g["target"]:
+                named = list(spec.get("namedExclusions") or [])
+                named.append({"name": g["target"], "bufferM": int(buffer_m)})
+                spec["namedExclusions"] = named
+            else:
+                notes.append(f"Could not read a place or feature from '{ft}' — no exclusion added.")
+
+        elif etype == "require_near":
+            if not ft:
+                notes.append("A must-be-near rule was chosen but nothing was named — no constraint added.")
+                continue
+            g = parse_gate_free_text(ft)
+            if not (g["tags"] or g["target"]):
+                notes.append(f"Could not read a place or feature from '{ft}' — no constraint added.")
+                continue
+            rc: dict = {
+                "name": f"Near {g['class_label'] or g['target']}",
+                "mode": g["mode"],
+                "required": True,
+            }
+            if g["tags"]:
+                rc["targetTags"] = g["tags"]
+            else:
+                rc["targetKeyword"] = g["target"]
+            if g["maxMinutes"]:
+                rc["maxMinutes"] = float(g["maxMinutes"])
+            elif g["maxDistanceM"]:
+                rc["maxDistanceM"] = int(g["maxDistanceM"])
+            else:
+                rc["maxMinutes"] = _DEFAULT_WALK_MINUTES
+            rcs = list(spec.get("routeConstraints") or [])
+            rcs.append(rc)
+            spec["routeConstraints"] = rcs
+
+        elif etype == "flag_unverifiable":
+            kind = eff.get("kind")
+            label = UNVERIFIABLE_LABELS.get(kind, kind or "")
+            feas = dict(spec.get("feasibility") or {})
+            unv = [u for u in (feas.get("unvalidatable") or [])]
+            if label and label not in unv:
+                unv.append(label)
+            feas["unvalidatable"] = unv
+            if feas.get("status", "feasible") == "feasible" and unv:
+                feas["status"] = "tradeoffs"
+            spec["feasibility"] = feas
+
+    return spec, notes
+
+
+def understanding_strip(slots: dict[str, SlotState]) -> list[dict]:
+    """The "So far:" strip — the slot table rendered for a customer, each item
+    carrying where it came from. This IS the confidence meter."""
+    out = []
+    for name in SLOTS:
+        st = slots.get(name)
+        if st is None or st.status == "empty":
+            continue
+        value = st.value
+        if name == "archetype" and isinstance(value, str):
+            value = ARCHETYPE_LABELS.get(value, value)
+        elif isinstance(value, dict):
+            value = value.get("free_text") or value.get("kind") or value.get("family") or value.get("key")
+        elif isinstance(value, list):
+            value = ", ".join(str(v) for v in value[:3])
+        out.append({
+            "slot": name,
+            "label": SLOT_LABELS.get(name, name),
+            "value": "" if value is None else str(value),
+            "source": st.source or "",
+            "status": st.status,
+        })
+    return out

@@ -329,6 +329,12 @@ def drop_unrequested_exclusions(spec, notes: list[str]) -> int:
         or getattr(spec, "normalizedPrompt", "")
         or ""
     )
+    # v1.13.0 — an exclusion the customer added by answering "keep away from
+    # ...?" has its basis in that answer, not in the original prompt. The
+    # resolved string deliberately contains "keep away from", so the avoidance
+    # test below keeps every exclusion once the customer has asked for one.
+    _meta = getattr(spec, "meta", None)
+    raw = " ".join([raw] + [str(x) for x in (getattr(_meta, "clarificationsResolved", None) or [])])
     if not raw.strip():
         return 0                      # nothing to compare against — never guess
     if _AVOIDANCE_RE.search(raw):

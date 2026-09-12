@@ -175,6 +175,7 @@ async def chat_turn(
     messages: list[ChatMessage],
     spec: dict | None,
     context: dict | None,
+    clarifications: list[dict] | None = None,
 ) -> ChatResponse:
     settings = get_settings()
     client = _client()
@@ -402,6 +403,27 @@ async def chat_turn(
             effective_raw_prompt = incoming_ri.get("rawPrompt") or raw_intent.rawPrompt
             canonical = resolve_canonical_archetype(effective_biz_key, effective_raw_prompt)
 
+            # v1.13.0 — a clarifying answer that chose a format overrides the
+            # parser's guess. This has to happen BEFORE the planner runs,
+            # because the whole framework is resolved from it. The answers are
+            # also written into meta.clarificationsResolved before planning, so
+            # build_assumptions renders them as "You told us this" and every
+            # customer-words check treats them as the customer speaking.
+            from ..engine.clarification import (
+                archetype_override, get_canonical_by_key, resolved_strings,
+                apply_answers_to_spec,
+            )
+            _answers = [a for a in (clarifications or []) if isinstance(a, dict)]
+            if _answers:
+                _override = archetype_override(_answers)
+                if _override:
+                    _chosen = get_canonical_by_key(_override)
+                    if _chosen is not None:
+                        canonical = _chosen
+                _meta = dict(new_spec.get("meta") or {})
+                _meta["clarificationsResolved"] = resolved_strings(_answers)
+                new_spec["meta"] = _meta
+
             # Build a minimal RawIntent using the effective (original) prompt info
             from ..engine.intent_parser import parse_raw_intent as _parse
             planner_intent = _parse(effective_raw_prompt) if effective_raw_prompt != raw_intent.rawPrompt else raw_intent
@@ -424,6 +446,16 @@ async def chat_turn(
             new_spec = preserve_user_grid_resolution(
                 new_spec, spec if isinstance(spec, dict) else None,
             )
+            # v1.13.0 — route the customer's answers into the spec: scope,
+            # emphasis, keep-away / must-be-near gates, unverifiable flags.
+            # Deterministic; anything that could not be applied is disclosed.
+            if _answers:
+                new_spec, _cl_notes = apply_answers_to_spec(new_spec, _answers, planner_intent)
+                if _cl_notes:
+                    _meta = dict(new_spec.get("meta") or {})
+                    _meta["clarificationNotes"] = _cl_notes
+                    new_spec["meta"] = _meta
+                    logger.info("clarification answers: %d note(s): %s", len(_cl_notes), _cl_notes[:3])
             logger.info(
                 "Deterministic plan applied: archetype=%s planningFingerprint=%s",
                 canonical.key,

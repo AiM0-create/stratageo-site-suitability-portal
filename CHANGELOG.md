@@ -4,6 +4,78 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.13.0] — 2026-09-12 — The AI asks, the engine owns the meaning
+
+Product decision: *"the slots should be AI based, the portal should be smart
+and dynamic enough according to user request … after that, knowing the site
+suitability analysis is more of our job."*
+
+Twice in v1.12.x the planner **invented a requirement nobody stated** — a metro
+exclusion, then a rent cap — because it was filling gaps in a one-line brief
+by itself. A question turns a guess into a stated fact, which makes
+clarification a correctness mechanism, not a UX nicety.
+
+### The division of labour
+- **AI:** which questions to ask, how many, how they are phrased. A paediatric
+  clinic and a dark kitchen have different ambiguities; spotting them is what a
+  model is for.
+- **Engine:** which *slots* exist, what an answer can *change*, whether a
+  question is redundant or illegal, and when enough is known.
+- A question is free text with a typed payload. The payload is the only thing
+  that ever touches the spec — the same posture as tool use.
+
+### `engine/clarification.py`
+- **Seven slots** mapped to `SpecV2` fields, with an impact tier for ordering
+  and a separate *required* set (`archetype`, `study_scope`) for gating. A brief
+  with no keep-away rule is complete, not missing one.
+- **A closed effect vocabulary.** The AI names a factor *family*, never a
+  multiplier (×1.5 / ×0.5 are the engine's, shared with the scenario chips).
+  Gate targets are whatever the customer types, never pre-filled. An option may
+  only reference a factor the framework measures.
+- `build_slot_state()` reads the brief first, so the AI only sees gaps — never
+  "how many?" after "4 best places".
+- `validate_questions()` — every rule mirrors a v1.12.x guard, moved to the
+  front door. Rejections are logged with rule and reason, never shown.
+- `is_complete()` replaces "98% confident" with a checklist. **No count cap**,
+  by decision. `fill_and_mark()` is "just run it": defaults marked `assumed`,
+  visibly different from `you`.
+- `apply_answers_to_spec()` routes answers into the registry, the shared
+  emphasis, `exclusions[]` / `namedExclusions`, `routeConstraints[]` and the
+  unsupported list. Free text is parsed deterministically: *"any metro
+  station, 1 km"* → a tagged exclusion; *"Koramangala"* → a geocoded named
+  exclusion; *"10 min walk to Indiranagar metro"* → a named place, not
+  nearest-of-any.
+
+### The turn
+- `POST /api/v2/clarify` runs it (`services/clarify.py`), fail-soft like the
+  critic. `/chat` accepts `clarifications`; a chosen format is applied
+  **before** the planner, since the whole framework resolves from it.
+- The approved prompt lives in `prompts.py::clarify_system_prompt`. Voice may
+  be reworded freely; the contract block is what the validator checks.
+
+### The integration trap, held shut
+An exclusion the customer added by answering *"keep away from …?"* has its basis
+in that **answer**, not in the original prompt. Every "customer's words" reader
+— `drop_unrequested_exclusions` at run time, the unsupported rules, the
+constraints table — now reads `meta.clarificationsResolved` too. An answered
+question *is* the customer speaking; the resolved strings deliberately carry
+the words each downstream rule keys on.
+
+### Not yet
+The frontend state for the turn (questions, the "So far" strip, "just run it")
+follows in v1.13.1. Nothing user-facing changes in this release.
+
+### Tests
+- `test_v1130_clarification_validator.py` — 56: slot pre-fill, completeness,
+  fill-and-mark, and every validator rule including the two briefs from the
+  design (the vague one earns questions, the complete one earns none).
+- `test_v1130_clarification_effects.py` — 53: free-text parsing, every effect,
+  defence in depth, the resolved strings, four end-to-end cases through the
+  planner (including the exclusion that survives `drop_unrequested_exclusions`),
+  and the endpoint with the model stubbed.
+
+---
+
 ## [1.12.9] — 2026-09-02 — The last authored commitments
 
 v1.12.8 got two clean runs of the same prompt to agree on assumptions, factors

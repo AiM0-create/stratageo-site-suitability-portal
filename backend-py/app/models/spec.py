@@ -415,6 +415,9 @@ class ConsultantPlan(BaseModel):
 class SpecMeta(BaseModel):
     unsupportedRequests: list[UnsupportedRequest] = []
     clarificationsResolved: list[str] = []
+    # v1.13.0 — plain-English records of an answer that could not be applied
+    # (e.g. a point with no coordinates), so a typed answer is never lost.
+    clarificationNotes: list[str] = []
 
 
 class WaterfrontMeta(BaseModel):

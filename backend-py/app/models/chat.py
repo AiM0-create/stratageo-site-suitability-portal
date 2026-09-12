@@ -20,10 +20,24 @@ class ChatContext(BaseModel):
     csvPointCount: Optional[int] = Field(default=None, ge=0, le=100_000)
 
 
+class ClarificationAnswer(BaseModel):
+    """v1.13.0 — one answered clarifying question, as the customer gave it.
+    `effect` is exactly what the validated option carried; `free_text` is what
+    they typed for an invitation option. Re-validated server-side."""
+    slot: str = Field(max_length=32)
+    effect: dict
+    free_text: Optional[str] = Field(default=None, max_length=300)
+    question: Optional[str] = Field(default=None, max_length=300)
+    label: Optional[str] = Field(default=None, max_length=120)
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=120)
     spec: Optional[dict] = None          # client-held draft; validated loosely (may be mid-construction)
     context: Optional[ChatContext] = None
+    # v1.13.0 — answers from the clarification turn, applied deterministically
+    # after the planner. Absent on ordinary turns.
+    clarifications: Optional[list[ClarificationAnswer]] = Field(default=None, max_length=24)
 
     @field_validator("messages")
     @classmethod
@@ -69,3 +83,21 @@ def validate_spec(spec_dict: dict | None) -> tuple[bool, str | None]:
         return True, None
     except Exception as e:  # pydantic.ValidationError
         return False, str(e)[:500]
+
+
+# ── v1.13.0 — /api/v2/clarify ────────────────────────────────────────────────
+
+class ClarifyRequest(BaseModel):
+    brief: str = Field(min_length=3, max_length=2000)
+
+
+class ClarifyResponse(BaseModel):
+    ok: bool = True
+    reply: str
+    questions: list[dict] = []
+    understanding: list[dict] = []       # the "So far:" strip
+    slots: dict = {}
+    complete: bool = False
+    archetypeKey: str = "generic"
+    model: str = ""
+    usage: Optional[dict] = None

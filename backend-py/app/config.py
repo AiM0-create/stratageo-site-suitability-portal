@@ -534,6 +534,33 @@ v1.12.9: The Last Authored Commitments (option 3). v1.12.8 left one authored
   so all three agree by construction.
   Still authored, deliberately: the conversational reply, per-factor rationale
   and executive narrative.
+v1.13.0: The AI Asks, The Engine Owns The Meaning (product decision: "the
+  slots should be AI based, the portal should be smart and dynamic enough
+  according to user request … after that, knowing the site suitability
+  analysis is more of our job").
+  Twice in v1.12.x the planner INVENTED a requirement nobody stated because it
+  was filling gaps in a one-line brief on its own. A question turns a guess into
+  a stated fact, so clarification is a correctness mechanism, not a UX nicety.
+  The division of labour: the AI chooses which questions to ask, how many and
+  how they are phrased (a paediatric clinic and a dark kitchen have different
+  ambiguities); the engine owns which SLOTS exist, what an answer can CHANGE,
+  whether a question is redundant or illegal, and when enough is known. A
+  question is free text with a typed payload; only the payload touches the spec.
+  engine/clarification.py: seven slots mapped to SpecV2 fields; a closed effect
+  vocabulary (the AI names a factor family, never a multiplier; gate targets are
+  whatever the customer types, never pre-filled); build_slot_state() so the AI
+  only sees gaps; validate_questions() mirroring every v1.12.x guard at the
+  front door; is_complete() — REQUIRED slots filled or skipped, no count cap —
+  replacing "98% confident" with a checklist; fill_and_mark() for "just run
+  it"; apply_answers_to_spec() routing answers into the registry, the shared
+  x1.5/x0.5 emphasis, exclusions[]/namedExclusions, routeConstraints[] and the
+  unsupported list. services/clarify.py + POST /api/v2/clarify run the turn;
+  /chat accepts `clarifications` and applies a chosen format BEFORE the
+  planner. An answered question is recorded in meta.clarificationsResolved and
+  every "customer's words" reader — drop_unrequested_exclusions, the
+  unsupported rules, the constraints table — now reads it, so an exclusion the
+  customer added by answering is never thrown away at the next gate.
+  Frontend state for the turn follows in v1.13.1.
 """
 from functools import lru_cache
 from typing import Literal
@@ -541,7 +568,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "1.12.9"
+APP_VERSION     = "1.13.0"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -556,7 +583,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "Every commitment on the plan card is now derived"
+RELEASE_NAME    = "The AI asks, the engine owns the meaning"
 
 
 class Settings(BaseSettings):

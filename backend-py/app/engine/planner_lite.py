@@ -458,6 +458,9 @@ def _user_text(spec) -> str:
         parts.append(getattr(ri, "rawPrompt", "") or "")
         # Parser-derived FROM the prompt, so still the customer's own words.
         parts.extend(getattr(ri, "hardConstraintPhrases", None) or [])
+    # v1.13.0 — an answered clarifying question IS the customer speaking.
+    meta = getattr(spec, "meta", None)
+    parts.extend(str(x) for x in (getattr(meta, "clarificationsResolved", None) or []))
     return " ".join(p for p in parts if p).strip()
 
 
