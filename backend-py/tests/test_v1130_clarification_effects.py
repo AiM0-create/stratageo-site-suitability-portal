@@ -632,3 +632,26 @@ class TestLocalitiesKeepTheirCity:
         spec, _ = apply_answers_to_spec(_spec(studyArea={"type": "places", "places": ["Somewhere, Else"]}), [
             _answer("study_scope", {"type": "set_scope", "kind": "localities"}, free_text="Indiranagar")], intent)
         assert spec["studyArea"]["places"] == ["Indiranagar"]
+
+
+class TestObjectiveFollowsScope:
+    def test_localities_rewrite_the_objective(self):
+        """Live: the objective still said "in Bengaluru, Karnataka" after the
+        customer named two localities."""
+        intent = parse_raw_intent(PROMPT)
+        spec, _ = apply_answers_to_spec(
+            _spec(objective="Identify top 4 candidate micro-market zones for a cafe in Bengaluru"),
+            [_answer("study_scope", {"type": "set_scope", "kind": "localities"},
+                     free_text="Indiranagar, Koramangala")], intent)
+        assert spec["objective"] == (
+            "Identify top 4 candidate micro-market zones for a cafe across Indiranagar, Koramangala")
+
+    def test_a_point_rewrites_the_objective(self):
+        spec, _ = apply_answers_to_spec(_spec(), [
+            _answer("study_scope", {"type": "set_scope", "kind": "point"}, free_text="12.9716, 77.5946")])
+        assert spec["objective"].endswith("in 12.9716, 77.5946")
+
+    def test_whole_city_leaves_the_objective_alone(self):
+        spec, _ = apply_answers_to_spec(_spec(objective="keep me"), [
+            _answer("study_scope", {"type": "set_scope", "kind": "city"})])
+        assert spec["objective"] == "keep me"

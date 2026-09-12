@@ -472,6 +472,23 @@ def detect_competition_band(prompt: str) -> bool:
     return bool(_TARGET_BAND_RE.search(prompt or ""))
 
 
+def templated_objective(top_n: int, business: str, places: list[str]) -> str:
+    """The one objective sentence, from deterministic inputs only (v1.5.2).
+    Factored out in v1.13.1 so a clarifying answer that changes the study
+    area can re-derive it — otherwise the plan said "in Bengaluru" while the
+    scope had become two named localities."""
+    names = [str(p) for p in (places or []) if p]
+    if not names:
+        where = ""
+    elif len(names) == 1:
+        where = f" in {names[0]}"
+    else:
+        shown = ", ".join(n.split(",")[0].strip() for n in names[:3])
+        more = f" and {len(names) - 3} more" if len(names) > 3 else ""
+        where = f" across {shown}{more}"
+    return f"Identify top {int(top_n)} candidate micro-market zones for a {business}{where}"
+
+
 def apply_deterministic_plan(
     llm_spec: dict,
     intent: RawIntent,
@@ -670,11 +687,7 @@ def apply_deterministic_plan(
     _biz = (spec.get("businessType") or llm_spec.get("businessType")
             or canonical.display_name or "business").strip()
     _places = [p for p in ((llm_spec.get("studyArea") or {}).get("places") or []) if p]
-    _where = f" in {_places[0]}" if _places else ""
-    spec["objective"] = (
-        f"Identify top {resolved_top_n} candidate micro-market zones "
-        f"for a {_biz}{_where}"
-    )
+    spec["objective"] = templated_objective(resolved_top_n, _biz, _places)
 
     # 3c. v1.6.4 — coordinate fidelity. If the user tagged places with exact
     # coordinates in the prompt, those coordinate-tagged strings BECOME the

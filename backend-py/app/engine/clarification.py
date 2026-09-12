@@ -729,6 +729,18 @@ def _scale_family(layers: list[dict], family: str, factor: float) -> tuple[list[
     return out, hit
 
 
+def _refresh_objective(spec: dict) -> None:
+    """A scope answer changes where; the objective sentence must say so."""
+    from .deterministic_planner import templated_objective
+    sa = spec.get("studyArea") or {}
+    places = list(sa.get("places") or []) or ([sa["name"]] if sa.get("name") else [])
+    spec["objective"] = templated_objective(
+        int(((spec.get("output") or {}).get("topN")) or 3),
+        (spec.get("businessType") or "business").strip(),
+        places,
+    )
+
+
 def apply_answers_to_spec(spec: dict, answers: list[dict], intent=None) -> tuple[dict, list[str]]:
     """Route the customer's answers into the spec. Deterministic; never raises.
 
@@ -803,6 +815,7 @@ def apply_answers_to_spec(spec: dict, answers: list[dict], intent=None) -> tuple
                 if places:
                     spec["studyArea"] = {**sa, "type": "places", "places": places}
                     spec.pop("searchRadiusOverrideM", None)
+                    _refresh_objective(spec)
             elif kind == "point":
                 m = _LATLNG_RE.search(ft)
                 if not m:
@@ -815,6 +828,7 @@ def apply_answers_to_spec(spec: dict, answers: list[dict], intent=None) -> tuple
                     "point": {"lat": lat, "lng": lng}, "radiusM": int(radius),
                     "hullBufferM": sa.get("hullBufferM", 500),
                 }
+                _refresh_objective(spec)
 
         elif etype == "exclude":
             if not ft:
