@@ -61,6 +61,25 @@ The AI proposes; the engine validates and installs. Every factor now carries an
 - *Pet-friendly café near the IT parks*: café framework + IT parks, parks and
   playgrounds, pet shops and vets — each quoting the words it rests on.
 
+### One map, one basis (the "6.5 next to dark green" contradiction)
+Live (NOVA IVF, Bengaluru): the #1 zone at 6.5 sat in a light cell at the
+study-area edge while dark-green interior cells it had beaten stayed dark.
+Two mechanisms, both by design and both unexplained on screen: cells are
+coloured by the *screening* score (every cell against the grid), the ranking
+uses the *verified* score (the 12-cell shortlist against each other,
+spread-compressed toward 5), and v1.6.4 painted the verified number onto the
+screening surface — so the winner looked worse than the cells it beat.
+- Every cell keeps its screening colour. Chosen cells carry `refinedScore` and
+  `finalRank` alongside; the tooltip shows both, labelled. Shortlisted-but-not-
+  ranked cells say so.
+- The result carries `shortlist` (size, verified, screened, eligible, rings,
+  basis). The header now reads *best of 12 zones re-verified with travel-time
+  and routing data · 112 eligible of 112 screened* instead of *best of 112
+  eligible*, and the legend says what the colour is and what the pins are.
+- Not changed: the verified 0–10 is still relative to the shortlist. Making it
+  comparable to the screening scale is an engine decision (refit on the grid,
+  not the shortlist) noted for the scoring review.
+
 ### Not in this release
 The market tier (a computed profile of the study area adjusting catchments
 and weights) is designed, not built; it needs the area fetch before planning.

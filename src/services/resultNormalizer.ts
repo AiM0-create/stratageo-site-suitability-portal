@@ -399,6 +399,10 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
 
   // map layers — MapView guards per-cell, but the containers must be arrays
   if (src.hexGrid !== undefined) out.hexGrid = asArr(src.hexGrid).filter(isObj);
+  // v1.14.0 — ranking basis (numbers only; the header prints them)
+  if (isObj(src.shortlist) && typeof src.shortlist.size === 'number') {
+    out.shortlist = src.shortlist as any;
+  }
   // v1.6.0 (Phase 3) — one headline confidence verdict (conservative merge)
   if (isObj(src.unifiedConfidence) && typeof src.unifiedConfidence.level === 'string') {
     const lv = src.unifiedConfidence.level;

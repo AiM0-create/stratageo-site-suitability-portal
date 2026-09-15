@@ -118,6 +118,7 @@ export function keyRisk(loc: LocationData): string | null {
 export interface ExecutiveSummary {
   screenedCells: number | null;      // total grid cells screened
   eligibleCells: number | null;      // cells surviving exclusion masks
+  verifiedCells: number | null;      // v1.14.0 — shortlist re-verified and ranked
   businessType: string;
   targetLocation: string;
   topZoneName: string | null;
@@ -140,6 +141,7 @@ export function buildExecutiveSummary(
   return {
     screenedCells: grid.length > 0 ? grid.length : null,
     eligibleCells: grid.length > 0 ? grid.filter(c => !c.excluded).length : null,
+    verifiedCells: typeof result.shortlist?.size === 'number' ? result.shortlist.size : null,
     businessType: result.business_type || '',
     targetLocation: result.target_location || '',
     topZoneName: top?.name ?? null,

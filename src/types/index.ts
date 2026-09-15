@@ -241,9 +241,24 @@ export interface HexGridCell {
   boundary: [number, number][]; // [lat, lng] ring
   /** Per-factor 0-10, direction already applied (higher = more favorable for all). */
   layerScores?: Record<string, number>;
-  /** v1.6.4 — this cell is a chosen candidate and its score is the FINAL
-   *  (Pass-B refined) score, so its color matches the candidate card. */
+  /** v1.6.4 marked chosen candidates; v1.14.0 — `score` is ALWAYS the
+   *  screening score (one basis for every cell). A chosen candidate carries
+   *  its verified score and final rank alongside, for the tooltip. */
   refinedCandidate?: boolean;
+  refinedScore?: number;
+  finalRank?: number;
+  /** v1.14.0 — one of the top-K screening cells that were re-verified. */
+  shortlisted?: boolean;
+}
+
+/** v1.14.0 — the ranking basis, as numbers the header can print. */
+export interface ShortlistInfo {
+  size: number;          // cells re-verified (top-K screening, separation applied)
+  verified: number;      // zones that survived to the final ranking
+  screened: number;
+  eligible: number;
+  separationRings: number;
+  basis: string;
 }
 
 export interface CatchmentOutline {
@@ -328,6 +343,8 @@ export interface AnalysisResult {
   /** success | no_viable_site | failed; 'malformed' when the payload had no
    * recognizable state or content. Legacy payloads normalize to 'success'. */
   status?: 'success' | 'no_viable_site' | 'failed' | 'malformed';
+  /** v1.14.0 — how many cells were re-verified and ranked (the basis of the 0–10 on cards). */
+  shortlist?: ShortlistInfo;
   jobRef?: string;
   degradationNotes?: string[];
   providerDiagnostics?: { degraded: string[]; degradationCount?: number; notes?: string[] };

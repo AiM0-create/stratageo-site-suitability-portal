@@ -123,7 +123,16 @@ describe('buildExecutiveSummary', () => {
     const ex = buildExecutiveSummary(res(), []);
     expect(ex.topZoneName).toBeNull();
     expect(ex.screenedCells).toBeNull();
+    expect(ex.verifiedCells).toBeNull();
     expect(ex.claimLevel).toBe('investigation_zone'); // conservative default
+  });
+
+  // v1.14.0 — "best of 112 eligible" over a 6.5 beside 8+ map cells read as a
+  // contradiction; the number on a card is the best of the re-verified
+  // shortlist, and the header must say so when the payload carries it.
+  it('reports the verified shortlist size when the engine sends it', () => {
+    const r = res({ shortlist: { size: 12, verified: 3, screened: 112, eligible: 112, separationRings: 2, basis: 'x' } });
+    expect(buildExecutiveSummary(r, []).verifiedCells).toBe(12);
   });
 });
 

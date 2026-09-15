@@ -3102,22 +3102,44 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # All Pass-A composite scores (the engine computed them anyway). Capped at
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
     hex_grid = results_mod.build_hex_grid(hexes, composite, excluded, scores)
-    # v1.6.4 — score/colour coherence (user-reported confusion: a pick's final
-    # refined score differed from its map colour). The chosen candidates' OWN
-    # cells are recoloured with their FINAL (Pass-B refined) scores and flagged,
-    # so a candidate's colour always matches the number on its card. All other
-    # cells remain the Pass-A screening surface — the only basis on which every
-    # cell is comparable (refinement only ever runs for the shortlist).
+    # v1.6.4 recoloured each chosen candidate's OWN cell with its FINAL
+    # (Pass-B refined) score so the colour matched the card. v1.14.0 reverses
+    # that: the two scores are on different bases (screening = every cell
+    # against the whole grid; verified = the shortlist against each other,
+    # spread-compressed toward 5 by refit_refined_layers), so painting a
+    # verified 6.5 onto a screening surface made the WINNER look paler than
+    # the unpicked cells beside it. Observed live (NOVA IVF, Bengaluru): #1
+    # Yediyuru at 6.5 sat in a light cell at the study-area edge while the
+    # dark-green interior cells it had beaten on refinement kept their
+    # screening colour. One surface, one basis: every cell keeps its screening
+    # score; the chosen cells carry the verified score and rank alongside it
+    # so the tooltip can show both, labelled.
     _final_by_h3 = {
-        hexes[ci].h3_id: loc
-        for ci, loc in zip(finals, locations)
+        hexes[ci].h3_id: (rank + 1, loc)
+        for rank, (ci, loc) in enumerate(zip(finals, locations))
         if isinstance(loc.get("mcda_score"), (int, float)) and not loc.get("scoreWithheld")
     }
+    _shortlist_h3 = {hexes[ci].h3_id for ci in candidates}
     for _cell in hex_grid:
-        _loc = _final_by_h3.get(_cell.get("h3"))
-        if _loc is not None and not _cell.get("excluded"):
-            _cell["score"] = round(float(_loc["mcda_score"]), 2)
+        if _cell.get("h3") in _shortlist_h3 and not _cell.get("excluded"):
+            _cell["shortlisted"] = True
+        _hit = _final_by_h3.get(_cell.get("h3"))
+        if _hit is not None and not _cell.get("excluded"):
+            _rank, _loc = _hit
             _cell["refinedCandidate"] = True
+            _cell["refinedScore"] = round(float(_loc["mcda_score"]), 2)
+            _cell["finalRank"] = _rank
+    _shortlist_info = {
+        "size": len(candidates),
+        "verified": len(finals),
+        "screened": len(hexes),
+        "eligible": int((~excluded).sum()),
+        "separationRings": _sep_rings,
+        "basis": ("Cells are coloured by the screening score (every cell, same basis). "
+                  f"The top {len(candidates)} screening cells, at least {_sep_rings} ring(s) apart, "
+                  "were re-scored with travel-time, routing and Places data; the ranking is "
+                  "among those and its 0–10 scale is relative to that shortlist."),
+    }
 
     # ── Catchment outlines for the winners ───────────────────────────
     catchments = results_mod.build_catchments(spec, iso_polygons, finals, locations)
@@ -3221,6 +3243,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "locations": locations,
         "grounding_sources": [],
         "hexGrid": hex_grid,
+        "shortlist": _shortlist_info,       # v1.14.0 — the ranking basis, as numbers
         "catchments": catchments,
         "dataSufficiency": data_sufficiency,
         "dataQuality": data_quality,

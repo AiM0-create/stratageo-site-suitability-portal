@@ -444,10 +444,19 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 }}>{execSummary.topZoneVerdict}</span>
               )}
             </div>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: 1, marginBottom: 6 }}>
-              best of {execSummary.eligibleCells !== null ? execSummary.eligibleCells : 'the'} eligible
+            {/* v1.14.0 — say what the number is the best OF. The 0–10 on a
+                card is relative to the re-verified shortlist, not to every
+                cell; "best of 112 eligible" over a 6.5 next to 8+ map cells
+                read as a contradiction (live: NOVA IVF, Bengaluru). */}
+            <div
+              style={{ fontSize: '11px', color: '#64748b', marginTop: 1, marginBottom: 6 }}
+              title={result.shortlist?.basis || undefined}
+            >
+              {execSummary.verifiedCells !== null
+                ? <>best of {execSummary.verifiedCells} zones re-verified with travel-time and routing data</>
+                : <>best of {execSummary.eligibleCells !== null ? execSummary.eligibleCells : 'the'} eligible</>}
               {execSummary.eligibleCells !== null && execSummary.screenedCells !== null
-                ? <> of {execSummary.screenedCells} screened</> : null}
+                ? <> · {execSummary.eligibleCells} eligible of {execSummary.screenedCells} screened</> : null}
               {execSummary.confidenceLevel ? <> · {execSummary.confidenceLevel.toLowerCase()} confidence</> : null}
             </div>
 

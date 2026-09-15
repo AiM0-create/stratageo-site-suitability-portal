@@ -448,7 +448,12 @@ export const MapView: React.FC<MapViewProps> = ({
           ? 0.12
           : recommendationWithheld ? 0.10 + t * 0.20 : 0.30 + t * 0.45;
 
-      const finalTag = (cell as any).refinedCandidate ? ' — FINAL refined score (chosen candidate)' : '';
+      // v1.14.0 — one basis on the surface, both numbers in the tooltip. A
+      // chosen zone's colour is its screening score like every other cell;
+      // its verified score (the number on its card) is stated alongside.
+      const finalTag = cell.refinedCandidate && typeof cell.refinedScore === 'number'
+        ? ` (screening, the map colour) — verified ${cell.refinedScore.toFixed(1)}/10, ranked #${cell.finalRank ?? '?'} after travel-time and routing checks`
+        : cell.shortlisted ? ' — shortlisted and re-verified, not in the final ranking' : '';
       const label = cell.excluded
         ? 'Excluded zone'
         : !hasVal
@@ -670,7 +675,7 @@ export const MapView: React.FC<MapViewProps> = ({
                   <div className="sg-legend-note">
                     {heatmapType
                       ? 'Greener = more favourable for this factor (relative to this area).'
-                      : 'Greener = higher overall score (relative to this area).'}
+                      : 'Greener = higher screening score (every cell, same basis). Numbered pins = the verified ranking; their card score is relative to the shortlist, not to the map.'}
                   </div>
                 </>
               )}
