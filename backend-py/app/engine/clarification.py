@@ -774,7 +774,10 @@ def _scale_family(layers: list[dict], family: str, factor: float) -> tuple[list[
 
 
 def _refresh_objective(spec: dict) -> None:
-    """A scope answer changes where; the objective sentence must say so."""
+    """A scope answer changes where; the objective sentence — and the derived
+    assumptions (v2.2.0 live: "Bengaluru, Karnataka is treated as the full
+    study area" printed above "Indiranagar, Koramangala — You told us this")
+    — must say so."""
     from .deterministic_planner import templated_objective
     sa = spec.get("studyArea") or {}
     places = list(sa.get("places") or []) or ([sa["name"]] if sa.get("name") else [])
@@ -783,6 +786,14 @@ def _refresh_objective(spec: dict) -> None:
         (spec.get("businessType") or "business").strip(),
         places,
     )
+    if isinstance(spec.get("plan"), dict):
+        try:
+            from .derived_plan import build_assumptions
+            from .intent_parser import parse_raw_intent
+            intent = parse_raw_intent(str(((spec.get("rawIntent") or {}).get("rawPrompt")) or ""))
+            spec["plan"]["assumptions"] = build_assumptions(spec, intent)
+        except Exception:  # never let a display refresh break the answer
+            pass
 
 
 def apply_answers_to_spec(spec: dict, answers: list[dict], intent=None) -> tuple[dict, list[str]]:

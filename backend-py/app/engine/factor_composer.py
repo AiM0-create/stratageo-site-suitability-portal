@@ -157,6 +157,15 @@ FACTOR_RATIONALE: dict[str, str] = {
 
 _EVIDENCE_TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
 _MIN_EVIDENCE_TOKEN_SHARE = 0.6
+# The words that describe the ASK, not the business. Evidence made only of
+# these is not evidence (live: "Banks and ATMs — you said 'micro-market zones'").
+_ASK_JARGON = frozenset({
+    "identify", "find", "suggest", "recommend", "top", "best", "candidate", "candidates",
+    "micro", "market", "markets", "zone", "zones", "site", "sites", "area", "areas",
+    "location", "locations", "place", "places", "option", "options", "shortlist",
+    "rank", "ranked", "ranking", "analysis", "expansion", "expand", "next", "new",
+    "open", "opening", "want", "need", "looking", "the", "for", "and", "our", "its",
+})
 
 
 # ── data types ───────────────────────────────────────────────────────────────
@@ -208,11 +217,11 @@ def evidence_in_text(evidence: str, user_text: str) -> bool:
     if len(ev) < 3:
         return False
     hay = str(user_text or "").lower()
+    toks = _tokens(ev)
+    if not toks or toks <= _ASK_JARGON:
+        return False
     if ev.lower() in hay:
         return True
-    toks = _tokens(ev)
-    if not toks:
-        return False
     hay_toks = _tokens(hay)
     return len(toks & hay_toks) / len(toks) >= _MIN_EVIDENCE_TOKEN_SHARE
 

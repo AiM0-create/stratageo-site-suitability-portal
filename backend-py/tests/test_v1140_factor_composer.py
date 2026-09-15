@@ -582,3 +582,12 @@ class TestModelDecidesTheFamily:
                 "meta": {"familySource": "model", "familyBusiness": "IVF centre"}, "layers": [], "output": {"topN": 3}}
         lines = [a["assumption"] for a in build_assumptions(spec, parse_raw_intent("NOVA IVF in Goa"))]
         assert any("Clinic / healthcare framework" in l for l in lines)
+
+
+class TestEvidenceIsAboutTheBusiness:
+    def test_ask_jargon_is_not_evidence(self):
+        brief = "Identify top 3 candidate micro-market zones for a NOVA IVF expansion in Bengaluru"
+        assert not evidence_in_text("micro-market zones", brief)
+        assert not evidence_in_text("top 3 candidate", brief)
+        assert evidence_in_text("NOVA IVF", brief)
+        assert evidence_in_text("IVF expansion", brief)      # a business word makes it evidence
