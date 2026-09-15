@@ -166,6 +166,7 @@ def _after(rx: re.Pattern, phrase) -> str:
     text = str(phrase)
     m = rx.search(text)
     tail = text[m.end():].strip(" ,.;") if m else text
+    tail = re.split(r"[,;]", tail)[0].strip()
     words = tail.split()
     return " ".join(words[:6]) + ("…" if len(words) > 6 else "") if words else text.strip()
 
@@ -422,6 +423,14 @@ def validate_questions(
         if st is not None and st.status in ("filled", "skipped"):
             result.rejections.append(Rejection(
                 qid, "redundant", f"slot {slot!r} is already {st.status} from {st.source}"))
+            continue
+        # v2.1.0 — a business with no framework has no formats to choose from.
+        # Live: a salon brief was offered "Salon only / Salon and spa / Spa-led
+        # wellness", each label silently bound to a registry key for a
+        # different business. The plan is built from the brief instead.
+        if slot == "archetype" and st is not None and st.status == "empty":
+            result.rejections.append(Rejection(
+                qid, "not_askable", "no standard format fits this business; the plan is built from the brief"))
             continue
 
         # 10. one writer per slot

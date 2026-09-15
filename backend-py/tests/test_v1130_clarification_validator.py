@@ -43,6 +43,15 @@ def _slots(prompt, study_area):
 
 
 def _empty_slots():
+    """Every slot open. The archetype slot is low_confidence rather than empty:
+    v2.1.0 never asks a format question for a business with no framework
+    (an empty archetype), so the generic-rule tests need a real choice open."""
+    out = {s: SlotState() for s in SLOTS}
+    out["archetype"] = SlotState("low_confidence", "prompt", "generic_qsr_cafe")
+    return out
+
+
+def _no_framework_slots():
     return {s: SlotState() for s in SLOTS}
 
 
@@ -336,6 +345,15 @@ class TestOnlyMeasuredFactors:
         ])], _empty_slots(), CAFE_LAYERS)
         assert res.accepted == []
         assert res.rejections[0].rule == "not_askable"
+
+    def test_no_format_question_without_a_framework(self):
+        """Live: a salon brief was offered 'Salon only / Salon and spa / Spa-led
+        wellness', each label bound to a registry key for a different business."""
+        res = validate_questions([_q("archetype", [
+            _opt("Salon only", {"type": "set_archetype", "key": "retail_store"}),
+            _opt("Spa-led wellness", {"type": "set_archetype", "key": "clinic_healthcare"}),
+        ])], _no_framework_slots(), CAFE_LAYERS)
+        assert res.accepted == [] and res.rejections[0].rule == "not_askable"
 
     def test_an_unknown_unverifiable_kind_is_rejected(self):
         res = validate_questions([_q("expectations", [
