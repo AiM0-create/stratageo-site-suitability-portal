@@ -427,6 +427,10 @@ class SpecMeta(BaseModel):
     # v1.13.1 — the format the customer chose, so the derived label and
     # objective follow the framework rather than the parser's original key.
     archetypeOverride: Optional[str] = None
+    # v2.2.0 — the framework was chosen by the model because the keyword parser
+    # had nothing (or only a weak word); the plan card says so.
+    familySource: Optional[Literal["parser", "model", "answer"]] = None
+    familyBusiness: Optional[str] = None
 
 
 class WaterfrontMeta(BaseModel):

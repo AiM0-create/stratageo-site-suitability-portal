@@ -57,13 +57,29 @@ def _formats_for(canonical_key: str) -> list[dict]:
     return [{"key": k, "label": ARCHETYPE_LABELS.get(k, k)} for k in keys]
 
 
-def build_clarify_inputs(brief: str) -> dict:
+def build_clarify_inputs(brief: str, family: dict | None = None) -> dict:
     """Everything the model is handed, and everything the validator needs —
-    computed once so both sides see the same table."""
+    computed once so both sides see the same table.
+
+    family — v2.2.0: the model's classification when the parser was weak
+    ({"family": <registry key>, "business": <noun>}); it overrides the
+    canonical framework and fills the archetype slot as an assumption."""
     intent = parse_raw_intent(brief)
     canonical = resolve_canonical_archetype(intent.businessTypeKey, brief)
+    if family and family.get("family") and family["family"] != "generic":
+        from ..engine.clarification import get_canonical_by_key
+        chosen = get_canonical_by_key(family["family"])
+        if chosen is not None:
+            canonical = chosen
     study_area = _study_area_hint(intent, brief)
     slots = build_slot_state(intent, canonical.key, study_area, brief)
+    if family and family.get("family") and canonical.key != "generic" and slots.get("archetype") is not None \
+            and slots["archetype"].source != "you":
+        from ..engine.clarification import SlotState, ARCHETYPE_SIBLINGS
+        # the model's reading is an assumption the customer can correct — a
+        # sibling question is still allowed where a real choice exists
+        slots["archetype"] = SlotState(
+            "low_confidence" if canonical.key in ARCHETYPE_SIBLINGS else "filled", "assumed", canonical.key)
     layers = [{"id": f.key, "name": f.display_name} for f in canonical.factors]
     families = sorted({_factor_family(l["name"]) for l in layers} - {"other"})
     return {
@@ -84,7 +100,10 @@ async def clarify(brief: str) -> dict:
     """One clarification turn. Returns the accepted questions, the reply, the
     understanding strip, and whether the brief is already complete."""
     settings = get_settings()
-    inputs = build_clarify_inputs(brief)
+    # v2.2.0 — the model decides the family when the parser is weak
+    from .classify import classify_family, is_weak
+    family = await classify_family(brief) if is_weak(parse_raw_intent(brief).businessTypeKey) else None
+    inputs = build_clarify_inputs(brief, family)
     slots, layers = inputs["slots"], inputs["layers"]
 
     reply = ""

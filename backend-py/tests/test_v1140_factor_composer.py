@@ -528,3 +528,57 @@ class TestSpecialtyCompetitors:
         fc = fcs.get("fertility_ivf")
         src = fcs.source_for(fc)
         assert src == {"provider": "google_places", "types": ["hospital", "doctor"], "keyword": "IVF fertility"}
+
+
+# ── v2.2.0 — the model decides the family when the parser is weak ───────────
+class TestModelDecidesTheFamily:
+    def test_weak_keys(self):
+        from app.services.classify import is_weak
+        assert is_weak("generic") and is_weak("retail") and not is_weak("cafe") and not is_weak("clinic")
+
+    def test_clarify_inputs_take_the_models_family(self):
+        from app.services.clarify import build_clarify_inputs
+        brief = "Boutique wellness retreat with spa for weekenders near Lonavala, 3 zones"
+        assert parse_raw_intent(brief).businessTypeKey in ("resort", "generic")
+        inputs = build_clarify_inputs(brief, {"family": "premium_restaurant", "business": "wellness retreat"})
+        assert inputs["canonical"].key == "premium_restaurant"
+        st = inputs["slots"]["archetype"]
+        assert st.source == "assumed" and st.value == "premium_restaurant"
+
+    def test_generic_answer_changes_nothing(self):
+        from app.services.clarify import build_clarify_inputs
+        brief = "Gym in Whitefield"
+        inputs = build_clarify_inputs(brief, {"family": "generic", "business": "gym"})
+        assert inputs["canonical"].key == "generic"
+
+    def test_unknown_key_is_ignored_by_the_classifier(self):
+        import asyncio
+        from unittest.mock import patch, AsyncMock, MagicMock
+        from app.services import classify
+        classify._CACHE.clear()
+        fake = MagicMock()
+        fake.chat.completions.create = AsyncMock(return_value=MagicMock(
+            choices=[MagicMock(message=MagicMock(content='{"family": "spa_resort", "business": "spa"}'))]))
+        with patch("openai.AsyncOpenAI", return_value=fake):
+            assert asyncio.run(classify.classify_family("Spa in Goa")) is None
+        fake.chat.completions.create = AsyncMock(return_value=MagicMock(
+            choices=[MagicMock(message=MagicMock(content='{"family": "clinic_healthcare", "business": "IVF centre"}'))]))
+        classify._CACHE.clear()
+        with patch("openai.AsyncOpenAI", return_value=fake):
+            assert asyncio.run(classify.classify_family("NOVA IVF")) == {"family": "clinic_healthcare", "business": "IVF centre"}
+
+    def test_failure_is_fail_soft(self):
+        import asyncio
+        from unittest.mock import patch
+        from app.services import classify
+        classify._CACHE.clear()
+        with patch("openai.AsyncOpenAI", side_effect=RuntimeError("down")):
+            assert asyncio.run(classify.classify_family("Anything at all")) is None
+
+    def test_plan_says_the_model_chose(self):
+        from app.engine.derived_plan import build_assumptions
+        spec = {"studyArea": {"type": "places", "places": ["Goa"]}, "grid": {"resolution": 8},
+                "archetypeKey": "clinic_healthcare", "businessType": "IVF centre",
+                "meta": {"familySource": "model", "familyBusiness": "IVF centre"}, "layers": [], "output": {"topN": 3}}
+        lines = [a["assumption"] for a in build_assumptions(spec, parse_raw_intent("NOVA IVF in Goa"))]
+        assert any("Clinic / healthcare framework" in l for l in lines)

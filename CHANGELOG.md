@@ -4,6 +4,32 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.2.0] — 2026-09-15 — The model decides the family when the parser is weak
+
+The framework was chosen by a keyword regex and the model's reading of the
+brief was ignored — which put "NOVA IVF expansion" into retail on the word
+"market" and sends every business the regex has never seen to the generic
+proxies. Owner's call: let the model decide when the parser is weak.
+
+- **`services/classify.py`** — one cheap, temperature-0, closed-vocabulary
+  call: the registry keys plus `generic`, JSON only, cached by brief, fail-soft
+  (any error or unknown key → the parser's answer stands). It runs only when
+  the parser is weak: nothing matched, a weak word matched (store / shop /
+  office / market), or the matched type has no framework (gym, hotel, resort,
+  office, industrial). The regex stays first for everything it reads well.
+- Both turns use it — clarify and plan — so they land on the same framework.
+  The "So far" strip shows the family as *assumed*, a sibling question is
+  still asked where a real choice exists, and the plan's assumptions carry a
+  line: *IVF clinic is analysed with the Clinic / healthcare framework — read
+  from your brief by the assistant.* `meta.familySource` / `familyBusiness`
+  declared.
+- Live, nine briefs the regex could not read: Blue Tokai outlet → café (the
+  regex said retail); Decathlon-style megastore → large-format retail; cold
+  chain hub → warehouse; rooftop bar → premium restaurant; Montessori house →
+  preschool; kirana + pharmacy → neighbourhood store; boutique hotel and
+  battery-swapping network → generic, honestly, and on to the brief-composed
+  path.
+
 ## [2.1.3] — 2026-09-15 — IVF is a fertility clinic
 
 Owner, live: *"Identify top 3 candidate micro-market zones for a NOVA IVF

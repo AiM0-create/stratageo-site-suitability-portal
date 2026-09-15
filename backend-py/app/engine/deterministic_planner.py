@@ -651,9 +651,14 @@ def apply_deterministic_plan(
         # re-introducing variance into two otherwise deterministic fields
         # ("premium cafe" on one run, "premium cafe in Indiranagar, Bengaluru"
         # on the next).
+        _meta_in = llm_spec.get("meta") or {}
+        spec["archetypeKey"] = canonical.key          # needed by build_assumptions below
         spec["businessType"] = derive_business_type(
-            intent, canonical, fallback=llm_spec.get("businessType", ""),
-            override_key=str(((llm_spec.get("meta") or {}).get("archetypeOverride")) or ""),
+            intent, canonical,
+            # v2.2.0 — the classifier's short noun ("NOVA IVF centre") beats the
+            # drafting model's businessType when the parser had nothing.
+            fallback=str(_meta_in.get("familyBusiness") or llm_spec.get("businessType") or ""),
+            override_key=str(_meta_in.get("archetypeOverride") or ""),
         )
         if isinstance(spec.get("plan"), dict):
             spec["plan"]["assumptions"] = build_assumptions(spec, intent)

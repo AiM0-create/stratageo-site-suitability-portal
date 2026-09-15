@@ -73,6 +73,22 @@ def build_assumptions(spec: dict, intent: RawIntent) -> list[dict]:
             "basis": "Named by you; no tighter sub-locality was specified.",
         })
 
+    # 1b. v2.2.0 — which framework, and who decided. When the keyword parser
+    # had nothing, the model's reading of the business chose the family; the
+    # customer sees that it was a reading, and which one.
+    meta = spec.get("meta") or {}
+    if meta.get("familySource") == "model":
+        try:
+            from .clarification import ARCHETYPE_LABELS
+            fam = ARCHETYPE_LABELS.get(str(spec.get("archetypeKey") or ""), str(spec.get("archetypeKey") or "framework"))
+        except Exception:  # pragma: no cover
+            fam = str(spec.get("archetypeKey") or "framework")
+        biz = str(meta.get("familyBusiness") or spec.get("businessType") or "this business")
+        out.append({
+            "assumption": f"{biz} is analysed with the {fam} framework.",
+            "basis": "Read from your brief by the assistant; the framework decides what is measured.",
+        })
+
     # 2. Grid resolution — a real methodology choice the customer can change.
     grid = spec.get("grid") or {}
     res = int(grid.get("resolution", 8) or 8)

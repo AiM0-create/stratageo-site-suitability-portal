@@ -402,6 +402,22 @@ async def chat_turn(
             effective_biz_key = incoming_ri.get("businessTypeKey") or raw_intent.businessTypeKey
             effective_raw_prompt = incoming_ri.get("rawPrompt") or raw_intent.rawPrompt
             canonical = resolve_canonical_archetype(effective_biz_key, effective_raw_prompt)
+            # v2.2.0 — the model decides the family when the parser is weak.
+            # Same call as the clarify turn (cached by brief), so both turns
+            # land on the same framework.
+            from .classify import classify_family, is_weak
+            _family = None
+            if is_weak(effective_biz_key):
+                _family = await classify_family(effective_raw_prompt)
+                if _family and _family.get("family") and _family["family"] != "generic":
+                    from ..engine.clarification import get_canonical_by_key as _by_key
+                    _chosen = _by_key(_family["family"])
+                    if _chosen is not None:
+                        canonical = _chosen
+                        _meta = dict(new_spec.get("meta") or {})
+                        _meta["familySource"] = "model"
+                        _meta["familyBusiness"] = _family.get("business") or ""
+                        new_spec["meta"] = _meta
 
             # v1.13.0 — a clarifying answer that chose a format overrides the
             # parser's guess. This has to happen BEFORE the planner runs,
