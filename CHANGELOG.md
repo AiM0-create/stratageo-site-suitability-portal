@@ -4,6 +4,27 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.1.3] — 2026-09-15 — IVF is a fertility clinic
+
+Owner, live: *"Identify top 3 candidate micro-market zones for a NOVA IVF
+expansion in Bengaluru"* was asked "Large-format / supermarket or
+Neighbourhood store?". The AI never chose that — the keyword parser did,
+and the only word it matched in the brief was "market" inside
+"micro-market zones".
+
+- **Parser:** `market` counts as a shop only when it is not "micro-market" /
+  "market analysis" / "target market"; IVF, fertility, reproductive, dialysis,
+  physio, dental, diagnostic, pathology, eye care and dermatology resolve to
+  the clinic framework. Regression tests for each.
+- **Specialty competitors.** The clinic framework's "Existing clinic
+  saturation" counts every doctor and pharmacy — wrong for an IVF centre,
+  whose competitors are other fertility centres and for whom nearby hospitals
+  are referral sources. New keyword-searched classes (`fertility_ivf`,
+  `dental`, `eye_care`, `dialysis`) and a rule: a specialty competitor found
+  in the brief supersedes the framework's category competitor and inherits
+  its points. Live: 4 factors — residential population, transit, healthcare
+  ecosystem (+), IVF and fertility centres (−, 52 / 25 / 173 found by name).
+
 ## [2.1.2] — 2026-09-15 — Why the greenest cell is not Priority 1
 
 Owner, on a live high-end-gym run: a cell reads *Overall suitability 10.0*

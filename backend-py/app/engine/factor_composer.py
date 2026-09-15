@@ -264,6 +264,11 @@ def _valid_catchment(raw, group: str) -> tuple[dict | None, str | None]:
     return out, None
 
 
+def layer_family_of(layer: dict) -> str:
+    from .planner_lite import layer_family
+    return layer_family(layer)
+
+
 def business_noun(canonical, spec: dict | None = None, intent=None) -> str:
     """The noun rationale sentences use for the business: the framework's own
     noun; else the parser's key ("gym"); else the first few words of the
@@ -385,7 +390,11 @@ COMPETITION_BY_WORD: tuple[tuple[re.Pattern, str], ...] = tuple(
         (r"\bpharmac|\bchemist|\bdrug\s*store", "pharmacies"),
         (r"\bbaker|\bsweet|\bconfection|\bpatisserie", "bakeries_sweets"),
         (r"\bbars?\b|\bpubs?\b|\bbrewer|\bnight\s*club|\blounge", "bars_pubs"),
-        (r"\bivf\b|\bfertility\b|\bclinic|\bdental|\bphysio|\bdiagnos", "clinics_doctors"),
+        (r"\bivf\b|\bfertility\b|\breproductive\b", "fertility_ivf"),
+        (r"\bdental|\bdentist", "dental"),
+        (r"\beye\s+(?:care|hospital|clinic)|\bophthalm|\boptician", "eye_care"),
+        (r"\bdialysis|\bnephro", "dialysis"),
+        (r"\bclinic|\bphysio|\bdiagnos", "clinics_doctors"),
         (r"\bpet\b|\bvet(?:erinary)?\b", "pet_services"),
         (r"\bbanks?\b|\batm\b|\bnbfc\b", "banks_atms"),
         (r"\bpetrol|\bfuel|\bgas\s+station", "fuel_stations"),
@@ -456,11 +465,12 @@ def validate_context_factors(
             continue
         # duplicate of the framework: same class, or same POIs in the same direction
         dup = None
+        _my_tags, _my_types = fcs.items_of(fc)
         for classes, tags, types, sdir in spine_sigs:
             if key in classes:
                 dup = "the framework already measures this"
                 break
-            if sdir == direction and (_overlaps(set(fc.osm_tags), tags) or _overlaps(set(fc.places_types), types)):
+            if sdir == direction and (_overlaps(_my_tags, tags) or _overlaps(_my_types, types)):
                 dup = "the framework already counts these places in the same direction"
                 break
         if dup:
@@ -477,8 +487,9 @@ def validate_context_factors(
         # a duplicate of a factor already accepted this turn (same places, same
         # direction) — live: premium_cotenants and shopping_malls side by side
         _dup_acc = next((a for a in accepted if a["direction"] == direction and (
-            _overlaps(set(fc.osm_tags), set((a["source"].get("tags") or []))) or
-            _overlaps(set(fc.places_types), set((a["source"].get("types") or []))))), None)
+            _overlaps(_my_tags, set((a["source"].get("tags") or []))) or
+            _overlaps(_my_types, set((a["source"].get("types") or [])) if not a["source"].get("keyword")
+                      else {f"kw:{a['source']['keyword']}"}))), None)
         if _dup_acc:
             rejected.append(Rejection(key, "duplicate_of_framework",
                                       f"'{_dup_acc['name']}' already counts these places"))
@@ -547,15 +558,27 @@ def compose(
     spine = annotate_framework_layers(framework_layers, canonical, spec, intent)
     generic = getattr(canonical, "key", "") == "generic"
     max_factors = MAX_CONTEXT_FACTORS_GENERIC if generic else MAX_CONTEXT_FACTORS
+    replaced: list[str] = []
+    replaced_points = 0.0          # the share the replaced proxies held; the brief inherits it
     accepted, rejected = validate_context_factors(proposals, spine, user_text, max_factors)
-    if generic and not any(l.get("_family") == "competition" and l.get("direction") == "negative" for l in accepted):
+    has_competitor = any(l.get("_family") == "competition" and l.get("direction") == "negative" for l in accepted)
+    backstop = infer_competition_proposal(user_text)
+    specialty = bool(backstop and (fcs.get(backstop["featureClass"]) or fcs.get("x")) and fcs.get(backstop["featureClass"]).keyword)
+    if backstop and ((generic and not has_competitor) or (specialty and not has_competitor)):
         # The backstop runs AFTER validation: a competitor the model proposed
         # but the validator rejected (bad catchment, say) must not block it.
-        backstop = infer_competition_proposal(user_text)
-        if backstop:
-            more, more_rej = validate_context_factors([backstop], spine + accepted, user_text, max_factors + 1)
-            accepted = more + accepted
-            rejected += more_rej
+        # A SPECIALTY competitor (found by keyword: IVF, dialysis, eye care)
+        # also supersedes a framework's category competitor — "every doctor
+        # and pharmacy" is not who an IVF centre competes with.
+        if specialty and not generic:
+            for l in list(spine):
+                if layer_family_of(l) == "competition":
+                    spine.remove(l)
+                    replaced.append(str(l.get("name")))
+                    replaced_points += float(l.get("weight") or 0.0) * 100.0
+        more, more_rej = validate_context_factors([backstop], spine + accepted, user_text, max_factors + 1)
+        accepted = more + accepted
+        rejected += more_rej
 
     # A specific competitor class supersedes the generic proxy. The generic
     # framework counts "all shops and eateries" as competition because it does
@@ -569,8 +592,6 @@ def compose(
     # accessibility" to stations / parking / arterial roads. With all three
     # covered, the brief IS the framework. Live: a high-end gym in Marine
     # Lines still ran 60% on any-building / any-shop proxies.
-    replaced: list[str] = []
-    replaced_points = 0.0          # the share the replaced proxies held; the brief inherits it
     if getattr(canonical, "key", "") == "generic":
         covered = {
             l.get("_family") for l in accepted

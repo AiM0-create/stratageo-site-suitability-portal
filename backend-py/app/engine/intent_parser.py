@@ -92,6 +92,11 @@ _BIZ_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("supermarket",           re.compile(r"\b(supermarket|super\s+market|grocery\s+store|grocery\s+chain)\b", re.I)),
     ("cafe",                  re.compile(r"\b(cafe|caf[eé]|coffee|bakery|patisserie)\b", re.I)),
     ("restaurant",            re.compile(r"\b(restaurant|dining|eatery|bistro|dhaba|bar\s+and\s+grill)\b", re.I)),
+    # v2.1.3 — "NOVA IVF expansion" is a fertility clinic. Live: the only word
+    # the parser matched in that brief was "market" inside "micro-market
+    # zones", so an IVF chain was planned as a retail store and asked
+    # "large-format or neighbourhood?".
+    ("clinic",                re.compile(r"\b(ivf|fertility|reproductive\s+(?:health|medicine)|dialysis|physio(?:therapy)?|dental|diagnostic|pathology|eye\s+care|dermat\w*)\b", re.I)),
     ("maternity_clinic",      re.compile(r"\b(maternity|obstetric|prenatal|antenatal|gynec|OBGYN)\b.{0,30}\b(clinic|hospital|centre|center)\b", re.I)),
     ("hospital",              re.compile(r"\b(hospital|healthcare\s+facility|medical\s+center|multi.?speciality)\b", re.I)),
     ("clinic",                re.compile(r"\b(clinic|dispensary|health\s+centre|polyclinic|diagnostic\s+centre|outpatient)\b", re.I)),
@@ -105,7 +110,9 @@ _BIZ_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("hotel",                 re.compile(r"\b(hotel|lodging|accommodation|guesthouse|inn)\b", re.I)),
     ("office",                re.compile(r"\b(office|coworking|co.?working|commercial\s+space|business\s+park|corporate)\b", re.I)),
     ("industrial",            re.compile(r"\b(industrial|manufacturing|factory|plant|production\s+facility|SEZ)\b", re.I)),
-    ("retail",                re.compile(r"\b(retail|store|shop|showroom|outlet|mall|market)\b", re.I)),
+    # "market" only as a shop, never the analyst's "micro-market zones" /
+    # "market analysis" / "target market".
+    ("retail",                re.compile(r"\b(retail|store|shop|showroom|outlet|mall)\b|(?<![\w-])market\b(?!\s+(?:zones?|areas?|analysis|fit|positioning|study|research|entry|potential|segment))", re.I)),
 ]
 
 # ── Strict route constraint detection (Phase 9) ───────────────────────────────

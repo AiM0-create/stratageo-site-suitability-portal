@@ -40,6 +40,7 @@ class FeatureClass:
     osm_tags: tuple[str, ...]        # Overpass key=value filters
     places_types: tuple[str, ...]    # Places API (New) includedTypes
     measures: str                    # one plain sentence: what is counted
+    keyword: str | None = None       # Places text keyword — a specialty no tag captures
 
     @property
     def provider(self) -> str:
@@ -48,8 +49,8 @@ class FeatureClass:
         return "google_places" if self.places_types else "osm"
 
 
-def _fc(key, label, group, osm, places, measures) -> FeatureClass:
-    return FeatureClass(key, label, group, tuple(osm), tuple(places), measures)
+def _fc(key, label, group, osm, places, measures, keyword=None) -> FeatureClass:
+    return FeatureClass(key, label, group, tuple(osm), tuple(places), measures, keyword)
 
 
 VOCABULARY: tuple[FeatureClass, ...] = (
@@ -174,6 +175,21 @@ VOCABULARY: tuple[FeatureClass, ...] = (
     _fc("banks_atms", "Banks and ATMs", "competition",
         ["amenity=bank", "amenity=atm"], ["bank", "atm"],
         "counts banks and ATMs"),
+    # v2.1.3 — specialties no OSM tag or Places type separates from "doctor".
+    # Live: an IVF chain was scored against every doctor and pharmacy in
+    # Bengaluru; its competitors are other fertility centres.
+    _fc("fertility_ivf", "IVF and fertility centres", "competition",
+        ["healthcare:speciality=fertility"], ["hospital", "doctor"],
+        "counts IVF and fertility centres found by name", keyword="IVF fertility"),
+    _fc("dental", "Dental clinics", "competition",
+        ["healthcare:speciality=dentistry", "amenity=dentist"], ["dentist", "dental_clinic"],
+        "counts dental clinics"),
+    _fc("eye_care", "Eye hospitals and opticians", "competition",
+        ["healthcare:speciality=ophthalmology", "shop=optician"], ["hospital", "doctor"],
+        "counts eye hospitals and clinics found by name", keyword="eye hospital ophthalmology"),
+    _fc("dialysis", "Dialysis centres", "competition",
+        ["healthcare:speciality=nephrology"], ["hospital", "doctor"],
+        "counts dialysis and nephrology centres found by name", keyword="dialysis"),
     _fc("pet_services", "Pet shops and vets", "competition",
         ["amenity=veterinary", "shop=pet"], ["veterinary_care", "pet_store"],
         "counts vets and pet shops"),
@@ -254,7 +270,7 @@ VOCABULARY: tuple[FeatureClass, ...] = (
 BY_KEY: dict[str, FeatureClass] = {fc.key: fc for fc in VOCABULARY}
 KEYS: tuple[str, ...] = tuple(fc.key for fc in VOCABULARY)
 
-_TAG_RE = re.compile(r"^[a-z_]+=(?:\*|[a-z_0-9]+)$")
+_TAG_RE = re.compile(r"^[a-z_:]+=(?:\*|[a-z_0-9]+)$")
 _TYPE_RE = re.compile(r"^[a-z_]+$")
 
 
@@ -265,8 +281,17 @@ def get(key: str) -> FeatureClass | None:
 def source_for(fc: FeatureClass) -> dict:
     """The SpecV2 `source` block for a factor built on this class."""
     if fc.places_types:
-        return {"provider": "google_places", "types": list(fc.places_types), "keyword": None}
+        return {"provider": "google_places", "types": list(fc.places_types), "keyword": fc.keyword}
     return {"provider": "osm", "tags": list(fc.osm_tags)}
+
+
+def items_of(fc: FeatureClass) -> tuple[set[str], set[str]]:
+    """(osm items, places items) for overlap checks. A keyword makes a class
+    distinct from the plain types it filters — IVF centres are not "doctors"."""
+    types = set(fc.places_types)
+    if fc.keyword:
+        types = {f"kw:{fc.keyword}"}
+    return set(fc.osm_tags), types
 
 
 def prompt_catalogue() -> str:

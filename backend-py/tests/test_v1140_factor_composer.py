@@ -488,3 +488,43 @@ class TestAddFactorTurn:
         classes = [l.get("featureClass") for l in spec["layers"] if l.get("origin") == "brief"]
         assert "luxury_retail" in classes and "gyms_fitness" in classes
         assert "eateries" in classes
+
+
+class TestParserReadsTheBusinessNotTheJargon:
+    """v2.1.3 live: 'micro-market zones for a NOVA IVF expansion' was parsed as
+    a retail store because 'market' matched inside 'micro-market'."""
+    @pytest.mark.parametrize("prompt,key", [
+        ("Identify top 3 candidate micro-market zones for a NOVA IVF expansion in Bengaluru", "clinic"),
+        ("NOVA IVF expansion in Bengaluru", "clinic"),
+        ("dental clinic in Kochi", "clinic"),
+        ("micro-market zones for a high-end gym in Marine Lines", "gym"),
+        ("market analysis for a cafe in Goa", "cafe"),
+        ("vegetable market stall in Pune", "retail"),
+    ])
+    def test_key(self, prompt, key):
+        assert parse_raw_intent(prompt).businessTypeKey == key
+
+
+class TestSpecialtyCompetitors:
+    """v2.1.3 — an IVF centre competes with fertility centres, not with every
+    doctor and pharmacy; the framework's category competitor gives way."""
+    def test_ivf_supersedes_clinic_saturation(self):
+        arch = _REGISTRY["clinic_healthcare"]
+        brief = "NOVA IVF expansion in Bengaluru, 3 zones"
+        c = compose(arch.to_layers_dict(), [], brief, arch)
+        names = [l["name"] for l in c.layers]
+        assert "IVF and fertility centres" in names and "Existing clinic saturation" not in names
+        ivf = next(l for l in c.layers if l["name"] == "IVF and fertility centres")
+        assert ivf["direction"] == "negative" and ivf["source"]["keyword"] == "IVF fertility"
+        assert "Complementary healthcare ecosystem" in names          # referrals stay a plus
+        assert abs(sum(l["weight"] for l in c.layers) - 1.0) < 1e-3
+
+    def test_a_plain_clinic_keeps_its_framework(self):
+        arch = _REGISTRY["clinic_healthcare"]
+        c = compose(arch.to_layers_dict(), [], "Clinic in Whitefield, Bengaluru", arch)
+        assert "Existing clinic saturation" in [l["name"] for l in c.layers] and not c.replaced
+
+    def test_keyword_class_is_executable(self):
+        fc = fcs.get("fertility_ivf")
+        src = fcs.source_for(fc)
+        assert src == {"provider": "google_places", "types": ["hospital", "doctor"], "keyword": "IVF fertility"}
