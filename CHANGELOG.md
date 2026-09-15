@@ -4,7 +4,7 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
-## [1.14.0] — 2026-09-15 — The AI composes, the engine measures
+## [2.0.0] — 2026-09-15 — The AI composes, the engine measures
 
 The review pack of 15 September put the variable framework on the table and
 the verdict was blunt: eleven fixed templates chosen by keyword, five recognised

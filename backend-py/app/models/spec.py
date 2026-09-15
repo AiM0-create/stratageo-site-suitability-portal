@@ -250,7 +250,7 @@ class Layer(BaseModel):
     # from missing data).
     required: bool = False
     notes: Optional[str] = None
-    # v1.14.0 — provenance. Every factor says where it came from and why it is
+    # v2.0.0 — provenance. Every factor says where it came from and why it is
     # in the plan. "framework": the business family's spine (deterministic
     # rationale from engine/factor_composer.FACTOR_RATIONALE). "brief": an
     # AI-composed context factor built from the customer's own words, on a
@@ -564,7 +564,7 @@ class SpecV2(BaseModel):
     # Entries: {"name": str, "bufferM": float, "lat"?: float, "lng"?: float}.
     namedExclusions: list[dict] = []
     competitionCurve: Optional[str] = None      # "target_band" when band scoring is on
-    # v1.14.0 — what the factor composer accepted and rejected from the AI's
+    # v2.0.0 — what the factor composer accepted and rejected from the AI's
     # context-factor proposals, with reasons, so the plan card can show the
     # customer which of their words became a variable and which could not.
     factorComposition: Optional[dict] = None

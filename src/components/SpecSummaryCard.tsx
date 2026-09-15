@@ -71,7 +71,7 @@ const Collapsible: React.FC<{ title: string; defaultOpen?: boolean; badgeClass?:
   );
 };
 
-/** v1.14.0 — plain wording for a composer rejection reason. */
+/** v2.0.0 — plain wording for a composer rejection reason. */
 export function rejectionLabel(reason: string): string {
   switch (reason) {
     case 'unknown_class':          return 'not something we can count from map data';
@@ -395,7 +395,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
           Each row is now a slider (drag, don't type into a 3-character number
           spinner), a clickable direction toggle, and a remove button. Adding a
           brand-new factor goes through the planner — see onSendMessage. */}
-      {/* v1.14.0 — provenance note: which framework, what the brief added,
+      {/* v2.0.0 — provenance note: which framework, what the brief added,
           and what could not be turned into a variable (and why). */}
       {!blocked && spec.factorComposition && (
         <div className={`spec-composition${spec.factorComposition.genericFramework ? ' is-generic' : ''}`}>
@@ -450,7 +450,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
                   </span>
                 )}
                 {l.proxyWarning && <span className="spec-proxy-flag" title={l.proxyWarning}>⚠</span>}
-                {/* v1.14.0 — where this factor came from. A framework factor
+                {/* v2.0.0 — where this factor came from. A framework factor
                     is the family's spine; a "from your brief" factor was
                     composed from the customer's own words and validated. */}
                 {l.origin === 'brief' && (
@@ -486,7 +486,7 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
               <div className="spec-factor-meta">
                 {catchmentLabel(l)} · {(l.confidence || 'medium')} confidence
               </div>
-              {/* v1.14.0 — the reason is a line of its own, not a tooltip:
+              {/* v2.0.0 — the reason is a line of its own, not a tooltip:
                   "why this variable" is the thing a customer needs to defend. */}
               {l.whyItMatters && (
                 <div className="spec-factor-why">

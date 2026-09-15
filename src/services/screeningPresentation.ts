@@ -118,7 +118,7 @@ export function keyRisk(loc: LocationData): string | null {
 export interface ExecutiveSummary {
   screenedCells: number | null;      // total grid cells screened
   eligibleCells: number | null;      // cells surviving exclusion masks
-  verifiedCells: number | null;      // v1.14.0 — shortlist re-verified and ranked
+  verifiedCells: number | null;      // v2.0.0 — shortlist re-verified and ranked
   businessType: string;
   targetLocation: string;
   topZoneName: string | null;

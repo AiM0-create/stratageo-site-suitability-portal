@@ -1,6 +1,6 @@
 """Factor composer — the AI proposes variables, the engine validates and installs them.
 
-v1.14.0 — "why was this variable chosen?" had no answer. The registry installed
+v2.0.0 — "why was this variable chosen?" had no answer. The registry installed
 a fixed template per business type (`whyItMatters` was null unless the LLM
 happened to name a layer identically), and any brief the parser did not
 recognise ran on three generic proxies. This module gives every factor in the

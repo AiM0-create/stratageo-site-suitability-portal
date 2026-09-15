@@ -429,7 +429,7 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
     }}
   ],
   "contextFactors": [
-    // v1.14.0 — WHAT MAKES THIS BRIEF DIFFERENT. The engine installs the business
+    // v2.0.0 — WHAT MAKES THIS BRIEF DIFFERENT. The engine installs the business
     // family's standard factors itself (demand, competition, access, co-tenancy —
     // you do not choose those). Here you add 0-4 factors that THIS customer's own
     // words justify, chosen ONLY from the feature-class vocabulary below. Each must

@@ -229,7 +229,7 @@ def _factor_family(name: str) -> str:
 
 
 def layer_family(layer: dict) -> str:
-    """v1.14.0 — a composed context factor carries its family explicitly
+    """v2.0.0 — a composed context factor carries its family explicitly
     (`_family`, from its feature class group); framework factors are still
     classified by name. Risk factors count as "other" for emphasis purposes."""
     fam = str((layer or {}).get("_family") or "")

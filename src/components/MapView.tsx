@@ -448,7 +448,7 @@ export const MapView: React.FC<MapViewProps> = ({
           ? 0.12
           : recommendationWithheld ? 0.10 + t * 0.20 : 0.30 + t * 0.45;
 
-      // v1.14.0 — one basis on the surface, both numbers in the tooltip. A
+      // v2.0.0 — one basis on the surface, both numbers in the tooltip. A
       // chosen zone's colour is its screening score like every other cell;
       // its verified score (the number on its card) is stated alongside.
       const finalTag = cell.refinedCandidate && typeof cell.refinedScore === 'number'

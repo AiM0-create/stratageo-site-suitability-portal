@@ -3103,7 +3103,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # 3000 hexes by score so metro-scale grids don't bloat the payload.
     hex_grid = results_mod.build_hex_grid(hexes, composite, excluded, scores)
     # v1.6.4 recoloured each chosen candidate's OWN cell with its FINAL
-    # (Pass-B refined) score so the colour matched the card. v1.14.0 reverses
+    # (Pass-B refined) score so the colour matched the card. v2.0.0 reverses
     # that: the two scores are on different bases (screening = every cell
     # against the whole grid; verified = the shortlist against each other,
     # spread-compressed toward 5 by refit_refined_layers), so painting a
@@ -3243,7 +3243,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "locations": locations,
         "grounding_sources": [],
         "hexGrid": hex_grid,
-        "shortlist": _shortlist_info,       # v1.14.0 — the ranking basis, as numbers
+        "shortlist": _shortlist_info,       # v2.0.0 — the ranking basis, as numbers
         "catchments": catchments,
         "dataSufficiency": data_sufficiency,
         "dataQuality": data_quality,

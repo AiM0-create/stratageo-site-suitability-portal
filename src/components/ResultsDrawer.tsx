@@ -444,7 +444,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                 }}>{execSummary.topZoneVerdict}</span>
               )}
             </div>
-            {/* v1.14.0 — say what the number is the best OF. The 0–10 on a
+            {/* v2.0.0 — say what the number is the best OF. The 0–10 on a
                 card is relative to the re-verified shortlist, not to every
                 cell; "best of 112 eligible" over a 6.5 next to 8+ map cells
                 read as a contradiction (live: NOVA IVF, Bengaluru). */}
@@ -1686,7 +1686,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             )}
                             <span className="criterion-score">{noData ? '—' : (c.score as number).toFixed(1)}</span>
                           </div>
-                          {/* v1.14.0 — why this factor is in the analysis (framework
+                          {/* v2.0.0 — why this factor is in the analysis (framework
                               rationale, or the customer's own words it was built from). */}
                           {c.whyItMatters && (
                             <div className="criterion-why">

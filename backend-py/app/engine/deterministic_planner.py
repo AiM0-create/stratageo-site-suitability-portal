@@ -509,7 +509,7 @@ def apply_deterministic_plan(
 
     # 1. Replace factor layers with the canonical framework, then compose.
     #
-    # v1.14.0 — the framework is the SPINE, not the whole plan. Until now the
+    # v2.0.0 — the framework is the SPINE, not the whole plan. Until now the
     # LLM's layers were discarded except for raw OSM tags inherited by display-
     # name match (which made a factor's data source vary run to run) and a
     # `whyItMatters` that was null whenever the names differed — so the plan

@@ -1,4 +1,4 @@
-"""v1.14.0 — the AI composes, the engine measures.
+"""v2.0.0 — the AI composes, the engine measures.
 
 Live failures behind these tests:
   * "Pedestrian footfall" (35% of café/retail) and two other headline factors

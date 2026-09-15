@@ -127,7 +127,7 @@ describe('buildExecutiveSummary', () => {
     expect(ex.claimLevel).toBe('investigation_zone'); // conservative default
   });
 
-  // v1.14.0 — "best of 112 eligible" over a 6.5 beside 8+ map cells read as a
+  // v2.0.0 — "best of 112 eligible" over a 6.5 beside 8+ map cells read as a
   // contradiction; the number on a card is the best of the re-verified
   // shortlist, and the header must say so when the payload carries it.
   it('reports the verified shortlist size when the engine sends it', () => {

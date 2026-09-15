@@ -89,7 +89,7 @@ export interface MCDACriteria {
    * observed_zero (query OK, zero features) vs unavailable (provider failed). */
   dataStatus?: 'observed' | 'observed_zero' | 'unavailable' | string;
   osmQuery?: string;
-  /** v1.14.0 — why this factor is in the analysis, and where it came from. */
+  /** v2.0.0 — why this factor is in the analysis, and where it came from. */
   whyItMatters?: string | null;
   origin?: 'framework' | 'brief' | 'answer' | 'user' | null;
   evidence?: string | null;
@@ -241,17 +241,17 @@ export interface HexGridCell {
   boundary: [number, number][]; // [lat, lng] ring
   /** Per-factor 0-10, direction already applied (higher = more favorable for all). */
   layerScores?: Record<string, number>;
-  /** v1.6.4 marked chosen candidates; v1.14.0 — `score` is ALWAYS the
+  /** v1.6.4 marked chosen candidates; v2.0.0 — `score` is ALWAYS the
    *  screening score (one basis for every cell). A chosen candidate carries
    *  its verified score and final rank alongside, for the tooltip. */
   refinedCandidate?: boolean;
   refinedScore?: number;
   finalRank?: number;
-  /** v1.14.0 — one of the top-K screening cells that were re-verified. */
+  /** v2.0.0 — one of the top-K screening cells that were re-verified. */
   shortlisted?: boolean;
 }
 
-/** v1.14.0 — the ranking basis, as numbers the header can print. */
+/** v2.0.0 — the ranking basis, as numbers the header can print. */
 export interface ShortlistInfo {
   size: number;          // cells re-verified (top-K screening, separation applied)
   verified: number;      // zones that survived to the final ranking
@@ -343,7 +343,7 @@ export interface AnalysisResult {
   /** success | no_viable_site | failed; 'malformed' when the payload had no
    * recognizable state or content. Legacy payloads normalize to 'success'. */
   status?: 'success' | 'no_viable_site' | 'failed' | 'malformed';
-  /** v1.14.0 — how many cells were re-verified and ranked (the basis of the 0–10 on cards). */
+  /** v2.0.0 — how many cells were re-verified and ranked (the basis of the 0–10 on cards). */
   shortlist?: ShortlistInfo;
   jobRef?: string;
   degradationNotes?: string[];

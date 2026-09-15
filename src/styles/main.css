@@ -1583,7 +1583,7 @@ button.spec-dir-toggle:hover { filter: brightness(0.95); }
 .spec-factor-remove:hover { color: #dc2626; }
 .spec-factor-slider { width: 100%; margin: 5px 0 3px; accent-color: var(--blue-600, #2563eb); }
 .spec-factor-meta { font-size: 10px; color: var(--gray-500, #64748b); line-height: 1.4; }
-/* v1.14.0 — factor provenance: the reason on its own line, the origin as a chip */
+/* v2.0.0 — factor provenance: the reason on its own line, the origin as a chip */
 .criterion-why { font-size: 10.5px; color: #475569; line-height: 1.4; padding: 1px 0 3px; }
 .criterion-why em { color: #64748b; }
 .spec-factor-why { font-size: 11px; color: var(--gray-700, #334155); line-height: 1.45; margin-top: 2px; }

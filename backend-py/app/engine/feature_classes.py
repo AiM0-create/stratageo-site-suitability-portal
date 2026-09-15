@@ -1,6 +1,6 @@
 """Feature classes — the closed vocabulary of things the engine can count.
 
-v1.14.0 — the variable framework had two systems and neither could say WHY.
+v2.0.0 — the variable framework had two systems and neither could say WHY.
 The registry (canonical_archetypes.py) installed a fixed template per business
 type; the LLM was briefed with a richer playbook, drafted its own layers with
 raw OSM tags, and then had them discarded. Five recognised business types and
