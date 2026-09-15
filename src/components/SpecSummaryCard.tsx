@@ -119,21 +119,20 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
       {!blocked && composition && (
         <div className={`spec-composition${composition.genericFramework ? ' is-generic' : ''}`}>
           {composition.genericFramework
-            ? <>No standard framework for this business type — the factors below are broad proxies plus what your brief added.
-                {composition.replaced?.length
-                  ? <> Your brief named the real competitors, so <em>{composition.replaced.join(', ')}</em> was dropped.</>
-                  : null}</>
+            ? (composition.replaced?.length
+                ? <>No standard framework for this business type — the factors are built from your brief{composition.replaced.length < 3 ? ', with a broad proxy where the brief said nothing' : ''}.</>
+                : <>No standard framework for this business type — the factors below are broad proxies plus what your brief added.</>)
             : <>Framework: <strong>{composition.frameworkName}</strong>
                 {composition.accepted.length
                   ? <> · {composition.accepted.length} factor{composition.accepted.length > 1 ? 's' : ''} added from your brief</>
                   : null}</>}
-          {composition.rejected.length > 0 && (
+          {/* Only what the customer can act on: things we cannot count from
+              map data. The model's own duplicate / unhinted proposals are
+              engine housekeeping, not a message. */}
+          {composition.rejected.filter(r => r.reason === 'unknown_class').length > 0 && (
             <ul className="spec-composition-rejected">
-              {composition.rejected.map((r, i) => (
-                <li key={i}>
-                  <span className="spec-composition-class">{r.featureClass}</span> — {rejectionLabel(r.reason)}
-                  {r.detail ? <span className="spec-list-sub"> ({r.detail})</span> : null}
-                </li>
+              {composition.rejected.filter(r => r.reason === 'unknown_class').map((r, i) => (
+                <li key={i}><span className="spec-composition-class">{r.featureClass.replace(/_/g, ' ')}</span> — {rejectionLabel(r.reason)}</li>
               ))}
             </ul>
           )}
