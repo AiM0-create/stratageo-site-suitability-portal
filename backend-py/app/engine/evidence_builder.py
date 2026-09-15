@@ -674,8 +674,6 @@ def _data_sources(layer) -> list[str]:
         return ["OpenStreetMap Overpass"]
     if layer.source.provider == "google_places":
         return ["Google Places", "OpenStreetMap (supplement)"]
-    if layer.source.provider == "custom":
-        return ["Custom/Derived"]
     return ["Internal"]
 
 

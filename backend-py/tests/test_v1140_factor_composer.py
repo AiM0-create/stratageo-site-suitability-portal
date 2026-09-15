@@ -368,3 +368,37 @@ class TestPlannerIntegration:
     def test_canonical_weights_include_context(self):
         spec = self._plan([_p("it_parks", evidence="IT professionals")])
         assert "IT / business parks" in spec["canonicalWeights"]
+
+
+# ── v2.1.0 — brand exclusions ("5 km around existing centres") ──────────────
+class TestBrandExclusion:
+    PROMPT = "NOVA IVF expansion in South Bengaluru, 3 zones, with a 5 km exclusion zone around existing NOVA IVF centres"
+
+    def test_parsed_from_the_meeting_prompt(self):
+        from app.engine.deterministic_planner import parse_brand_exclusion
+        assert parse_brand_exclusion(self.PROMPT) == {"brand": "NOVA IVF", "bufferM": 5000}
+        assert parse_brand_exclusion("Find 3 zones for NOVA IVF's next clinic, keep 5 km from existing centres") == {"brand": "NOVA IVF", "bufferM": 5000}
+        assert parse_brand_exclusion("Cafe in Indiranagar, exclude 2 km around our existing outlets") == {"brand": None, "bufferM": 2000}
+        assert parse_brand_exclusion("Gym in Whitefield near the tech parks") is None
+
+    def test_the_llm_stand_in_exclusion_is_dropped(self):
+        """Locally observed: the LLM turned the brand request into amenity=clinic
+        with a 5 km buffer and removed every cell in South Bengaluru."""
+        intent = parse_raw_intent(self.PROMPT)
+        canonical = get_canonical(intent.businessTypeKey)
+        llm = _llm_spec(self.PROMPT, [], biz="IVF clinic")
+        llm["exclusions"] = [
+            {"name": "5 km exclusion around existing NOVA IVF centres",
+             "source": {"provider": "osm", "tags": ["amenity=clinic", "amenity=hospital"]}, "bufferM": 5000},
+            {"name": "railway land", "source": {"provider": "osm", "tags": ["railway=rail"]}, "bufferM": 100},
+        ]
+        llm["routeConstraints"] = [
+            {"name": "Keep 5 km from existing NOVA IVF centres", "targetKeyword": "NOVA IVF", "mode": "drive",
+             "maxMinutes": 10, "maxDistanceM": 5000, "required": True},
+        ]
+        spec = apply_deterministic_plan(llm, intent, canonical, "test", "balanced")
+        assert spec["brandExclusions"] == [{"brand": "NOVA IVF", "bufferM": 5000}]
+        assert [e["name"] for e in spec["exclusions"]] == ["railway land"]
+        assert spec["routeConstraints"] == []          # "keep away" is not "must be within"
+        assert spec["llmSuggestedButNotApplied"][0]["factorName"].startswith("5 km exclusion")
+        SpecV2.model_validate(spec)

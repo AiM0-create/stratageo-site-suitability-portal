@@ -522,7 +522,6 @@ def _run_pipeline(spec, *, river_line: bool = False):
          patch.object(jobs_mod, "fetch_isochrones", fake_fetch_isochrones), \
          patch.object(jobs_mod, "reverse_geocode_name", fake_reverse_geocode), \
          patch.object(jobs_mod, "geocode", fake_geocode), \
-         patch.object(jobs_mod, "critique_analysis", fake_critique), \
          patch.object(results_mod, "write_explanations", fake_write_explanations):
         asyncio.run(jobs_mod._run_analysis(job, spec))
     return job

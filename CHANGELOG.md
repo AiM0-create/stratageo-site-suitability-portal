@@ -4,6 +4,86 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.1.0] — 2026-09-15 — Only the major things
+
+The meeting of 15 September (notes reviewed against v2.0.0) and the owner's
+verdict afterwards: the portal had become "all ideas mixed to form one large
+complex thing". This release keeps the flow — brief → clarify → plan → run →
+zones — and removes everything that was not that flow. Frontend −9,400 lines,
+backend −1,900 lines, no change to what is scored or how.
+
+### From the meeting notes — done
+- **"Priority 1 through 4, not made-up place names."** Zones are titled
+  `Priority N`; the reverse-geocoded locality is a hint ("near Byrasandra"),
+  never the title. (`services/jobs.py`, `areaHint`)
+- **"A 5-kilometre exclusion zone around existing centres."** The NOVA IVF
+  brief was run in the meeting and the zone was silently ignored — the
+  planner only knew named places and coordinates. Now `brandExclusions` is
+  parsed from the brief, the brand is searched in the study area at run time
+  (Places Text Search, results restricted to the padded study bbox because the
+  API's location is a *bias*), every outlet found is masked at the stated
+  distance, and the run says how many it found and removed. Found locally: the
+  LLM had been turning the same sentence into `amenity=clinic` with a 5 km
+  buffer (which removed all 227 cells of South Bengaluru) and, on another
+  phrasing, into a *must-be-within-5-km* route gate (which withheld every
+  zone for being too far from the thing to avoid). Both stand-ins are dropped
+  when a brand exclusion is parsed. When the zone legitimately empties the
+  area, the no-viable-site reason now names the exclusion that did it instead
+  of blaming "water and land-safety masks".
+- **"Who mostly comes in?" is gone.** It arrived on every brief — café,
+  clinic, IVF centre alike — and never sharpened one. `customer_mode` is no
+  longer askable; the business type decides what is weighed. Three questions
+  is the ceiling: where, what kind, and one more only when the brief hints at
+  it (keep away / must be near / what we can't check). The label-family guard
+  that existed only for that question was deleted with it.
+- **"Explain the refined score and overall suitability."** Done in v2.0.0 (one
+  map basis, "best of 12 re-verified"); kept.
+- **"Strip away non-essential features."** Below.
+
+### Frontend — what was removed
+- The second, client-side analysis pipeline (demo mode): `analysisService`,
+  `osmService`, `placesService`, `promptParser`, `mcdaEngine`, `sectorTemplates`,
+  `intentSchema/Validator`, `llmIntentExtractor`, `businessClassifier`,
+  `keywordOntology`, `domainSignalExtractor`, `contextResolver`, `profileBuilder`,
+  `radiusInference`, `spatialBufferEngine`, `userPointManager`,
+  `feasibilityValidator`, `benchmarks`, `csvParser`, `demoScenarios`, `aiClient`.
+  `VITE_APP_MODE`, `VITE_AI_BACKEND_URL` and `VITE_CONVERSATIONAL_MODE` are gone;
+  the portal has one backend.
+- Post-run weight sliders and the client-side re-ranking — an unverified second
+  ranking on the same screen as the verified one. Weights are edited on the
+  plan card, before the run.
+- CSV candidate upload, the guided tour, the methodology dialog, the
+  diagnostics panel, the sector picker, the memory chips, the prompt-writing
+  guide, the dark-mode toggle, the demo/live badge.
+- `ResultsDrawer` 2,024 → 300 lines: the answer, the map controls, the zones
+  (each with its factors, the reason each is there, what was observed, the
+  next check), and one collapsed notices list. Gone: methodology comparison,
+  benchmark comparison, conversion CTA, copy-summary, evidence-trail viewer,
+  critique prose, weight audit, data-sufficiency grid, constraint-verification
+  table, assumptions panel, comparison chart.
+- `SpecSummaryCard` 717 → 220 lines: what and where, what we assumed, the
+  factors with weight/direction/reason, what is kept out, Run. Gone: scenario
+  chips, plan-card questions, misleading-variables list, constraints table,
+  validation/failure-risk prose, planner-preview scope, H3 level picker.
+- `App.tsx` 2,101 → 420 lines. The 770-line PDF export moved verbatim to
+  `services/pdfReport.ts` (minus its benchmark page).
+
+### Backend — what was removed
+- The LLM critic (`services/critic.py`): a second model's opinion of the
+  first. The deterministic `reliability_critic` checks everything checkable
+  and stays.
+- Sandboxed custom layers (`engine/sandbox.py`, `CustomSource`): Python-in-a-
+  spec, never used, a security surface.
+- The duplicate archetype playbook (`engine/archetypes.py`, 654 lines): it
+  briefed the LLM with 14 playbooks the engine never ran; the deterministic
+  planner overrode every field it influenced.
+
+### Housekeeping
+- `vitest` 4 → 5 (GHSA-82fw-gwwq-j7x9, dev-only); `npm audit` and
+  `pip-audit` clean.
+- README rewritten to describe the portal as it is; `.env.example` and the
+  Pages workflow carry only the two variables the build uses.
+
 ## [2.0.0] — 2026-09-15 — The AI composes, the engine measures
 
 The review pack of 15 September put the variable framework on the table and

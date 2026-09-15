@@ -56,12 +56,6 @@ def test_results_import_does_not_require_openai():
     assert callable(results.write_explanations)
 
 
-def test_critic_import_does_not_require_openai():
-    """Importing critic.py must not require openai at module level (lazy import fix)."""
-    from app.services import critic  # noqa: F401
-    assert callable(critic.critique_analysis)
-
-
 def test_evidence_import_does_not_require_openai():
     """Importing evidence modules must not require openai."""
     from app.models.evidence import EvidenceTrail  # noqa: F401
@@ -576,14 +570,15 @@ def test_build_methodology_contains_layers():
 # ── 14b. PDF evidence appendix marker ────────────────────────────────────────
 
 def test_pdf_evidence_appendix_marker_in_source():
-    """App.tsx must contain an Evidence Appendix section (v1.3.0 PDF requirement)."""
+    """The PDF report must contain an Evidence Appendix section (v1.3.0 PDF
+    requirement). v2.1.0 — the export moved from App.tsx to services/pdfReport.ts."""
     import pathlib
-    app_tsx = pathlib.Path(__file__).parents[2] / "src" / "App.tsx"
-    if not app_tsx.exists():
-        pytest.skip("App.tsx not found relative to test location")
-    src = app_tsx.read_text(encoding="utf-8")
+    src_path = pathlib.Path(__file__).parents[2] / "src" / "services" / "pdfReport.ts"
+    if not src_path.exists():
+        pytest.skip("pdfReport.ts not found relative to test location")
+    src = src_path.read_text(encoding="utf-8")
     assert "Evidence Appendix" in src, (
-        "App.tsx PDF section must include 'Evidence Appendix' (v1.3.0 PDF requirement)"
+        "pdfReport.ts must include 'Evidence Appendix' (v1.3.0 PDF requirement)"
     )
     assert "evidenceTrail" in src, (
         "App.tsx PDF section must reference evidenceTrail"

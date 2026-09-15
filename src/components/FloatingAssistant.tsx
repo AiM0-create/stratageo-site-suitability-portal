@@ -2,15 +2,18 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AnalysisStatus } from '../types';
-import type { WorkingMemory } from '../types/session';
 import type { SpecV2, AnalysisPhase, ClarifyResponse, ClarificationAnswer } from '../types/chat';
-import { config } from '../config';
-import { demoScenarios } from '../data/demoScenarios';
 import { useAuth } from '../contexts/AuthContext';
 import { MAX_PROMPTS_PER_USER } from '../config/firebase';
 import { SpecSummaryCard } from './SpecSummaryCard';
 import { ClarificationCard } from './ClarificationCard';
 
+/**
+ * v2.1.0 — the conversation panel, reduced to the four things it does:
+ * show the exchange, ask the clarifying questions, show the plan, run it.
+ * Gone: CSV upload, the sector picker, demo scenario chips, the memory chips,
+ * the prompt-writing guide. One input, one button.
+ */
 interface FloatingAssistantProps {
   messages: Array<{ role: 'user' | 'assistant'; text: string }>;
   isLoading: boolean;
@@ -21,158 +24,86 @@ interface FloatingAssistantProps {
   hasResults: boolean;
   onToggleResults: () => void;
   drawerOpen: boolean;
-  resultCount: number;
-  onResultCountChange: (count: number) => void;
-  onCSVUpload: (file: File) => void;
-  onClearCSV: () => void;
-  csvPointCount: number;
-  memory: WorkingMemory;
   onNewChat: () => void;
-  onClearMemoryField: (field: keyof WorkingMemory) => void;
   sessionTitle: string;
-  // ─── Conversational mode (v1.0.1) ───
-  chatSpec?: SpecV2 | null;
-  chatSpecStatus?: 'empty' | 'draft' | 'complete';
-  /** v1.13.1 — a clarification turn awaiting answers; rendered in place of the plan card. */
-  clarification?: ClarifyResponse | null;
-  onClarificationSubmit?: (answers: ClarificationAnswer[]) => void;
-  /** v1.13.1 — this brief was clarified at the front door. */
-  briefClarified?: boolean;
-  chatReady?: boolean;
-  /** Staged flow: the plan card stays hidden while the conversation is exploratory */
-  chatStage?: 'chat' | 'framework' | 'ready';
-  isExecuting?: boolean;
-  onConfirmExecute?: () => void;
-  onSpecEdit?: (updated: SpecV2) => void;
-  /** v1.4.1 — cancel a running analysis; shown alongside the progress bar. */
-  onCancelAnalysis?: () => void;
-  /** v1.4.2 — retry the last failed analysis with the same spec, no re-typing. */
-  canRetry?: boolean;
-  onRetryAnalysis?: () => void;
-  /** v1.4.6 — drives the always-visible sticky Start-analysis action bar. */
-  analysisPhase?: AnalysisPhase;
+  chatSpec: SpecV2 | null;
+  chatSpecStatus: 'empty' | 'draft' | 'complete';
+  clarification: ClarifyResponse | null;
+  onClarificationSubmit: (answers: ClarificationAnswer[]) => void;
+  briefClarified: boolean;
+  chatReady: boolean;
+  chatStage: 'chat' | 'framework' | 'ready';
+  isExecuting: boolean;
+  onConfirmExecute: () => void;
+  onSpecEdit: (updated: SpecV2) => void;
+  onCancelAnalysis: () => void;
+  canRetry: boolean;
+  onRetryAnalysis: () => void;
+  analysisPhase: AnalysisPhase;
 }
 
-const SCENARIOS = [
-  ...demoScenarios.map(s => ({ label: s.label, prompt: `${s.businessType} in ${s.city}` })),
-  { label: 'Clinic in Hyderabad', prompt: 'Clinic in Hyderabad' },
-  { label: 'Retail in Pune', prompt: 'Retail Store in Pune' },
+const EXAMPLES = [
+  'Cafe in Indiranagar, Bengaluru — 3 zones',
+  'Premium restaurant in Bandra, Mumbai, avoid areas with many restaurants',
+  'Gym for IT professionals near the tech parks in Whitefield, Bengaluru',
 ];
 
 export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
-  messages,
-  isLoading,
-  analysisStatus,
-  error,
-  onRunAnalysis,
-  onDismissError,
-  hasResults,
-  onToggleResults,
-  drawerOpen,
-  resultCount,
-  onCSVUpload,
-  onClearCSV,
-  csvPointCount,
-  onResultCountChange,
-  memory,
-  onNewChat,
-  onClearMemoryField,
-  sessionTitle,
-  chatSpec,
-  chatSpecStatus = 'empty',
-  clarification = null,
-  onClarificationSubmit,
-  briefClarified = false,
-  chatReady = false,
-  chatStage = 'chat',
-  isExecuting = false,
-  onConfirmExecute,
-  onSpecEdit,
-  onCancelAnalysis,
-  canRetry = false,
-  onRetryAnalysis,
-  analysisPhase,
+  messages, isLoading, analysisStatus, error, onRunAnalysis, onDismissError,
+  hasResults, onToggleResults, drawerOpen, onNewChat, sessionTitle,
+  chatSpec, chatSpecStatus, clarification, onClarificationSubmit, briefClarified,
+  chatReady, chatStage, isExecuting, onConfirmExecute, onSpecEdit,
+  onCancelAnalysis, canRetry, onRetryAnalysis, analysisPhase,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
   const [input, setInput] = useState('');
-  const [showSectors, setShowSectors] = useState(false);
-  const [showPromptGuide, setShowPromptGuide] = useState(false);
-  const [selectedSector, setSelectedSector] = useState('');
-  const [city, setCity] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const csvInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-grow the input with content (up to ~6 lines), shrink back when cleared
-  const autoGrow = () => {
+  useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
-  };
-  useEffect(autoGrow, [input]);
+  }, [input]);
 
-  // v1.6.1 — per-customer allotment (falls back to the global default for
-  // accounts without an admin-granted maxPrompts)
   const promptCap = user?.maxPrompts ?? MAX_PROMPTS_PER_USER;
   const promptsLeft = user ? (user.isAdmin ? Infinity : Math.max(0, promptCap - user.promptsUsed)) : 0;
 
   useEffect(() => {
-    if (expanded && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isLoading, expanded]);
+    if (expanded && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, isLoading, expanded, clarification, chatSpec]);
 
-  const handleSubmit = () => {
+  const submit = () => {
     const text = input.trim();
     if (!text) return;
     onRunAnalysis(text);
     setInput('');
   };
 
-  const handleStructuredSubmit = () => {
-    if (!selectedSector || !city.trim()) return;
-    const label = config.sectors.find(s => s.id === selectedSector)?.label || selectedSector;
-    onRunAnalysis(`${label} in ${city.trim()}`);
-    setShowSectors(false);
-    setSelectedSector('');
-    setCity('');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
+  const showPlan = chatSpec && !isLoading && chatStage !== 'chat' && !clarification;
+  const showRun = analysisPhase === 'spec_ready' && chatSpec && !isLoading && !isExecuting
+    && chatSpec.feasibility?.status !== 'not_feasible';
 
   return (
     <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}${drawerOpen ? ' assistant-drawer-shift' : ''}`}>
-      {/* Header bar */}
       <div className="assistant-header" onClick={() => setExpanded(!expanded)}>
         <div className="assistant-header-left">
           <div className="assistant-indicator" />
-          <span className="assistant-title">{memory.lastAnalysisTimestamp ? sessionTitle : 'Site Suitability Assistant'}</span>
+          <span className="assistant-title">{messages.length ? sessionTitle : 'Site Suitability Assistant'}</span>
         </div>
         <div className="assistant-header-right">
           {messages.length > 0 && (
-            <button
-              className="new-chat-btn"
-              onClick={(e) => { e.stopPropagation(); onNewChat(); }}
-              title="New chat"
-            >
+            <button className="new-chat-btn" onClick={(e) => { e.stopPropagation(); onNewChat(); }} title="New analysis">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </button>
           )}
           {hasResults && (
-            <button
-              className="assistant-results-toggle"
-              onClick={(e) => { e.stopPropagation(); onToggleResults(); }}
-              title={drawerOpen ? 'Hide results' : 'Show results'}
-            >
+            <button className="assistant-results-toggle" onClick={(e) => { e.stopPropagation(); onToggleResults(); }} title={drawerOpen ? 'Hide results' : 'Show results'}>
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
               </svg>
@@ -188,92 +119,23 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
 
       {expanded && (
         <>
-          {/* Conversation area */}
           <div className="assistant-body" ref={scrollRef}>
             {messages.length === 0 && !isLoading && (
               <div className="assistant-welcome">
-                <p className="assistant-welcome-text" style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>
-                  AI-Powered Site Suitability Analysis
+                <p className="assistant-welcome-text" style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b', marginBottom: 4 }}>
+                  Where should this business go?
                 </p>
-                <p className="assistant-welcome-desc" style={{ fontSize: '12px', marginBottom: '8px', color: '#64748b', lineHeight: '1.5' }}>
-                  Describe your business, location, and constraints in natural language. We score real locations using Google Places and OpenStreetMap data with multi-criteria decision analysis.
+                <p className="assistant-welcome-desc" style={{ fontSize: '12px', marginBottom: 8, color: '#64748b', lineHeight: 1.5 }}>
+                  Say what you are opening and where. We ask what we need, agree the factors with you, then score the area from map data.
                 </p>
-
-                {/* Prompt limit reminder for non-admin users */}
                 {user && !user.isAdmin && (
                   <div className="assistant-prompt-reminder">
-                    <span className="assistant-prompt-reminder-icon">💡</span>
-                    <span>You have <strong>{promptsLeft} of {promptCap} queries</strong> remaining. Make each one count — <button className="assistant-guide-link" onClick={() => setShowPromptGuide(!showPromptGuide)}>see tips for better results</button>.</span>
+                    <span>You have <strong>{promptsLeft} of {promptCap} analyses</strong> left.</span>
                   </div>
                 )}
-
-                {/* Prompt guide — shown on click */}
-                {showPromptGuide && (
-                  <div className="assistant-prompt-guide">
-                    <div className="assistant-guide-header">
-                      <strong>How to write better site suitability queries</strong>
-                      <button className="assistant-guide-close" onClick={() => setShowPromptGuide(false)}>&times;</button>
-                    </div>
-                    <div className="assistant-guide-body">
-                      <div className="assistant-guide-item">
-                        <span className="assistant-guide-do">✅</span>
-                        <div>
-                          <strong>Be specific about business type</strong>
-                          <p>"Premium co-working space" not just "office"</p>
-                        </div>
-                      </div>
-                      <div className="assistant-guide-item">
-                        <span className="assistant-guide-do">✅</span>
-                        <div>
-                          <strong>Name a city or area</strong>
-                          <p>"in Bengaluru HSR Layout" or "near 12.97, 77.59"</p>
-                        </div>
-                      </div>
-                      <div className="assistant-guide-item">
-                        <span className="assistant-guide-do">✅</span>
-                        <div>
-                          <strong>Add spatial constraints</strong>
-                          <p>"near metro stations", "away from industrial zones", "not in Whitefield"</p>
-                        </div>
-                      </div>
-                      <div className="assistant-guide-item">
-                        <span className="assistant-guide-do">✅</span>
-                        <div>
-                          <strong>Mention what matters for the site</strong>
-                          <p>"high foot traffic", "good road access", "low competition"</p>
-                        </div>
-                      </div>
-                      <div className="assistant-guide-item">
-                        <span className="assistant-guide-dont">❌</span>
-                        <div>
-                          <strong>Avoid vague prompts</strong>
-                          <p>"best place for business" → too generic, no location</p>
-                        </div>
-                      </div>
-                      <div className="assistant-guide-example">
-                        <strong>Great example:</strong> "Cold storage warehouse near Gurgaon, close to NH-48, away from residential areas, needs truck access and power infrastructure"
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <p className="assistant-welcome-examples" style={{ fontSize: '11px', color: '#64748b', margin: '0 0 8px', lineHeight: '1.6' }}>
-                  Try: "EV charging station in Delhi NCR near highways, away from existing chargers"
-                  <br />
-                  or: "Premium retail store in Mumbai BKC area, high foot traffic"
-                  <br />
-                  or: "Solar farm near 26.9, 70.9 — flat terrain, away from settlements"
-                </p>
                 <div className="assistant-chips">
-                  {SCENARIOS.map(s => (
-                    <button
-                      key={s.label}
-                      className="assistant-chip"
-                      onClick={() => onRunAnalysis(s.prompt)}
-                      disabled={isLoading}
-                    >
-                      {s.label}
-                    </button>
+                  {EXAMPLES.map(p => (
+                    <button key={p} className="assistant-chip" onClick={() => onRunAnalysis(p)} disabled={isLoading}>{p}</button>
                   ))}
                 </div>
               </div>
@@ -283,38 +145,24 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               <div key={i} className={`assistant-msg assistant-msg-${msg.role}`}>
                 {msg.role === 'assistant' && <div className="assistant-avatar" />}
                 <div className={`assistant-bubble assistant-bubble-${msg.role}`}>
-                  {msg.role === 'assistant' ? (
-                    <div className="assistant-markdown">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    msg.text
-                  )}
+                  {msg.role === 'assistant'
+                    ? <div className="assistant-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown></div>
+                    : msg.text}
                 </div>
               </div>
             ))}
 
-            {/* v1.13.1 — the clarification turn sits exactly where the plan
-                card will: after the brief, before anything is spent. The plan
-                card is not shown while questions are open. */}
-            {config.isConversationalMode && clarification && !isLoading && onClarificationSubmit && (
-              <ClarificationCard
-                clarification={clarification}
-                onSubmit={onClarificationSubmit}
-                disabled={isExecuting}
-              />
+            {clarification && !isLoading && (
+              <ClarificationCard clarification={clarification} onSubmit={onClarificationSubmit} disabled={isExecuting} />
             )}
 
-            {/* Conversational mode: agreed analysis plan + confirm chip.
-                Hidden during the exploratory "chat" stage — the framework only
-                appears once the user asks to move ahead. */}
-            {config.isConversationalMode && chatSpec && !isLoading && chatStage !== 'chat' && !clarification && (
+            {showPlan && (
               <SpecSummaryCard
                 spec={chatSpec}
                 specStatus={chatSpecStatus}
                 readyToExecute={chatReady}
                 isExecuting={isExecuting}
-                onConfirmExecute={onConfirmExecute ?? (() => {})}
+                onConfirmExecute={onConfirmExecute}
                 onSpecEdit={onSpecEdit}
                 onSendMessage={onRunAnalysis}
                 hideClarifyingQuestions={briefClarified}
@@ -331,16 +179,8 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                       <div className="assistant-progress-fill" style={{ width: `${analysisStatus.progress}%` }} />
                     </div>
                     <div className="assistant-progress-pct">{Math.round(analysisStatus.progress)}%</div>
-                    {/* v1.4.1 — always-available recovery: an analysis can legitimately
-                        take a while on a large study area, but the user must never be
-                        stuck waiting with no way out. */}
-                    {isExecuting && onCancelAnalysis && (
-                      <button
-                        type="button"
-                        className="assistant-cancel-btn"
-                        onClick={() => onCancelAnalysis()}
-                        title="Stop this analysis and unlock the chat"
-                      >
+                    {isExecuting && (
+                      <button type="button" className="assistant-cancel-btn" onClick={onCancelAnalysis} title="Stop this analysis">
                         Cancel analysis
                       </button>
                     )}
@@ -355,179 +195,40 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                 <button onClick={onDismissError} className="assistant-error-dismiss">&times;</button>
               </div>
             )}
-            {canRetry && onRetryAnalysis && !isLoading && (
+            {canRetry && !isLoading && (
               <div className="assistant-retry-row">
-                <button
-                  type="button"
-                  className="assistant-retry-btn"
-                  onClick={() => onRetryAnalysis()}
-                >
-                  Retry analysis
-                </button>
+                <button type="button" className="assistant-retry-btn" onClick={onRetryAnalysis}>Retry analysis</button>
               </div>
             )}
           </div>
 
-          {/* v1.4.6 — sticky Start-analysis action bar. Whenever a valid spec
-              is ready (phase spec_ready), a clearly visible Start button lives
-              HERE, outside the scrollable conversation body, so it can never
-              disappear behind internal scroll (the SpecSummaryCard's own
-              button scrolls with the chat). Same execution path as the card:
-              onConfirmExecute() directly — never a new /api/v2/chat turn,
-              never the click event as an argument. */}
-          {analysisPhase === 'spec_ready' && chatSpec && !isLoading && !isExecuting
-            && chatSpec.feasibility?.status !== 'not_feasible' && onConfirmExecute && (
+          {/* The Run button lives outside the scrolling body so it can never
+              disappear behind internal scroll. Same path as the card's button. */}
+          {showRun && (
             <div className="assistant-action-bar">
-              <button
-                type="button"
-                className="assistant-start-btn"
-                onClick={() => onConfirmExecute()}
-              >
-                Run analysis
-              </button>
+              <button type="button" className="assistant-start-btn" onClick={onConfirmExecute}>Run analysis</button>
             </div>
           )}
 
-          {/* Structured input toggle */}
-          {showSectors && (
-            <div className="assistant-structured">
-              <div className="assistant-sector-grid">
-                {config.sectors.map(s => (
-                  <button
-                    key={s.id}
-                    className={`assistant-sector ${selectedSector === s.id ? 'active' : ''}`}
-                    onClick={() => setSelectedSector(s.id)}
-                  >
-                    <span>{s.icon}</span>
-                    <span>{s.label}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="assistant-structured-row">
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="Target city..."
-                  className="assistant-input-field"
-                  list="city-list"
-                />
-                <datalist id="city-list">
-                  {config.featuredCities.map(c => <option key={c.name} value={c.name} />)}
-                </datalist>
-                <button
-                  onClick={handleStructuredSubmit}
-                  disabled={!selectedSector || !city.trim() || isLoading}
-                  className="assistant-send"
-                >
-                  Analyze
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* v1.1.0: result count is inferred from the prompt by the deterministic
-              RawIntent parser — no dropdown needed in the chat UI.
-              Count editing remains available in SpecSummaryCard (advanced). */}
-
-          {/* Context chips — show active memory items */}
-          {memory.lastAnalysisTimestamp && (
-            <div className="context-chips">
-              {memory.businessType && (
-                <span className="context-chip">
-                  {memory.businessType}
-                  <button className="context-chip-clear" onClick={() => onClearMemoryField('businessType')} title="Clear">&times;</button>
-                </span>
-              )}
-              {memory.city && (
-                <span className="context-chip">
-                  {memory.city}
-                  <button className="context-chip-clear" onClick={() => onClearMemoryField('city')} title="Clear">&times;</button>
-                </span>
-              )}
-              {memory.constraints.length > 0 && (
-                <span className="context-chip">
-                  {memory.constraints.length} constraint{memory.constraints.length !== 1 ? 's' : ''}
-                  <button className="context-chip-clear" onClick={() => onClearMemoryField('constraints')} title="Clear">&times;</button>
-                </span>
-              )}
-              {csvPointCount > 0 && (
-                <span className="context-chip">
-                  {csvPointCount} CSV pt{csvPointCount !== 1 ? 's' : ''}
-                  <button className="context-chip-clear" onClick={onClearCSV} title="Clear CSV">&times;</button>
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* CSV chip (shown only when no analysis yet) */}
-          {csvPointCount > 0 && !memory.lastAnalysisTimestamp && (
-            <div className="csv-chip">
-              <span className="csv-chip-icon">&#128205;</span>
-              <span>{csvPointCount} location{csvPointCount !== 1 ? 's' : ''} loaded</span>
-              <button className="csv-chip-clear" onClick={onClearCSV} title="Clear CSV data">&times;</button>
-            </div>
-          )}
-
-          {/* Remaining prompts badge (shown after first message for non-admins) */}
           {user && !user.isAdmin && messages.length > 0 && (
             <div className="assistant-prompts-remaining">
-              <span>{promptsLeft} of {promptCap} queries left</span>
+              <span>{promptsLeft} of {promptCap} analyses left</span>
               {promptsLeft <= 1 && promptsLeft > 0 && <span className="assistant-prompts-warning"> — last one!</span>}
             </div>
           )}
 
-          {/* Input bar */}
           <div className="assistant-input">
-            <button
-              className="assistant-mode-btn"
-              onClick={() => setShowSectors(!showSectors)}
-              title={showSectors ? 'Free text input' : 'Pick business type'}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
-                {showSectors
-                  ? <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 15.75 7.5-7.5 7.5 7.5" />
-                  : <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
-                }
-              </svg>
-            </button>
-            {/* CSV upload button */}
-            <input
-              ref={csvInputRef}
-              type="file"
-              accept=".csv"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) onCSVUpload(file);
-                e.target.value = '';
-              }}
-            />
-            <button
-              className="csv-upload-btn"
-              onClick={() => csvInputRef.current?.click()}
-              title="Upload CSV with lat/lon locations"
-              disabled={isLoading}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-              </svg>
-            </button>
             <textarea
               ref={textareaRef}
               rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={csvPointCount > 0 ? "e.g. Cafe in Bengaluru, not within 3km of these locations" : "e.g. Cafe in Bengaluru near metro, low competition"}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
+              placeholder="e.g. Cafe in Indiranagar, Bengaluru — 3 zones"
               className="assistant-text-input"
               disabled={isLoading}
             />
-            <button
-              onClick={handleSubmit}
-              disabled={isLoading || !input.trim()}
-              className="assistant-send"
-            >
+            <button onClick={submit} disabled={isLoading || !input.trim()} className="assistant-send" aria-label="Send">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-sm">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
               </svg>

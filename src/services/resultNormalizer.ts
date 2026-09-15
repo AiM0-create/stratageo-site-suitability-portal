@@ -52,6 +52,7 @@ function normalizeLocation(raw: unknown, index: number, warnings: string[]): Loc
   out.lat = lat;
   out.lng = lng;
   out.name = asStr(raw.name) || `Zone-${index + 1}`;
+  out.areaHint = asStr(raw.areaHint) || null;
   if (!Number.isFinite(Number(raw.mcda_score))) {
     warnings.push(`Candidate "${out.name}": missing score — shown as 0.0 (incomplete).`);
     out._incomplete = true;

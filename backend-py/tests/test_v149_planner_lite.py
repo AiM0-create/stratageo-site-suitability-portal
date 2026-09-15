@@ -269,7 +269,6 @@ def _run_pipeline(spec: SpecV2, *, healthy_places: bool = True):
          patch.object(jobs_mod, "evaluate_route_constraint", fake_route_eval), \
          patch.object(jobs_mod, "fetch_railway_lines", fake_rail), \
          patch.object(jobs_mod, "reverse_geocode_name", fake_rgeo), \
-         patch.object(jobs_mod, "critique_analysis", fake_critique), \
          patch.object(results_mod, "write_explanations", fake_explain):
         asyncio.run(jobs_mod._run_analysis(job, spec))
     return job, spies

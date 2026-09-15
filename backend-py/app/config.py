@@ -568,7 +568,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "2.0.0"
+APP_VERSION     = "2.1.0"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -583,7 +583,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "The AI composes, the engine measures"
+RELEASE_NAME    = "Only the major things"
 
 
 class Settings(BaseSettings):
@@ -668,7 +668,6 @@ class Settings(BaseSettings):
     critic_enabled: bool = True
 
     # ── Safety / abuse guards ─────────────────────────────────────────────────
-    sandbox_enabled: bool = False
     rate_limit_per_min: int = 20
     rate_limit_global_per_min: int = 200
     max_request_bytes: int = 256 * 1024

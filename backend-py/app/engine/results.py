@@ -69,8 +69,6 @@ def _catchment_label(layer) -> str:
 
 
 def _evidence_basis(detail: dict, raw: float, provider: str) -> str:
-    if provider == "custom":
-        return "ai-generated"
     if provider == "google_places":
         return "google-corroborated"
     if raw <= 0:
@@ -213,7 +211,7 @@ def build_location(
             # (real OSM/Google counts were showing as "AI").
             "evidenceBasis": _evidence_basis(d, raw, layer.source.provider),
             "lowConfidenceProxy": (
-                layer.confidence == "low" or layer.source.provider == "custom"
+                layer.confidence == "low"
             ),
             **({"comparative": comparative} if comparative else {}),
             **({"scoringCurve": "target_band"} if _is_band else {}),

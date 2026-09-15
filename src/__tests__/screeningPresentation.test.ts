@@ -4,8 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  topEvidenceReasons, keyRisk, computeRankDeltas,
-  buildExecutiveSummary, buildMethodologyComparison, buildCopySummary,
+  topEvidenceReasons, keyRisk, buildExecutiveSummary,
   topFactorSignals,
 } from '../services/screeningPresentation';
 import type { AnalysisResult, LocationData } from '../types';
@@ -67,26 +66,6 @@ describe('keyRisk', () => {
   });
 });
 
-describe('computeRankDeltas (§8.3)', () => {
-  const A = loc('A', 8), B = loc('B', 7), C = loc('C', 6);
-  it('tracks movement between original and reweighted lists', () => {
-    const reweighted = [loc('B', 8.2), loc('A', 7.1), loc('C', 6.5)];
-    const d = computeRankDeltas([A, B, C], reweighted);
-    expect(d['B']).toEqual({ prevRank: 2, newRank: 1, moved: 1 });
-    expect(d['A']).toEqual({ prevRank: 1, newRank: 2, moved: -1 });
-    expect(d['C'].moved).toBe(0);
-  });
-  it('marks zones absent from the original shortlist as newly introduced', () => {
-    const d = computeRankDeltas([A, B], [loc('NEW', 9), loc('A', 8), loc('B', 7)]);
-    expect(d['NEW'].prevRank).toBeNull();
-    expect(d['NEW'].moved).toBeNull();
-  });
-  it('excluded zones never get ranks', () => {
-    const d = computeRankDeltas([A], [loc('A', 8), loc('X', 9, [], { excluded: true })]);
-    expect(d['X']).toBeUndefined();
-  });
-});
-
 const res = (over: Partial<AnalysisResult> & Record<string, unknown> = {}): AnalysisResult => ({
   summary: '', business_type: 'organic grocery store', target_location: 'Bengaluru',
   methodology: '', spec: {} as any, locations: [], grounding_sources: [],
@@ -136,57 +115,6 @@ describe('buildExecutiveSummary', () => {
   });
 });
 
-describe('buildMethodologyComparison (§9)', () => {
-  const withFactors = (names: string[], scale: string | null, biz = 'organic grocery store') =>
-    res({
-      business_type: biz,
-      dataQuality: names.map(n => ({ name: n, provider: 'osm', weight: 0.2, featureCount: 5, lowCoverage: false, nonDiscriminating: false })),
-      ...(scale ? { analysisIntelligence: { spatialScale: scale } } : {}),
-    });
-
-  it('reports retained / added / removed criteria and the scale change', () => {
-    const prev = withFactors(['Residential demand', 'Competition'], 'micro_market');
-    const next = withFactors(['Residential demand', 'Competition', 'Arterial connectivity'], 'metro_region');
-    const cmp = buildMethodologyComparison(prev, next)!;
-    expect(cmp.retained).toEqual(['Residential demand', 'Competition']);
-    expect(cmp.added).toEqual(['Arterial connectivity']);
-    expect(cmp.removed).toEqual([]);
-    expect(cmp.scaleChange).toEqual({ from: 'micro_market', to: 'metro_region' });
-  });
-
-  it('returns null for a different business or no previous run', () => {
-    expect(buildMethodologyComparison(null, withFactors(['A'], null))).toBeNull();
-    expect(buildMethodologyComparison(
-      withFactors(['A'], null, 'gym'), withFactors(['A'], null, 'cafe'),
-    )).toBeNull();
-  });
-
-  it('returns null when nothing actually changed', () => {
-    const a = withFactors(['A', 'B'], 'locality');
-    expect(buildMethodologyComparison(a, withFactors(['A', 'B'], 'locality'))).toBeNull();
-  });
-});
-
-describe('buildCopySummary (§7 CTA)', () => {
-  it('contains only computed values, never the raw prompt', () => {
-    const zones = [
-      loc('Zone One', 7.5, [], { screeningVerdict: 'Priority', nextValidation: ['Verify rent'] }),
-      loc('Zone Two', 6.9, [], { screeningVerdict: 'Promising' }),
-    ];
-    const text = buildCopySummary(res({ jobRef: 'abc12345', unifiedConfidence: { level: 'Medium', reason: '', components: {} } }), zones);
-    expect(text).toContain('organic grocery store');
-    expect(text).toContain('1. Zone One — 7.5/10 [Priority]');
-    expect(text).toContain('Verify rent');
-    expect(text).toContain('abc12345');
-    expect(text).toContain('not verified properties');
-  });
-});
-
-// v1.11.2 — the scannable projection behind the sidebar's factor bars.
-// Live feedback: "still a lot of info which I really have to read to
-// understand what's going on". Same criteria the prose was built from,
-// reduced to {label, score, tone} so the UI can draw a bar instead of a
-// sentence the user has to parse word by word.
 describe('topFactorSignals (v1.11.2 scannable drivers)', () => {
   it('orders by weighted contribution and caps at n', () => {
     const signals = topFactorSignals(loc('Z', 7, [

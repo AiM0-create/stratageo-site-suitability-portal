@@ -150,32 +150,3 @@ class TestRedundantAnchorGuard:
             named_layer("L2", "Competition", 40, {"type": "euclidean", "meters": 800}),
         ]))
         assert len(spec.layers) == 2
-
-
-class TestSandboxValidator:
-    def test_rejects_disallowed_import(self):
-        from app.engine.sandbox import validate_snippet, SandboxValidationError
-        with pytest.raises(SandboxValidationError):
-            validate_snippet("import os\ndef compute(hexes, pois): return {}")
-
-    def test_rejects_banned_names(self):
-        from app.engine.sandbox import validate_snippet, SandboxValidationError
-        with pytest.raises(SandboxValidationError):
-            validate_snippet("def compute(hexes, pois): return eval('{}')")
-
-    def test_rejects_dunder_access(self):
-        from app.engine.sandbox import validate_snippet, SandboxValidationError
-        with pytest.raises(SandboxValidationError):
-            validate_snippet("def compute(hexes, pois): return hexes.__class__")
-
-    def test_requires_compute(self):
-        from app.engine.sandbox import validate_snippet, SandboxValidationError
-        with pytest.raises(SandboxValidationError):
-            validate_snippet("x = 1")
-
-    def test_accepts_clean_snippet(self):
-        from app.engine.sandbox import validate_snippet
-        validate_snippet(
-            "import math\ndef compute(hexes, pois):\n"
-            "    return {h['h3']: math.sqrt(2) for h in hexes}"
-        )

@@ -1584,6 +1584,7 @@ button.spec-dir-toggle:hover { filter: brightness(0.95); }
 .spec-factor-slider { width: 100%; margin: 5px 0 3px; accent-color: var(--blue-600, #2563eb); }
 .spec-factor-meta { font-size: 10px; color: var(--gray-500, #64748b); line-height: 1.4; }
 /* v2.0.0 — factor provenance: the reason on its own line, the origin as a chip */
+.drawer-loc-hint { font-weight: 400; font-size: 11px; color: #64748b; }
 .criterion-why { font-size: 10.5px; color: #475569; line-height: 1.4; padding: 1px 0 3px; }
 .criterion-why em { color: #64748b; }
 .spec-factor-why { font-size: 11px; color: var(--gray-700, #334155); line-height: 1.45; margin-top: 2px; }
@@ -1891,3 +1892,19 @@ button.spec-dir-toggle:hover { filter: brightness(0.95); }
   padding: 3px 8px; border-radius: 6px; border: 1px solid var(--red-600); background: #fff;
   color: var(--red-700); font-size: 11px; font-weight: 600; cursor: pointer;
 }
+
+/* ── v2.1.0 — lean results panel ─────────────────────────────────────── */
+.exec-header { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 12.5px; color: #0c4a6e; line-height: 1.5; }
+.drawer-claim-note { font-size: 11px; color: var(--gray-500, #64748b); margin: 0 0 8px; }
+.withheld-list { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: #7f1d1d; }
+.drawer-next-check { font-size: 11px; color: #0c4a6e; background: #f0f9ff; border-top: 1px solid #e0f2fe; padding: 5px 12px; }
+.drawer-loc-details { padding: 6px 12px 10px; border-top: 1px solid var(--gray-100, #f1f5f9); }
+.drawer-next-list { margin-top: 8px; font-size: 11px; color: #334155; }
+.drawer-next-title { font-weight: 600; margin-bottom: 2px; }
+.drawer-next-list ul { margin: 0; padding-left: 16px; }
+.drawer-notices { margin-top: 10px; }
+.drawer-notice-list { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: #475569; line-height: 1.45; }
+.drawer-notice-list li { margin: 3px 0; }
+.drawer-footnote { font-size: 10.5px; color: var(--gray-500, #64748b); margin-top: 10px; }
+.criterion-source { font-size: 10px; color: var(--gray-500, #64748b); margin-left: 8px; }
+.spec-assumptions { margin: 6px 0; }

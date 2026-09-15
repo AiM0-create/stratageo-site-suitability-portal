@@ -648,7 +648,6 @@ def test_pipeline_with_healthy_google_providers_full_contract():
          patch.object(jobs_mod, "fetch_named_features", fake_named), \
          patch.object(jobs_mod, "fetch_isochrones", fake_iso), \
          patch.object(jobs_mod, "reverse_geocode_name", fake_rgeo), \
-         patch.object(jobs_mod, "critique_analysis", fake_critique), \
          patch.object(results_mod, "write_explanations", fake_explain):
         asyncio.run(jobs_mod._run_analysis(job, spec))
 

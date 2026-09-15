@@ -72,7 +72,16 @@ HIGH_SLOTS: tuple[str, ...] = tuple(s for s, i in SLOT_IMPACT.items() if i == "h
 REQUIRED_SLOTS: tuple[str, ...] = ("archetype", "study_scope")
 # grid_level is deliberately not a slot: the plan card already has a 7/8
 # control, and top_n has a default plus a card control too.
-ASKABLE_SLOTS: frozenset[str] = frozenset(SLOTS) - {"top_n"}
+# v2.1.0 — customer_mode ("who mostly comes in?") is no longer askable. It
+# was arriving on every brief — a café, a clinic, an IVF centre all got "people
+# walking past / people who live nearby" — and the owner's verdict was that it
+# adds a question without sharpening the brief. The framework already decides
+# what to weigh for a business type; a customer who cares can move the sliders.
+# The slot and its effects stay valid for answers already in flight.
+ASKABLE_SLOTS: frozenset[str] = frozenset(SLOTS) - {"top_n", "customer_mode"}
+# v2.1.0 — three questions is the ceiling. Where, what kind, and at most one
+# more (keep away / must be near / what we can't verify) when the brief hints.
+MAX_QUESTIONS = 3
 _IMPACT_RANK = {"high": 0, "medium": 1, "low": 2}
 # Tie-break within a tier, in the order an answer changes the result: where we
 # look changes everything, what kind changes what we measure, the gates add
@@ -340,19 +349,6 @@ def _check_effect(effect: Any, slot: str, families: set[str]) -> Optional[str]:
     return None
 
 
-# v1.13.0 live finding: with no `demand` family in the café framework, the model
-# offered "People who live or work nearby" and mapped it to `competition` — the
-# nearest family it had. The validator only checked that the family existed. A
-# label that contradicts its own effect is exactly the kind of meaning the
-# engine owns, so the plainest mismatches are caught here.
-_LABEL_FAMILY_HINTS: tuple[tuple[re.Pattern, str], ...] = (
-    (re.compile(r"\b(?:live|living|work(?:ing)?|residents?|households?|offices?|population)\b", re.I), "demand"),
-    (re.compile(r"\b(?:walk(?:ing)?\s+past|passing|foot(?:fall)?|commut|transit|metro|bus)\b", re.I), "access"),
-    (re.compile(r"\b(?:businesses?\s+(?:already|around|nearby)|shops?\s+around|anchor|co-?tenan|brand\s+mix)\b", re.I), "cotenancy"),
-    (re.compile(r"\b(?:crowded|competitors?|rivals?|saturat|similar\s+places)\b", re.I), "competition"),
-)
-
-
 def _label_contradicts_family(label: str, family: str) -> Optional[str]:
     """The family a label plainly describes, when it is not the one attached."""
     for rx, implied in _LABEL_FAMILY_HINTS:
@@ -434,13 +430,6 @@ def validate_questions(
             if reason:
                 result.rejections.append(Rejection(oid, "illegal_effect", reason))
                 continue
-            if effect.get("type") in ("emphasize", "deemphasize"):
-                implied = _label_contradicts_family(str(opt.get("label") or ""), effect.get("family"))
-                if implied:
-                    result.rejections.append(Rejection(
-                        oid, "label_family_mismatch",
-                        f"label describes {implied!r} but the effect names {effect.get('family')!r}"))
-                    continue
             if _needs_free_text(effect) and not opt.get("free_text"):
                 result.rejections.append(Rejection(
                     oid, "needs_free_text",
@@ -474,9 +463,15 @@ def validate_questions(
             "options": kept,
         })
 
-    # 9. order by impact — highest first, input order within a tier. No cap:
-    #    the stopping condition is completeness, not a count.
+    # 9. order by impact — highest first, input order within a tier.
     result.accepted.sort(key=_question_sort_key)
+    # 10. v2.1.0 — ceiling. Required slots are ordered first, so a cap never
+    #     drops "where" or "what kind"; it drops the third-tier extras.
+    if len(result.accepted) > MAX_QUESTIONS:
+        for q in result.accepted[MAX_QUESTIONS:]:
+            result.rejections.append(Rejection(str(q.get("id") or "?"), "over_cap",
+                                               f"more than {MAX_QUESTIONS} questions"))
+        result.accepted = result.accepted[:MAX_QUESTIONS]
     return result
 
 

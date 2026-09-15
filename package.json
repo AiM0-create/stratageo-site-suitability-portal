@@ -1,6 +1,6 @@
 {
   "name": "stratageo-site-suitability-portal",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -29,6 +29,6 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "vitest": "^4.1.9"
+    "vitest": "^5.0.0"
   }
 }

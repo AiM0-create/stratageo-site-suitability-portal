@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import type { LocationData, HeatmapType, UserPoint, HexGridCell, CatchmentOutline } from '../types';
+import type { LocationData, HeatmapType, HexGridCell, CatchmentOutline } from '../types';
 import { config } from '../config';
 import { createSourceBuffer, type SourceBuffer, type BufferableMap } from '../services/mapSourceBuffer';
 import {
@@ -39,9 +39,6 @@ interface MapViewProps {
   onSelectLocation: (location: LocationData) => void;
   onDeselectAll: () => void;
   heatmapType: HeatmapType;
-  userPoints?: UserPoint[];
-  showBuffers?: boolean;
-  bufferRadiusM?: number;
   basemapId?: BasemapId;
   onBasemapChange?: (id: BasemapId) => void;
   /** v2 engine layers (conversational analyses) */
@@ -49,10 +46,6 @@ interface MapViewProps {
   catchments?: CatchmentOutline[];
   /** Spatial Reliability Upgrade v1.0.3 */
   recommendationWithheld?: boolean;             // grey out pins, label as raw candidates
-  /** v1.6.7 — h3 → rank (1 = best) over eligible cells, under current weights */
-  cellRanks?: { ranks: Record<string, number>; total: number };
-  /** v1.6.7 — screening-basis top-X re-selected under custom weights (unverified) */
-  screeningCandidates?: { h3: string; lat: number; lng: number; score: number; rank: number }[];
   studyAreaBoundary?: [number, number][];        // [lat,lng] ring of the AOI
 }
 
@@ -61,12 +54,11 @@ const CATCHMENT_COLORS: Record<string, string> = { walk: '#059669', drive: '#7c3
 // Source / layer ids — kept in one place so the installer and the updaters agree.
 const SRC = {
   hex: 'sg-hex', aoi: 'sg-aoi', catchment: 'sg-catchment',
-  radius: 'sg-radius', buffer: 'sg-buffer',
+  radius: 'sg-radius',
 } as const;
 const LYR = {
   hexFill: 'sg-hex-fill', aoiLine: 'sg-aoi-line', catchmentLine: 'sg-catchment-line',
   radiusLine: 'sg-radius-line', radiusFill: 'sg-radius-fill',
-  bufferLine: 'sg-buffer-line', bufferFill: 'sg-buffer-fill',
 } as const;
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -107,23 +99,16 @@ export const MapView: React.FC<MapViewProps> = ({
   onSelectLocation,
   onDeselectAll,
   heatmapType,
-  userPoints = [],
-  showBuffers = true,
-  bufferRadiusM,
   basemapId = 'light',
   onBasemapChange,
   hexGrid,
   catchments,
   recommendationWithheld = false,
-  cellRanks,
-  screeningCandidates = [],
   studyAreaBoundary,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
-  const userMarkersRef = useRef<mapboxgl.Marker[]>([]);
-  const screeningMarkersRef = useRef<mapboxgl.Marker[]>([]);
   const hoverPopupRef = useRef<mapboxgl.Popup | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showHexGrid, setShowHexGrid] = useState(true);
@@ -175,16 +160,6 @@ export const MapView: React.FC<MapViewProps> = ({
       map.addLayer({
         id: LYR.radiusLine, type: 'line', source: SRC.radius,
         paint: { 'line-color': '#1d4ed8', 'line-width': 1.5, 'line-dasharray': [6, 4] },
-      });
-    }
-    if (!map.getLayer(LYR.bufferFill)) {
-      map.addLayer({
-        id: LYR.bufferFill, type: 'fill', source: SRC.buffer,
-        paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.05 },
-      });
-      map.addLayer({
-        id: LYR.bufferLine, type: 'line', source: SRC.buffer,
-        paint: { 'line-color': '#ef4444', 'line-width': 1, 'line-dasharray': [4, 3] },
       });
     }
     if (!map.getLayer(LYR.catchmentLine)) {
@@ -299,9 +274,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
     return () => {
       markersRef.current.forEach(m => m.remove());
-      userMarkersRef.current.forEach(m => m.remove());
-      screeningMarkersRef.current.forEach(m => m.remove());
-      markersRef.current = []; userMarkersRef.current = []; screeningMarkersRef.current = [];
+      markersRef.current = [];
       hoverPopupRef.current?.remove();
       map.remove();
       mapRef.current = null;
@@ -460,10 +433,7 @@ export const MapView: React.FC<MapViewProps> = ({
           ? `${factor}: no data here`
           : recommendationWithheld
             ? `Screening value ${v!.toFixed(1)}/10 — context only: this result was flagged unreliable, no recommendation is made`
-            : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10${factor ? '' : finalTag}${
-                !factor && cellRanks?.ranks?.[cell.h3]
-                  ? ` — rank ${cellRanks.ranks[cell.h3]} of ${cellRanks.total} eligible cells`
-                  : ''}`;
+            : `${factor || 'Overall suitability'}: ${v!.toFixed(1)}/10${factor ? '' : finalTag}`;
 
       features.push({
         type: 'Feature',
@@ -472,7 +442,7 @@ export const MapView: React.FC<MapViewProps> = ({
       });
     }
     setData(SRC.hex, { type: 'FeatureCollection', features });
-  }, [hexGrid, showHexGrid, heatmapType, recommendationWithheld, cellRanks, styleEpoch, setData]);
+  }, [hexGrid, showHexGrid, heatmapType, recommendationWithheld, styleEpoch, setData]);
 
   // ── Hex hover tooltip (Leaflet bindTooltip{sticky} equivalent) ──
   useEffect(() => {
@@ -502,24 +472,6 @@ export const MapView: React.FC<MapViewProps> = ({
     };
   }, [styleEpoch]);
 
-  // ── v1.6.7: screening-basis top-X under custom weights (amber, unverified) ──
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    screeningMarkersRef.current.forEach(m => m.remove());
-    screeningMarkersRef.current = [];
-    if (!screeningCandidates || screeningCandidates.length === 0) return;
-
-    screeningCandidates.forEach((c, i) => {
-      const el = document.createElement('div');
-      el.innerHTML =
-        `<div title="Top ${i + 1} under YOUR weights — screening basis only (score ${c.score.toFixed(1)}/10, grid rank ${c.rank}). Not yet verified with travel-time / routing / Places data." ` +
-        `style="width:26px;height:26px;border-radius:50%;background:#fffbeb;border:2.5px dashed #d97706;color:#92400e;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,0.3)">${i + 1}</div>`;
-      const m = new mapboxgl.Marker({ element: el }).setLngLat([c.lng, c.lat]).addTo(map);
-      screeningMarkersRef.current.push(m);
-    });
-  }, [screeningCandidates, styleEpoch]);
-
   // ── Catchment isochrone outlines (v2 engine, selected location) ──
   useEffect(() => {
     if (!showCatchments || !catchments || catchments.length === 0) {
@@ -542,50 +494,6 @@ export const MapView: React.FC<MapViewProps> = ({
     }
     setData(SRC.catchment, { type: 'FeatureCollection', features });
   }, [catchments, showCatchments, selectedLocations, locations, styleEpoch, setData]);
-
-  // ── User-uploaded points layer ──
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    userMarkersRef.current.forEach(m => m.remove());
-    userMarkersRef.current = [];
-
-    if (userPoints.length === 0) { setData(SRC.buffer, EMPTY); return; }
-
-    const bufferFeatures: GeoJSON.Feature[] = [];
-    const pts: { lat: number; lng: number }[] = [];
-    for (const pt of userPoints) {
-      const lat = Number(pt.lat);
-      const lng = Number(pt.lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-
-      const el = document.createElement('div');
-      el.className = 'sg-marker';
-      el.innerHTML = `<div class="user-marker-dot"${pt.name ? ` title="${pt.name}"` : ''}></div>`;
-      userMarkersRef.current.push(
-        new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map),
-      );
-      pts.push({ lat, lng });
-
-      if (showBuffers && bufferRadiusM) {
-        const ring = circleRingLngLat(lat, lng, bufferRadiusM);
-        if (ring) {
-          bufferFeatures.push({
-            type: 'Feature', properties: {},
-            geometry: { type: 'Polygon', coordinates: [ring] },
-          });
-        }
-      }
-    }
-    setData(SRC.buffer, { type: 'FeatureCollection', features: bufferFeatures });
-
-    // If no analysis locations yet, fit to user points
-    if (locations.length === 0 && pts.length > 0) {
-      const b = boundsOfLatLng(pts);
-      if (b) map.fitBounds(b, { padding: 60, duration: 1000 });
-    }
-  }, [userPoints, showBuffers, bufferRadiusM, locations.length, styleEpoch, setData]);
 
   return (
     <div className="sg-map-wrapper">
@@ -641,7 +549,7 @@ export const MapView: React.FC<MapViewProps> = ({
           </div>
         )}
       </div>
-      {(locations.length > 0 || userPoints.length > 0) && (
+      {locations.length > 0 && (
         <div className="sg-map-legend">
           <div className="sg-legend-title">Map Legend</div>
           {locations.length > 0 && (
@@ -696,18 +604,6 @@ export const MapView: React.FC<MapViewProps> = ({
                     <span className="sg-legend-line sg-legend-line-dashed" style={{ borderColor: '#7c3aed' }} /> Drive isochrone
                   </div>
                 </>
-              )}
-            </>
-          )}
-          {userPoints.length > 0 && (
-            <>
-              <div className="sg-legend-item">
-                <span className="sg-legend-dot" style={{ background: '#f97316' }} /> User Points
-              </div>
-              {showBuffers && bufferRadiusM && (
-                <div className="sg-legend-item">
-                  <span className="sg-legend-circle" style={{ borderColor: '#ef4444' }} /> Buffer Zone
-                </div>
               )}
             </>
           )}

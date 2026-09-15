@@ -9,12 +9,12 @@ interface UserInfo {
   promptsRemaining: number;
 }
 
+/** v2.1.0 — two jobs: get back to a past analysis, take this one away
+ *  (PDF / share). Everything else (mode badge, methodology dialog, dark-mode
+ *  toggle, duplicate "new analysis" button) was removed. */
 interface TopBarProps {
-  mode: 'demo' | 'live';
   hasResults: boolean;
   onExportPDF: () => void;
-  onMethodology: () => void;
-  onNewAnalysis: () => void;
   sessions: SessionIndexEntry[];
   currentSessionId: string | null;
   onSwitchSession: (id: string) => void;
@@ -23,11 +23,9 @@ interface TopBarProps {
   onAdminOpen?: () => void;
   onSavedOpen?: () => void;
   onShareAnalysis?: () => void;
-  darkMode?: boolean;
-  onToggleDark?: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, onMethodology, onNewAnalysis, sessions, currentSessionId, onSwitchSession, user, onLogout, onAdminOpen, onSavedOpen, onShareAnalysis, darkMode, onToggleDark }) => {
+export const TopBar: React.FC<TopBarProps> = ({ hasResults, onExportPDF, sessions, currentSessionId, onSwitchSession, user, onLogout, onAdminOpen, onSavedOpen, onShareAnalysis }) => {
   const [historyOpen, setHistoryOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -51,9 +49,6 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, o
         <a href="https://stratageo.in/index.html" className="topbar-logo" aria-label="Stratageo">
           <span className="logo-strata">STRATA</span><span className="logo-geo">GEO</span>
         </a>
-        <span className={`topbar-badge ${mode === 'demo' ? 'badge-demo' : 'badge-live'}`}>
-          {mode === 'demo' ? 'Demo' : 'Live'}
-        </span>
         <span className="topbar-version">v{__APP_VERSION__}</span>
       </div>
       <div className="topbar-right">
@@ -85,27 +80,6 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, o
             )}
           </div>
         )}
-        {/* Dark mode toggle */}
-        <button
-          onClick={onToggleDark}
-          className="topbar-btn"
-          title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {darkMode ? (
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
-            </svg>
-          )}
-        </button>
-        <button onClick={onMethodology} className="topbar-btn" title="How this works">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
-          </svg>
-        </button>
         {onSavedOpen && (
           <button onClick={onSavedOpen} className="topbar-btn" title="My analyses">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
@@ -125,11 +99,6 @@ export const TopBar: React.FC<TopBarProps> = ({ mode, hasResults, onExportPDF, o
             <button onClick={onExportPDF} className="topbar-btn" title="Export PDF">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-              </svg>
-            </button>
-            <button onClick={onNewAnalysis} className="topbar-btn" title="New analysis">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="icon-sm">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
             </button>
           </>

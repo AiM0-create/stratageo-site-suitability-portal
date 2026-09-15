@@ -224,7 +224,6 @@ def _run_pipeline_with_fetch_delay(spec, delay_s: float):
          patch.object(jobs_mod, "evaluate_route_constraint", fake_route_eval), \
          patch.object(jobs_mod, "fetch_railway_lines", fake_rail), \
          patch.object(jobs_mod, "reverse_geocode_name", fake_rgeo), \
-         patch.object(jobs_mod, "critique_analysis", fake_critique), \
          patch.object(results_mod, "write_explanations", fake_explain):
         t0 = time.monotonic()
         asyncio.run(jobs_mod._run_analysis(job, spec))

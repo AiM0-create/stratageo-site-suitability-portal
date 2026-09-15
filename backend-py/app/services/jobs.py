@@ -38,14 +38,11 @@ from ..engine.data_places import fetch_places_pois
 from ..engine.grid import cell_boundary as grid_cell_boundary, polyfill
 from ..engine.routing import evaluate_route_constraint, fetch_railway_lines
 from ..engine.traffic import traffic_catchment
-from ..engine.sandbox import run_custom_layer
 from ..engine.study_area import (
     geocode, geocode_with_bbox, resolve_study_area, reverse_geocode_name,
 )
 from . import storage
-from .critic import critique_analysis
 from ..engine.intent_parser import parse_raw_intent, validate_hard_constraints_in_spec
-from ..engine.archetypes import get_archetype
 from ..engine.multi_score import compute_multi_scores, compute_data_coverage
 from ..engine.unified_confidence import build_unified_confidence
 from ..engine.uploaded_candidates import (
@@ -200,8 +197,8 @@ def _viability_suggestions(spec) -> list[str]:
     if wf and wf.isWaterfront:
         out.append("Consider converting existing restaurant / heritage buildings on the bank instead of requiring new construction.")
     else:
-        if getattr(spec, "namedExclusions", None):
-            out.append("Reduce the exclusion buffer around your existing site(s), or widen the study area.")
+        if getattr(spec, "namedExclusions", None) or getattr(spec, "brandExclusions", None):
+            out.append("Reduce the exclusion distance around your existing site(s), or widen the study area.")
         out.append("Lower the minimum viability threshold, or widen the study area, and re-run.")
     # Keep the geographic constraint explicit in the guidance.
     if spec.studyArea.type == "places" and spec.studyArea.places and len(spec.studyArea.places) >= 2:
@@ -1386,28 +1383,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "Layers with no available data (excluded from scoring): " + ", ".join(no_data_layers)
         )
 
-    # Custom layers (sandbox) — override their Pass-A zeros
-    if any(l.source.provider == "custom" for l in spec.layers):
-        if s.sandbox_enabled:
-            hex_dicts = [{"h3": h.h3_id, "lat": h.lat, "lng": h.lng} for h in hexes]
-            for layer in spec.custom_layers():
-                try:
-                    input_pois = {lid: layer_pois.get(lid, []) for lid in layer.source.inputLayerIds}
-                    values = run_custom_layer(layer.source.code, hex_dicts, input_pois)
-                    raw = np.array([values.get(h.h3_id, 0.0) for h in hexes])
-                    lo, hi = scoring.fit_normalization(raw, layer)
-                    ls = scores[layer.id]
-                    ls.raw, ls.norm_low, ls.norm_high = raw, lo, hi
-                except Exception as e:
-                    fallbacks.append(f"Custom layer '{layer.name}' failed in sandbox — dropped ({e}).")
-            # rebuild composite with updated raws
-            composite = np.zeros(len(hexes))
-            for lid, ls in scores.items():
-                composite += ls.layer.weight * scoring.normalize(
-                    ls.raw, ls.norm_low, ls.norm_high, ls.layer.direction,
-                )
-        else:
-            fallbacks.append("Custom layers present but sandbox is disabled — scored as zero.")
+    # v2.1.0 — sandboxed custom layers (engine/sandbox.py) were removed: Python-in-a-spec, never used.
 
     excluded = scoring.exclusion_mask(
         hexes, exclusion_pois, {e.name: e.bufferM for e in spec.exclusions},
@@ -1878,6 +1854,68 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 "no candidate cells."
             )
 
+    # v2.1.0 — "N km exclusion zone around existing centres": find the brand's
+    # own outlets in the study area and mask the buffer around each. Meeting
+    # of 15 Sep: NOVA IVF with a 5 km zone was run and silently ignored —
+    # the planner only knew named places and coordinates. If the brand cannot
+    # be told from the brief, or nothing is found, the run says so in the
+    # headline rather than pretending the zone was enforced.
+    for _be in (getattr(spec, "brandExclusions", None) or []):
+        _brand = (_be.get("brand") or "").strip()
+        _be_buf = float(_be.get("bufferM", 5000))
+        _label = f"{int(_be_buf)} m around existing {_brand or 'outlets'}"
+        if not _brand:
+            fallbacks.append(
+                f"You asked for a {int(_be_buf/1000) if _be_buf >= 1000 else int(_be_buf)}"
+                f"{' km' if _be_buf >= 1000 else ' m'} exclusion zone around your existing outlets, "
+                "but the brief does not name the brand, so it was NOT enforced — name the brand "
+                "(e.g. 'NOVA IVF') and re-run."
+            )
+            unenforced_exclusions.append(_label)
+            mask_stats["brandExclusionUnenforced:unnamed"] = 1
+            continue
+        _found: list[dict] = []
+        if s.enable_google_places_new and s.google_places_api_key:
+            _south, _west, _north, _east = overpass_bbox
+            _pad = _be_buf / 111_000.0
+            try:
+                _r = await gp_new.search_text(
+                    _brand, (_south - _pad, _west - _pad, _north + _pad, _east + _pad), ctx=_pctx,
+                )
+                # Text Search is a location BIAS, not a restriction — the same
+                # query returned a Delhi outlet for a Bengaluru bbox. Keep only
+                # results inside the padded study bbox, and match the brand's
+                # first word against the place name (tags.name).
+                _first = _brand.split()[0].lower()
+                _found = [
+                    q for q in ((_r.data or {}).get("pois") or [])
+                    if _first in str((q.get("tags") or {}).get("name", "")).lower()
+                    and (_south - _pad) <= float(q["lat"]) <= (_north + _pad)
+                    and (_west - _pad) <= float(q["lng"]) <= (_east + _pad)
+                ]
+            except Exception as _bx:
+                logger.warning("brand exclusion search failed for %r: %s", _brand, _bx)
+        if not _found:
+            fallbacks.append(
+                f"No '{_brand}' outlets were found in or around the study area, so the "
+                f"{_label} exclusion removed nothing — check the brand name if that is wrong."
+            )
+            unenforced_exclusions.append(_label)
+            mask_stats[f"brandExclusionUnenforced:{_brand}"] = 1
+            continue
+        _be_mask = np.zeros(len(hexes), dtype=bool)
+        for q in _found:
+            _c = (float(q["lat"]), float(q["lng"]))
+            _be_mask |= np.array([named_exclusion_hit(h.lat, h.lng, _c, None, _be_buf) for h in hexes], dtype=bool)
+        _n_be = int(_be_mask.sum())
+        excluded |= _be_mask
+        mask_stats[f"brandExclusion:{_brand}"] = _n_be
+        enforced_exclusions.append({"name": _label, "cells": _n_be})
+        notes.append(
+            f"Excluded {int(_be_buf)} m around {len(_found)} existing '{_brand}' outlet(s) found "
+            f"in the area — {_n_be} cell(s) removed from consideration."
+        )
+
     # ── 4e (apply phase). Buildability / no-construction masks (v1.0.3) ──
     # Hard-exclude obvious no-build land for waterfront + commercial briefs:
     # railway land, ghats, heritage/protected/sacred, open space. OSM is incomplete
@@ -2080,25 +2118,43 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             {"gate": k, "hexesRemoved": int(v)}
             for k, v in mask_stats.items()
             if isinstance(v, (int, float)) and not isinstance(v, bool)
-            and k.endswith("Removed") and v > 0
+            and (k.endswith("Removed") or k.startswith(("brandExclusion:", "namedExclusion:"))) and v > 0
         ]
         if spec.waterfront and spec.waterfront.isWaterfront:
             _failed_gates.append({
                 "gate": "waterfront_corridor",
                 "detail": f"{spec.waterfront.corridorWidthM} m riverfront band",
             })
+        # v2.1.0 — say WHICH rule removed the area. A 5 km zone around a
+        # brand's existing centres legitimately empties South Bengaluru; the
+        # old wording blamed "water and land-safety masks" for it.
+        _named_hits = [
+            (k.split(":", 1)[1], int(v)) for k, v in mask_stats.items()
+            if (k.startswith("brandExclusion:") or k.startswith("namedExclusion:"))
+            and isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+        ]
+        if _named_hits:
+            _biggest = max(_named_hits, key=lambda kv: kv[1])
+            _what = "; ".join(f"'{n}' removed {c}" for n, c in _named_hits)
+            _reason = (f"Every cell was removed by the exclusions you asked for ({_what} of "
+                       f"{len(hexes)} cells). Nothing in this study area is outside them.")
+            _plain = (f"All {len(hexes)} cells in this area fall inside the exclusion around "
+                      f"{_biggest[0]}. Widen the study area, or reduce the exclusion distance, and re-run.")
+        else:
+            _reason = ("No buildable candidate survived the " + wf_band
+                       + "water / railway / ghat / heritage / open-space masks.")
+            _plain = ("Every grid cell in this study area was removed by the "
+                      + wf_band + "water and land-safety masks — there is no "
+                      "buildable candidate to rank here. Widen the area or "
+                      "relax the constraints below and re-run.")
         job.result = {
             # v1.4.7 — three-state result contract
             "status": "no_viable_site",
             "analysisId": "analysis_" + job.id[:8],
             "jobRef": job.id[:8],
-            "reason": ("No buildable candidate survived the " + wf_band
-                       + "water / railway / ghat / heritage / open-space masks."),
+            "reason": _reason,
             # v1.9.0 — same message under the plain-reason key the UI leads with
-            "plainReason": ("Every grid cell in this study area was removed by the "
-                            + wf_band + "water and land-safety masks — there is no "
-                            "buildable candidate to rank here. Widen the area or "
-                            "relax the constraints below and re-run."),
+            "plainReason": _plain,
             "failedGates": _failed_gates,
             "relaxationSuggestions": _viability_suggestions(spec),
             "degradationNotes": list(fallbacks),
@@ -2107,8 +2163,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                 "googleCalls": _pctx.call_log[:80],
             },
             # legacy shape (frontend wire contract) — unchanged below
-            "summary": ("No reliable recommendation: no buildable site remained after the "
-                        + wf_band + "water, railway, ghat, heritage and open-space masks were applied."),
+            "summary": "No reliable recommendation: " + _reason,
             "business_type": spec.businessType,
             "target_location": target_location,
             "methodology": results_mod.build_methodology(spec, len(hexes), res, False, fallbacks),
@@ -2564,10 +2619,15 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     names = results_mod.disambiguate_names(list(names), [hexes[ci] for ci in finals])
     locations = []
     for rank, (ci, name) in enumerate(zip(finals, names), 1):
+        # v2.1.0 — the zone is called "Priority N". Reverse-geocoded names were
+        # wrong often enough (meeting of 15 Sep: a cell in one colony named for
+        # the next) that the request was to stop leading with them. The
+        # geocoded locality stays as a hint ("near Yediyuru"), never the title.
         loc = results_mod.build_location(
-            spec, hexes, ci, scores, layer_pois, name or f"Candidate {rank}", rank,
+            spec, hexes, ci, scores, layer_pois, f"Priority {rank}", rank,
             screening01=float(composite[ci]),
         )
+        loc["areaHint"] = (name or "").strip() or None
         # Traffic-context (typical-peak congestion ratio) — informational, low confidence.
         ratios = traffic_ctx.get(ci, [])
         if ratios:
@@ -2772,11 +2832,11 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             "dataStatus": getattr(ls, "data_status", "observed") if ls else "observed",
         })
 
-    # ── Senior-consultant self-critique of the COMPUTED result ──────────────
-    # Geographic sanity, dead factors, thin data, constraint satisfaction.
-    # Fail-soft: returns None and the analysis ships without it.
-    # v1.1.0: critic runs based on cost_mode (not just critic_enabled flag).
-    critique = await critique_analysis(spec, locations, data_quality, data_sufficiency)
+    # v2.1.0 — the LLM critic (services/critic.py) was removed: a second
+    # model's opinion of the first, on top of the deterministic reliability
+    # critic that already checks everything checkable. `critique` stays None
+    # so merge_with_llm_critic is a no-op and the wire contract is unchanged.
+    critique = None
 
     # ── Viability gate (v1.0.3) — minimum score + minimum viable candidates ──
     # A candidate is RECOMMENDED only if it passes hard constraints AND clears the

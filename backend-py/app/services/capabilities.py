@@ -18,11 +18,6 @@ def capability_manifest() -> dict:
         "dataSources": {
             "osm": "OpenStreetMap via Overpass — any key=value tag query (counts of nodes/ways per catchment)",
             "google_places": "Google Places Nearby Search by type/keyword (max 3 such layers per analysis)",
-            "custom": (
-                "EXPERIMENTAL, currently "
-                + ("ENABLED" if s.sandbox_enabled else "DISABLED")
-                + " — small Python snippet computing a per-hex value from already-fetched POIs; no network, no files"
-            ),
         },
         "catchments": {
             "euclidean": "straight-line radius in meters around hex centroid",

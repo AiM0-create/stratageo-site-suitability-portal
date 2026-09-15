@@ -500,36 +500,6 @@ CAFE_LAYERS_NO_DEMAND = [
 ]
 
 
-class TestLabelFamilyGuard:
-    def test_the_live_mislabel_is_rejected(self):
-        """"People who live or work nearby" mapped to competition, because the
-        café framework has no demand family and the model picked the nearest."""
-        slots = {"customer_mode": SlotState()}
-        res = validate_questions([{"id": "who", "slot": "customer_mode", "question": "Who comes in?",
-            "options": [
-                {"label": "People walking past", "effect": {"type": "emphasize", "family": "access"}},
-                {"label": "People who live or work nearby", "effect": {"type": "emphasize", "family": "competition"}},
-            ]}], slots, CAFE_LAYERS_NO_DEMAND)
-
-        labels = [o["label"] for o in res.accepted[0]["options"]]
-        assert "People who live or work nearby" not in labels
-        assert any(r.rule == "label_family_mismatch" and "'demand'" in r.reason for r in res.rejections)
-
-    def test_a_correctly_paired_label_passes(self):
-        slots = {"customer_mode": SlotState()}
-        res = validate_questions([{"id": "who", "slot": "customer_mode", "question": "Who comes in?",
-            "options": [{"label": "People walking past", "effect": {"type": "emphasize", "family": "access"}}]}],
-            slots, CAFE_LAYERS_NO_DEMAND)
-        assert res.rejections == []
-
-    def test_a_neutral_label_is_not_second_guessed(self):
-        slots = {"customer_mode": SlotState()}
-        res = validate_questions([{"id": "who", "slot": "customer_mode", "question": "Who comes in?",
-            "options": [{"label": "Mostly regulars", "effect": {"type": "emphasize", "family": "cotenancy"}}]}],
-            slots, CAFE_LAYERS_NO_DEMAND)
-        assert res.rejections == []
-
-
 class TestRequiredFloor:
     def _slots(self):
         return {

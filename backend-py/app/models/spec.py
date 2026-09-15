@@ -181,12 +181,6 @@ class PlacesSource(BaseModel):
     keyword: Optional[str] = None
 
 
-class CustomSource(BaseModel):
-    provider: Literal["custom"] = "custom"
-    code: str                                     # def compute(hexes, pois) -> {h3: float}
-    inputLayerIds: list[str] = []
-
-
 class Catchment(BaseModel):
     type: Literal["euclidean", "walk", "drive"]
     meters: Optional[int] = None                  # required for euclidean
@@ -237,7 +231,7 @@ class Layer(BaseModel):
     # not zero". Band peak is relative to the observed distribution — never
     # an absolute count. Direction is ignored when the curve is target_band.
     scoringCurve: Literal["monotonic", "target_band"] = "monotonic"
-    source: OsmSource | PlacesSource | CustomSource = Field(discriminator="provider")
+    source: OsmSource | PlacesSource = Field(discriminator="provider")
     catchment: Catchment
     normalization: Normalization = Normalization()
     # Consultant honesty fields (v1.0.1.2)
@@ -563,6 +557,9 @@ class SpecV2(BaseModel):
     #
     # Entries: {"name": str, "bufferM": float, "lat"?: float, "lng"?: float}.
     namedExclusions: list[dict] = []
+    # v2.1.0 — "N km exclusion zone around existing centres": the brand's own
+    # outlets, found by searching the brand in the study area at run time.
+    brandExclusions: list[dict] = []
     competitionCurve: Optional[str] = None      # "target_band" when band scoring is on
     # v2.0.0 — what the factor composer accepted and rejected from the AI's
     # context-factor proposals, with reasons, so the plan card can show the
@@ -765,5 +762,3 @@ class SpecV2(BaseModel):
                 l.weight = round(l.weight / total, 4)
         return self
 
-    def custom_layers(self) -> list[Layer]:
-        return [l for l in self.layers if l.source.provider == "custom"]

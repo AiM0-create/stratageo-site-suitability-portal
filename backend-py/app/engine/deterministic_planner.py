@@ -210,6 +210,56 @@ def parse_coordinate_exclusions(raw_prompt: str) -> tuple[list[dict], str]:
     )
 
 
+# v2.1.0 — "a 5-kilometer exclusion zone around existing centers". The
+# meeting of 15 Sep ran this for NOVA IVF and the engine ignored it: the
+# named-exclusion parser needs place NAMES ("branches in Koramangala"), and
+# the coordinate parser needs lat/long. A brand's own outlets are neither —
+# they are found by searching the brand in the study area at run time.
+_BRAND_EXCL_DIST_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*-?\s*(km|kilomet\w*|m\b|met\w*)\s+(?:exclusion|buffer|no-?go)"
+    r"|(?:exclusion|buffer)\s+(?:zone|radius)?\s*(?:of\s+)?(\d+(?:\.\d+)?)\s*-?\s*(km|kilomet\w*|m\b|met\w*)"
+    r"|(?:exclud\w*|avoid\w*|keep\w*)\s+(?:\w+\s+){0,3}?(\d+(?:\.\d+)?)\s*-?\s*(km|kilomet\w*|m\b|met\w*)"
+    r"|(\d+(?:\.\d+)?)\s*-?\s*(km|kilomet\w*|m\b|met\w*)\s+(?:away\s+)?from\s+(?:our|its|their|my|the|all|any)?\s*(?:existing|current)",
+    re.I,
+)
+_BRAND_EXCL_TARGET_RE = re.compile(
+    r"\b(?:around|from|near|of)\s+(?:our|its|their|my|the|all|any)?\s*(?:existing|current|present)\s+"
+    r"(?:\w+\s+){0,2}?(?:cent(?:er|re)s?|branch(?:es)?|outlets?|stores?|clinics?|sites?|locations?|units?)",
+    re.I,
+)
+_BRAND_NAME_RE = re.compile(
+    r"\b((?:[A-Z][A-Za-z0-9&'.-]*|[A-Z]{2,})(?:\s+(?:[A-Z][A-Za-z0-9&'.-]*|[A-Z]{2,})){0,2})"
+    r"(?='s\b|\s+(?:expansion|growth|rollout|roll-out|network|chain|centres?|centers?|branches|outlets|stores|clinics))",
+)
+_BRAND_STOP = {"exclusion", "existing", "the", "our", "new", "next", "site", "sites", "in", "for", "near",
+               "north", "south", "east", "west", "central", "bengaluru", "bangalore", "mumbai", "delhi",
+               "hyderabad", "chennai", "kolkata", "pune", "india"}
+
+
+def parse_brand_exclusion(raw_prompt: str) -> dict | None:
+    """'<Brand> expansion … N km exclusion zone around existing centres' →
+    {"brand": "NOVA IVF", "bufferM": 5000}. brand is None when the prompt
+    does not say whose outlets — still recorded, so the run can say it
+    could not enforce it rather than pretending it did."""
+    text = raw_prompt or ""
+    if not _BRAND_EXCL_TARGET_RE.search(text):
+        return None
+    m = _BRAND_EXCL_DIST_RE.search(text)
+    if not m:
+        return None
+    groups = [g for g in m.groups() if g]
+    val, unit = float(groups[0]), groups[1].lower()
+    buffer_m = int(val * 1000) if unit.startswith("k") else int(val)
+    buffer_m = max(200, min(20_000, buffer_m))
+    brand = None
+    for bm in _BRAND_NAME_RE.finditer(text):
+        cand = bm.group(1).strip()
+        if cand and cand.lower() not in _BRAND_STOP and not all(w.lower() in _BRAND_STOP for w in cand.split()):
+            brand = cand
+            break
+    return {"brand": brand, "bufferM": buffer_m}
+
+
 def parse_named_exclusions(raw_prompt: str) -> list[str]:
     """Return the place names the user wants excluded (their existing sites)."""
     if not _EXCLUDE_EXISTING_RE.search(raw_prompt or ""):
@@ -690,6 +740,40 @@ def apply_deterministic_plan(
     _excl_entries.extend({"name": n, "bufferM": 1500} for n in _excl_names)
     if _excl_entries:
         spec["namedExclusions"] = _excl_entries
+    _brand_excl = parse_brand_exclusion(intent.rawPrompt or "")
+    if _brand_excl:
+        spec["brandExclusions"] = [_brand_excl]
+        # The LLM tries to express the same request as an OSM exclusion and,
+        # having no tag for a brand, reaches for the nearest category —
+        # observed locally: "5 km exclusion around existing NOVA IVF centres"
+        # became amenity=clinic|hospital with a 5 km buffer, which removed
+        # all 227 cells of South Bengaluru. The brand search is the only
+        # honest way to enforce it; drop the LLM's stand-in.
+        # The same misreading shows up as a ROUTE constraint ("keep 5 km from
+        # existing centres" → "must be within 5 km of NOVA IVF"), which then
+        # withholds every zone for being too FAR from the thing to avoid.
+        def _is_brand_stand_in(_nm: str) -> bool:
+            return bool(
+                _BRAND_EXCL_TARGET_RE.search(" around " + _nm)
+                or re.search(r"\bexisting\b|\bour\b|\bown\b", _nm, re.I)
+                or (_brand_excl.get("brand") and _brand_excl["brand"].lower() in _nm.lower())
+            )
+        _dropped = []
+        for _key, _what in (("exclusions", "exclusion"), ("routeConstraints", "route constraint"), ("corridors", "corridor")):
+            _kept = []
+            for _e in (spec.get(_key) or []):
+                _nm = str((_e or {}).get("name") or "") + " " + str((_e or {}).get("targetKeyword") or "")
+                if _is_brand_stand_in(_nm):
+                    _dropped.append((_what, _nm.strip()))
+                else:
+                    _kept.append(_e)
+            if len(_kept) != len(spec.get(_key) or []):
+                spec[_key] = _kept
+        if _dropped:
+            spec.setdefault("llmSuggestedButNotApplied", []).extend(
+                {"factorName": n, "llmWeight": 0, "canonicalWeight": 0,
+                 "action": f"{w} replaced by the brand-outlet search"} for w, n in _dropped
+            )
 
     # 3b. v1.5.2 — canonical objective. The LLM re-phrased the objective
     # differently for the IDENTICAL prompt across runs ("3 candidate
@@ -744,7 +828,9 @@ def apply_deterministic_plan(
         "constraintEnforcementLevel": "hard_enforced",
         "constraintEnforcementRecords": build_constraint_enforcement_records(intent, spec),
         # Track what the LLM suggested vs what was applied
-        "llmSuggestedButNotApplied": _diff_llm_vs_canonical(llm_spec, canonical),
+        "llmSuggestedButNotApplied": (
+            list(spec.get("llmSuggestedButNotApplied") or []) + _diff_llm_vs_canonical(llm_spec, canonical)
+        ),
     })
 
     # 5. Preserve LLM's study area (it did the geocoding / place enumeration)

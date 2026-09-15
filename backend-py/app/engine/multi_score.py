@@ -21,7 +21,6 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .archetypes import Archetype, get_archetype
 
 # ── Recommendation thresholds ─────────────────────────────────────────────────
 # A candidate reaches RECOMMENDED only if ALL three pass their gate.
@@ -103,7 +102,6 @@ def compute_absolute_viability_score(
         "ev_charger":       3.0,   # sparse data expected; lower floor
         "generic":          2.0,   # almost any signal is acceptable
     }
-    arch = get_archetype(archetype_key)
     floor = arch_floors.get(archetype_key, 3.5)
     # If composite is above floor, don't alter it; if below, penalise
     if score < floor:

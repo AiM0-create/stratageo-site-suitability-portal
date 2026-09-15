@@ -115,6 +115,8 @@ export interface POI {
 
 export interface LocationData {
   name: string;
+  /** v2.1.0 — the reverse-geocoded locality, shown as "near …"; never the title. */
+  areaHint?: string | null;
   lat: number;
   lng: number;
   mcda_score: number;

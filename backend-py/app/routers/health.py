@@ -74,7 +74,6 @@ async def health():
         # ── Feature flags ───────────────────────────────────────────────────
         "featureFlags":    s.feature_flags(),
         # ── Capability flags (booleans only — no key values) v1.4.0 ────────
-        "sandbox":                    s.sandbox_enabled,
         "criticEnabled":              s.critic_active,
         "hasOpenAiKey":               has_openai,
         "hasGooglePlacesKey":         has_places,

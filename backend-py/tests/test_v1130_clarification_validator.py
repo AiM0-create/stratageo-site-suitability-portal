@@ -215,32 +215,32 @@ class TestAcceptsGoodQuestions:
         assert res.rejections == []
 
     def test_a_question_i_would_never_have_put_in_a_fixed_list(self):
-        """The whole point of letting the AI ask: "walk-in or referral-based?"
-        for a clinic, with effects the engine understands."""
+        """The whole point of letting the AI ask: a question about what the
+        customer expects us to check, with effects the engine understands."""
         s = _empty_slots()
-        res = validate_questions([_q("customer_mode", [
-            _opt("Walk-in", {"type": "emphasize", "family": "access"}),
-            _opt("Referral-based", {"type": "emphasize", "family": "cotenancy"}),
+        res = validate_questions([_q("expectations", [
+            _opt("Rent is the constraint", {"type": "flag_unverifiable", "kind": "rent"}),
+            _opt("Floor area is the constraint", {"type": "flag_unverifiable", "kind": "floor_area"}),
         ])], s, CAFE_LAYERS)
 
         assert len(res.accepted) == 1
         labels = [o["label"] for o in res.accepted[0]["options"]]
-        assert labels[:2] == ["Walk-in", "Referral-based"]
+        assert labels[:2] == ["Rent is the constraint", "Floor area is the constraint"]
 
     def test_an_empty_question_list_is_valid_and_expected(self):
         res = validate_questions({"questions": []}, _empty_slots(), CAFE_LAYERS)
         assert res.accepted == [] and res.rejections == []
 
     def test_a_bare_list_is_accepted_as_well_as_the_wrapped_form(self):
-        res = validate_questions([_q("customer_mode", [
-            _opt("Walk-in", {"type": "emphasize", "family": "access"})])], _empty_slots(), CAFE_LAYERS)
+        res = validate_questions([_q("expectations", [
+            _opt("Rent", {"type": "flag_unverifiable", "kind": "rent"})])], _empty_slots(), CAFE_LAYERS)
         assert len(res.accepted) == 1
 
     def test_accepted_shape_carries_impact_and_normalised_options(self):
-        res = validate_questions([_q("customer_mode", [
-            _opt("Walk-in", {"type": "emphasize", "family": "access"})])], _empty_slots(), CAFE_LAYERS)
+        res = validate_questions([_q("expectations", [
+            _opt("Rent", {"type": "flag_unverifiable", "kind": "rent"})])], _empty_slots(), CAFE_LAYERS)
         q = res.accepted[0]
-        assert q["impact"] == "medium"
+        assert q["impact"] == "low"
         assert all({"id", "label", "effect", "free_text"} <= set(o) for o in q["options"])
 
 
@@ -263,18 +263,18 @@ class TestNeverAskWhatIsKnown:
         assert res.rejections[0].rule == "not_askable"
 
     def test_a_skipped_slot_is_not_asked_again(self):
-        s = apply_answer(_empty_slots(), "customer_mode", {"type": "none"})
-        res = validate_questions([_q("customer_mode", [
-            _opt("Walk-in", {"type": "emphasize", "family": "access"})])], s, CAFE_LAYERS)
+        s = apply_answer(_empty_slots(), "expectations", {"type": "none"})
+        res = validate_questions([_q("expectations", [
+            _opt("Rent", {"type": "flag_unverifiable", "kind": "rent"})])], s, CAFE_LAYERS)
         assert res.rejections[0].rule == "redundant"
 
 
 class TestNumbersAreTheEngines:
     def test_an_authored_multiplier_is_rejected(self):
         """The bad AI output from the design doc: "rate rent 1–5" with a value."""
-        res = validate_questions([_q("customer_mode", [
-            _opt("Very important", {"type": "emphasize", "family": "access", "multiplier": 2.5}),
-            _opt("Not important", {"type": "emphasize", "family": "access", "value": 0.8}),
+        res = validate_questions([_q("expectations", [
+            _opt("Very important", {"type": "flag_unverifiable", "kind": "rent", "multiplier": 2.5}),
+            _opt("Not important", {"type": "flag_unverifiable", "kind": "rent", "value": 0.8}),
         ])], _empty_slots(), CAFE_LAYERS)
 
         assert res.accepted == []
@@ -282,7 +282,7 @@ class TestNumbersAreTheEngines:
         assert any("does not accept" in r.reason for r in res.rejections)
 
     def test_an_unknown_effect_type_is_rejected(self):
-        res = validate_questions([_q("customer_mode", [
+        res = validate_questions([_q("expectations", [
             _opt("Whatever", {"type": "weight", "value": 0.8})])], _empty_slots(), CAFE_LAYERS)
         assert any("unknown effect type" in r.reason for r in res.rejections)
 
@@ -326,22 +326,21 @@ class TestTargetsComeFromTheCustomer:
 
 
 class TestOnlyMeasuredFactors:
-    def test_a_family_with_no_layer_is_rejected(self):
-        """v1.12.6: no option may emphasise a factor the framework does not have."""
-        no_competition = [l for l in CAFE_LAYERS if l["id"] != "comp"]
+    def test_who_comes_in_is_never_asked(self):
+        """v2.1.0 — "who mostly comes in?" arrived on every brief (café, clinic,
+        IVF centre alike) and never sharpened one. The business type decides
+        what is weighed; the slot is no longer askable."""
         res = validate_questions([_q("customer_mode", [
-            _opt("Avoid rivals", {"type": "emphasize", "family": "competition"}),
             _opt("Walk-in", {"type": "emphasize", "family": "access"}),
-        ])], _empty_slots(), no_competition)
+            _opt("Referral-based", {"type": "emphasize", "family": "cotenancy"}),
+        ])], _empty_slots(), CAFE_LAYERS)
+        assert res.accepted == []
+        assert res.rejections[0].rule == "not_askable"
 
-        assert len(res.accepted) == 1
-        assert [o["label"] for o in res.accepted[0]["options"] if o["effect"]["type"] != "none"] == ["Walk-in"]
-        assert any("no layer in this framework" in r.reason for r in res.rejections)
-
-    def test_an_unknown_family_is_rejected(self):
-        res = validate_questions([_q("customer_mode", [
-            _opt("Vibes", {"type": "emphasize", "family": "vibes"})])], _empty_slots(), CAFE_LAYERS)
-        assert any("unknown factor family" in r.reason for r in res.rejections)
+    def test_an_unknown_unverifiable_kind_is_rejected(self):
+        res = validate_questions([_q("expectations", [
+            _opt("Vibes", {"type": "flag_unverifiable", "kind": "vibes"})])], _empty_slots(), CAFE_LAYERS)
+        assert res.accepted == [] and any(r.rule == "illegal_effect" for r in res.rejections)
 
     def test_an_unknown_archetype_key_is_rejected(self):
         res = validate_questions([_q("archetype", [
@@ -357,27 +356,27 @@ class TestOnlyMeasuredFactors:
 
 class TestARealChoice:
     def test_opt_out_is_injected_when_missing(self):
-        res = validate_questions([_q("customer_mode", [
-            _opt("Walk-in", {"type": "emphasize", "family": "access"})])], _empty_slots(), CAFE_LAYERS)
+        res = validate_questions([_q("expectations", [
+            _opt("Rent", {"type": "flag_unverifiable", "kind": "rent"})])], _empty_slots(), CAFE_LAYERS)
         assert any(o["effect"]["type"] == "none" for o in res.accepted[0]["options"])
 
     def test_opt_out_is_not_duplicated_when_present(self):
-        res = validate_questions([_q("customer_mode", [
-            _opt("Walk-in", {"type": "emphasize", "family": "access"}),
+        res = validate_questions([_q("expectations", [
+            _opt("Rent", {"type": "flag_unverifiable", "kind": "rent"}),
             _opt("No preference", {"type": "none"}),
         ])], _empty_slots(), CAFE_LAYERS)
         assert sum(1 for o in res.accepted[0]["options"] if o["effect"]["type"] == "none") == 1
 
     def test_a_question_whose_options_all_died_is_dropped(self):
-        res = validate_questions([_q("customer_mode", [
-            _opt("Bad", {"type": "emphasize", "family": "vibes"}),
+        res = validate_questions([_q("expectations", [
+            _opt("Bad", {"type": "flag_unverifiable", "kind": "vibes"}),
             _opt("Also bad", {"type": "weight", "value": 1}),
         ])], _empty_slots(), CAFE_LAYERS)
         assert res.accepted == []
         assert any(r.rule == "no_choice" for r in res.rejections)
 
     def test_a_question_with_only_an_opt_out_is_dropped(self):
-        res = validate_questions([_q("customer_mode", [_opt("Skip", {"type": "none"})])],
+        res = validate_questions([_q("expectations", [_opt("Skip", {"type": "none"})])],
                                  _empty_slots(), CAFE_LAYERS)
         assert res.accepted == []
 
@@ -385,36 +384,37 @@ class TestARealChoice:
 class TestOneWriterPerSlot:
     def test_second_question_on_the_same_slot_is_dropped(self):
         res = validate_questions([
-            _q("customer_mode", [_opt("A", {"type": "emphasize", "family": "access"})], qid="first"),
-            _q("customer_mode", [_opt("B", {"type": "emphasize", "family": "cotenancy"})], qid="second"),
+            _q("expectations", [_opt("A", {"type": "flag_unverifiable", "kind": "rent"})], qid="first"),
+            _q("expectations", [_opt("B", {"type": "flag_unverifiable", "kind": "zoning"})], qid="second"),
         ], _empty_slots(), CAFE_LAYERS)
 
         assert [q["id"] for q in res.accepted] == ["first"]
         assert any(r.rule == "duplicate_slot" and r.question_id == "second" for r in res.rejections)
 
 
-class TestOrderingAndNoCap:
+class TestOrderingAndCap:
     def test_questions_are_ordered_by_impact_highest_first(self):
         res = validate_questions([
             _q("expectations", [_opt("Rent", {"type": "flag_unverifiable", "kind": "rent"})], qid="low"),
-            _q("customer_mode", [_opt("Walk-in", {"type": "emphasize", "family": "access"})], qid="med"),
+            _q("keep_away", [_opt("Yes", {"type": "exclude"}, free_text=True)], qid="med"),
             _q("study_scope", [_opt("City", {"type": "set_scope", "kind": "city"})], qid="high"),
         ], _empty_slots(), CAFE_LAYERS)
 
         assert [q["id"] for q in res.accepted] == ["high", "med", "low"]
 
-    def test_there_is_no_count_cap(self):
-        """By decision: the stopping condition is completeness, not a number."""
+    def test_three_questions_is_the_ceiling(self):
+        """v2.1.0 — where, what kind, and at most one more. The required
+        slots sort first, so the cap only ever drops the extras."""
         qs = [
+            _q("expectations",  [_opt("Rent", {"type": "flag_unverifiable", "kind": "rent"})], qid="6"),
+            _q("must_be_near",  [_opt("Yes", {"type": "require_near"}, free_text=True)], qid="4"),
+            _q("keep_away",     [_opt("Yes", {"type": "exclude"}, free_text=True)], qid="3"),
             _q("archetype",     [_opt("QSR", {"type": "set_archetype", "key": "generic_qsr_cafe"})], qid="1"),
             _q("study_scope",   [_opt("City", {"type": "set_scope", "kind": "city"})], qid="2"),
-            _q("keep_away",     [_opt("Yes", {"type": "exclude"}, free_text=True)], qid="3"),
-            _q("must_be_near",  [_opt("Yes", {"type": "require_near"}, free_text=True)], qid="4"),
-            _q("customer_mode", [_opt("Walk-in", {"type": "emphasize", "family": "access"})], qid="5"),
-            _q("expectations",  [_opt("Rent", {"type": "flag_unverifiable", "kind": "rent"})], qid="6"),
         ]
         res = validate_questions(qs, _empty_slots(), CAFE_LAYERS)
-        assert len(res.accepted) == 6
+        assert [q["id"] for q in res.accepted] == ["2", "1", "3"]
+        assert [r.question_id for r in res.rejections if r.rule == "over_cap"] == ["4", "6"]
 
 
 class TestSchemaIsStrict:
@@ -427,8 +427,8 @@ class TestSchemaIsStrict:
         assert res.rejections and res.rejections[0].rule == "schema"
 
     def test_a_question_with_no_text_is_rejected(self):
-        res = validate_questions([_q("customer_mode", [
-            _opt("A", {"type": "emphasize", "family": "access"})], question="   ")],
+        res = validate_questions([_q("expectations", [
+            _opt("A", {"type": "flag_unverifiable", "kind": "rent"})], question="   ")],
             _empty_slots(), CAFE_LAYERS)
         assert res.rejections[0].rule == "schema"
 
@@ -438,7 +438,7 @@ class TestSchemaIsStrict:
         assert "unknown slot" in res.rejections[0].reason
 
     def test_a_missing_id_is_generated_deterministically(self):
-        q = _q("customer_mode", [_opt("A", {"type": "emphasize", "family": "access"})])
+        q = _q("expectations", [_opt("A", {"type": "flag_unverifiable", "kind": "rent"})])
         del q["id"]
         res = validate_questions([q], _empty_slots(), CAFE_LAYERS)
         assert res.accepted[0]["id"] == "q1"
