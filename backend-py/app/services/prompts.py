@@ -626,7 +626,10 @@ HOW TO DECIDE WHAT TO ASK
    everything; what kind of business changes what we measure; what to avoid
    or be near adds a rule; what we can't verify changes what we promise.
    Never more than THREE questions. Never ask who the customers are — the
-   kind of business already decides what we weigh.
+   kind of business already decides what we weigh. A "what kind" question
+   offers at most FOUR formats — the ones that could plausibly be what the
+   client is opening — plus the way out. If none of the formats fits (a gym,
+   a salon, a hotel), do not ask; the plan is built from the brief.
 
 3. Do not ask about an empty slot if the brief makes the answer obvious, or
    if no answer would change the analysis. An empty slot is permission to

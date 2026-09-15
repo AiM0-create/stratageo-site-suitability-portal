@@ -82,6 +82,7 @@ ASKABLE_SLOTS: frozenset[str] = frozenset(SLOTS) - {"top_n", "customer_mode"}
 # v2.1.0 — three questions is the ceiling. Where, what kind, and at most one
 # more (keep away / must be near / what we can't verify) when the brief hints.
 MAX_QUESTIONS = 3
+MAX_FORMAT_OPTIONS = 4
 _IMPACT_RANK = {"high": 0, "medium": 1, "low": 2}
 # Tie-break within a tier, in the order an answer changes the result: where we
 # look changes everything, what kind changes what we measure, the gates add
@@ -159,6 +160,16 @@ _NEAR_RE = re.compile(
     r"|minutes?\s+(?:walk|drive)|drive\s+(?:time|of))\b",
     re.I,
 )
+def _after(rx: re.Pattern, phrase) -> str:
+    """The target of a near/avoid phrase, for the "So far" strip: the words
+    after the keyword, capped. Live: the whole brief was shown as the value."""
+    text = str(phrase)
+    m = rx.search(text)
+    tail = text[m.end():].strip(" ,.;") if m else text
+    words = tail.split()
+    return " ".join(words[:6]) + ("…" if len(words) > 6 else "") if words else text.strip()
+
+
 _MODE_RE = re.compile(
     r"\b(?:walk-?in|passing\s+trade|footfall|destination|delivery(?:-only)?|takeaway"
     r"|office\s+crowd|residents?|commuters?)\b",
@@ -223,8 +234,8 @@ def build_slot_state(
         slots["study_scope"] = SlotState("empty", None, None)
 
     # keep_away / must_be_near — from the parser's own constraint phrases
-    avoid = [p for p in phrases if _AVOIDANCE_RE.search(str(p))]
-    near = [p for p in phrases if _NEAR_RE.search(str(p)) and not _AVOIDANCE_RE.search(str(p))]
+    avoid = [_after(_AVOIDANCE_RE, p) for p in phrases if _AVOIDANCE_RE.search(str(p))]
+    near = [_after(_NEAR_RE, p) for p in phrases if _NEAR_RE.search(str(p)) and not _AVOIDANCE_RE.search(str(p))]
     if getattr(intent, "hasStrictRouteConstraint", False) and not near:
         near = ["(strict route constraint)"]
     slots["keep_away"] = SlotState("filled", "prompt", avoid) if avoid else SlotState()
@@ -442,6 +453,18 @@ def validate_questions(
                 "effect": dict(effect),
                 "free_text": bool(opt.get("free_text")),
             })
+
+        # 7b. v2.1.0 — a format question offers at most three formats. Live:
+        #     a gym brief (no framework) was offered all ten registry formats,
+        #     café to supermarket. The model is told to pick the plausible
+        #     ones; the engine enforces the count.
+        if slot == "archetype":
+            _fmt = [o for o in kept if o["effect"]["type"] == "set_archetype"]
+            if len(_fmt) > MAX_FORMAT_OPTIONS:
+                for o in _fmt[MAX_FORMAT_OPTIONS:]:
+                    result.rejections.append(Rejection(o["id"], "over_cap", f"more than {MAX_FORMAT_OPTIONS} formats offered"))
+                _drop = {id(o) for o in _fmt[MAX_FORMAT_OPTIONS:]}
+                kept = [o for o in kept if id(o) not in _drop]
 
         # 8. every question has an explicit opt-out
         if not any(o["effect"]["type"] == "none" for o in kept):
@@ -943,7 +966,11 @@ def _fallback_question(slot: str, st: SlotState, formats: list[dict]) -> Optiona
              "effect": {"type": "set_archetype", "key": f["key"]}, "free_text": False}
             for i, f in enumerate(formats or []) if f.get("key") in KNOWN_ARCHETYPES
         ]
-        if not opts:
+        # v2.1.0 — the engine floor only asks when there is a real sibling
+        # choice (a café brief: quick-service / premium / delivery). With no
+        # framework at all the registry list is not a choice, it is a menu;
+        # the plan is built from the brief instead.
+        if not opts or len(opts) > MAX_FORMAT_OPTIONS:
             return None
         opts.append({"id": "none", "label": "Not sure — use your judgement", "effect": {"type": "none"}, "free_text": False})
         return {
