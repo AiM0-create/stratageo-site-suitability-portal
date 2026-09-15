@@ -4,6 +4,43 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.1.1] — 2026-09-15 — The brief is the framework
+
+Owner's test after v2.1.0, a high-end gym in Marine Lines: the plan came
+straight up with no questions (correct — the brief said where, and no
+format fits a gym) but the variables were the generic proxies at 60% with
+four brief factors underneath, "Add a factor" re-planned and lost every
+brief factor, and the clarify reply still said "a couple of things would
+sharpen this" over an empty list.
+
+### Engine
+- **Generic proxies give way by kind.** A brief factor supersedes the generic
+  proxy of the same kind — demand (offices, apartments, luxury retail…),
+  competition (the business's own class, negative), access (stations, parking,
+  main roads) — and inherits the proxy's points. With all three covered the
+  brief is the whole framework: the gym now scores gyms (−), luxury retail,
+  premium co-tenants, stations, parking; a boutique hotel scores offices,
+  hotels (−), stations, eateries. Cap of six brief factors when no framework
+  fits. A surviving proxy keeps its own points instead of inflating to 62%.
+- **The engine names the competitors when the model forgets** — word →
+  vocabulary class (gym → gyms_fitness, salon → salons_spas, hotel, pharmacy,
+  IVF/clinic, bakery, bar, bank, petrol …), applied after validation so a
+  rejected proposal cannot block it.
+- **Context factors survive a follow-up turn.** The previous plan's brief
+  factors are re-proposed and re-validated on every turn; a factor the model
+  writes straight into `layers[]` on an "add a factor" turn is mapped onto the
+  vocabulary by the tags it asked for (tightest class wins); every user
+  message counts as the customer's words for the evidence check. New
+  `eateries` co-tenancy class.
+- Two classes that count the same places in the same direction are one
+  factor (offices ⊃ IT parks; premium co-tenants ⊃ malls).
+- **Clarify:** keep-away / must-be-near / expectations are asked only when the
+  brief hints at them — the engine checks the words, not the model's
+  judgement; a "what kind" question offers at most four formats and is never
+  asked when no framework fits; the reply no longer promises questions it
+  then drops; the "So far" strip shows the near/avoid target, not the brief.
+- A generic business label is the business ("Salon and spa"), not the brief.
+
 ## [2.1.0] — 2026-09-15 — Only the major things
 
 The meeting of 15 September (notes reviewed against v2.0.0) and the owner's

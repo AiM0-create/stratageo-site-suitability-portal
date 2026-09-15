@@ -109,5 +109,5 @@ export function buildAddFactorPrompt(name: string, direction: 'positive' | 'nega
   const sense = direction === 'negative'
     ? 'Less of it should score higher.'
     : 'More of it should score higher.';
-  return `Add a scoring factor for "${clean}". ${sense} Pick a suitable data source and weight, and keep the rest of the plan unchanged.`;
+  return `Add a factor for "${clean}" to the plan. ${sense} Use the closest feature class from the vocabulary; if nothing in it counts this, say so. Keep every other factor exactly as it is.`;
 }

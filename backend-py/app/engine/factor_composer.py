@@ -41,6 +41,9 @@ from . import feature_classes as fcs
 
 # ── limits ───────────────────────────────────────────────────────────────────
 MAX_CONTEXT_FACTORS = 4
+# With no framework the brief IS the framework: room for demand, competition,
+# access and co-tenancy plus what the customer adds.
+MAX_CONTEXT_FACTORS_GENERIC = 6
 MAX_CONTEXT_SHARE = 0.40
 # For a business the engine has no framework for, the generic spine is three
 # broad proxies and the brief IS the analysis — context may carry more.
@@ -222,10 +225,18 @@ def _spine_signature(layer: dict) -> tuple[set[str], set[str], set[str], str]:
     refinement of a broad proxy (apartment blocks vs "any building") is not a
     duplicate, because the proxy never queried those tags."""
     key = str(layer.get("_canonicalKey") or "")
-    classes = set(FACTOR_FEATURE_CLASSES.get(key, ()))
+    # The generic proxies are placeholders the brief is meant to replace; a
+    # brief factor is never a duplicate of them (live: residential_buildings
+    # and arterial_roads were rejected against "any building" / "any road").
+    classes = set() if key in _GENERIC_PROXIES else set(FACTOR_FEATURE_CLASSES.get(key, ()))
     src = layer.get("source") or {}
+    if key in _GENERIC_PROXIES:
+        return classes, set(), set(), str(layer.get("direction") or "positive")
     return (classes, set(src.get("tags") or []), set(src.get("types") or []),
             str(layer.get("direction") or "positive"))
+
+
+_GENERIC_PROXIES = frozenset({"demand_density_proxy", "generic_competition", "road_access"})
 
 
 def _overlaps(mine: set[str], theirs: set[str]) -> bool:
@@ -324,11 +335,89 @@ def _source_for_classes(classes: tuple[str, ...]) -> dict:
     return {"provider": "osm", "tags": tags}
 
 
+def proposals_from_llm_layers(llm_layers: list | None, known_names: set[str]) -> list[dict]:
+    """A layer the model wrote directly into `layers[]` instead of
+    `contextFactors` — which is what it does on "add a factor" turns (live:
+    contextFactors came back null and the reply said the layer was added).
+    Map it onto the vocabulary by the tags/types it asked for; unmappable
+    layers are dropped, as before, because nothing can count them."""
+    out = []
+    for ll in llm_layers or []:
+        if not isinstance(ll, dict):
+            continue
+        name = str(ll.get("name") or "").strip()
+        if not name or name.lower() in known_names:
+            continue
+        src = ll.get("source") or {}
+        want = set(src.get("tags") or []) | set(src.get("types") or [])
+        best, best_score = None, 0.0
+        for fc in fcs.VOCABULARY:
+            have = set(fc.osm_tags) | set(fc.places_types)
+            if not (want & have):
+                continue
+            score = len(want & have) / len(want | have)      # Jaccard: the tightest class wins
+            if score > best_score:
+                best, best_score = fc, score
+        if best is None:
+            continue
+        c = ll.get("catchment") if isinstance(ll.get("catchment"), dict) else None
+        out.append({
+            "featureClass": best.key,
+            "direction": str(ll.get("direction") or "positive"),
+            "catchment": {k: v for k, v in c.items() if k in ("type", "minutes", "meters")} if c else None,
+            "weightBand": "medium",
+            "why": str(ll.get("whyItMatters") or ll.get("notes") or f"You asked for {name.lower()} to count."),
+            "evidence": str(ll.get("notes") or name),
+        })
+    return out
+
+
+# ── competition backstop for a business with no framework ───────────────────
+# The model is told to name the business's own competitors; it skips it often
+# enough (live: a high-end gym with no gyms factor) that the engine does it
+# deterministically from the customer's words. Word → vocabulary class.
+COMPETITION_BY_WORD: tuple[tuple[re.Pattern, str], ...] = tuple(
+    (re.compile(rx, re.I), cls) for rx, cls in (
+        (r"\bgyms?\b|\bfitness\b|\bcrossfit\b|\byoga\b|\bhealth\s+club", "gyms_fitness"),
+        (r"\bsalons?\b|\bspas?\b|\bbeauty\b|\bparlou?r", "salons_spas"),
+        (r"\bhotels?\b|\bresorts?\b|\bguest\s*house|\bhostel|\blodg", "hotels_competition"),
+        (r"\bco-?working\b|\boffice\s+space|\bbusiness\s+cent", "coworking"),
+        (r"\bpharmac|\bchemist|\bdrug\s*store", "pharmacies"),
+        (r"\bbaker|\bsweet|\bconfection|\bpatisserie", "bakeries_sweets"),
+        (r"\bbars?\b|\bpubs?\b|\bbrewer|\bnight\s*club|\blounge", "bars_pubs"),
+        (r"\bivf\b|\bfertility\b|\bclinic|\bdental|\bphysio|\bdiagnos", "clinics_doctors"),
+        (r"\bpet\b|\bvet(?:erinary)?\b", "pet_services"),
+        (r"\bbanks?\b|\batm\b|\bnbfc\b", "banks_atms"),
+        (r"\bpetrol|\bfuel|\bgas\s+station", "fuel_stations"),
+        (r"\bfast\s*food|\bqsr\b|\btakeaway", "fast_food"),
+        (r"\brestaurant|\bdiner|\beatery|\bbistro", "restaurants"),
+        (r"\bcaf[eé]\b|\bcoffee\b", "cafes"),
+        (r"\bgrocer|\bsupermarket|\bkirana|\bconvenience", "convenience_stores"),
+        (r"\bwarehous|\bstorage|\bfulfil", "warehouses"),
+        (r"\bcharg(?:er|ing)\b|\bev\b", "ev_chargers"),
+    )
+)
+
+
+def infer_competition_proposal(user_text: str) -> dict | None:
+    for rx, cls in COMPETITION_BY_WORD:
+        m = rx.search(user_text or "")
+        if m:
+            fc = fcs.get(cls)
+            return {
+                "featureClass": cls, "direction": "negative", "weightBand": "medium",
+                "why": f"Other {fc.label.lower()} nearby compete for the same customers; some presence validates the market, saturation splits it.",
+                "evidence": m.group(0),
+            }
+    return None
+
+
 # ── validation ───────────────────────────────────────────────────────────────
 def validate_context_factors(
     raw: list | None,
     spine_layers: list[dict],
     user_text: str,
+    max_factors: int = MAX_CONTEXT_FACTORS,
 ) -> tuple[list[dict], list[Rejection]]:
     """Turn the LLM's proposals into installable layer dicts, or rejections."""
     accepted: list[dict] = []
@@ -385,8 +474,17 @@ def validate_context_factors(
             rejected.append(Rejection(key, "not_in_brief",
                                       f"'{evidence or '—'}' does not appear in what you wrote"))
             continue
-        if len(accepted) >= MAX_CONTEXT_FACTORS:
-            rejected.append(Rejection(key, "over_cap", f"more than {MAX_CONTEXT_FACTORS} context factors"))
+        # a duplicate of a factor already accepted this turn (same places, same
+        # direction) — live: premium_cotenants and shopping_malls side by side
+        _dup_acc = next((a for a in accepted if a["direction"] == direction and (
+            _overlaps(set(fc.osm_tags), set((a["source"].get("tags") or []))) or
+            _overlaps(set(fc.places_types), set((a["source"].get("types") or []))))), None)
+        if _dup_acc:
+            rejected.append(Rejection(key, "duplicate_of_framework",
+                                      f"'{_dup_acc['name']}' already counts these places"))
+            continue
+        if len(accepted) >= max_factors:
+            rejected.append(Rejection(key, "over_cap", f"more than {max_factors} context factors"))
             continue
         seen_classes.add(key)
         thin = key in THIN_COVERAGE
@@ -407,10 +505,32 @@ def validate_context_factors(
             "origin": "brief",
             "featureClass": key,
             "featureClasses": [key],
+            "weightBand": band,
             "_scoringCurve": "positive_linear",
             "_family": fc.group,
         })
     return accepted, rejected
+
+
+def proposals_from_layers(layers: list | None) -> list[dict]:
+    """Context factors already on the plan, re-expressed as proposals so a
+    later turn re-validates them instead of losing them. v2.1.0 live: "Add a
+    factor" re-planned the spec and every brief factor vanished, leaving the
+    generic proxies."""
+    out = []
+    for l in layers or []:
+        if not isinstance(l, dict) or l.get("origin") != "brief" or not l.get("featureClass"):
+            continue
+        c = l.get("catchment") or {}
+        out.append({
+            "featureClass": l["featureClass"],
+            "direction": l.get("direction") or "positive",
+            "catchment": {k: v for k, v in c.items() if k in ("type", "minutes", "meters")} or None,
+            "weightBand": l.get("weightBand") or "medium",
+            "why": l.get("whyItMatters") or "Carried over from the plan you agreed.",
+            "evidence": l.get("evidence") or "",
+        })
+    return out
 
 
 # ── composition ──────────────────────────────────────────────────────────────
@@ -425,7 +545,17 @@ def compose(
     """framework spine + validated context factors → one renormalised layer
     list, every layer carrying origin + why."""
     spine = annotate_framework_layers(framework_layers, canonical, spec, intent)
-    accepted, rejected = validate_context_factors(proposals, spine, user_text)
+    generic = getattr(canonical, "key", "") == "generic"
+    max_factors = MAX_CONTEXT_FACTORS_GENERIC if generic else MAX_CONTEXT_FACTORS
+    accepted, rejected = validate_context_factors(proposals, spine, user_text, max_factors)
+    if generic and not any(l.get("_family") == "competition" and l.get("direction") == "negative" for l in accepted):
+        # The backstop runs AFTER validation: a competitor the model proposed
+        # but the validator rejected (bad catchment, say) must not block it.
+        backstop = infer_competition_proposal(user_text)
+        if backstop:
+            more, more_rej = validate_context_factors([backstop], spine + accepted, user_text, max_factors + 1)
+            accepted = more + accepted
+            rejected += more_rej
 
     # A specific competitor class supersedes the generic proxy. The generic
     # framework counts "all shops and eateries" as competition because it does
@@ -433,34 +563,57 @@ def compose(
     # (gyms for a gym, salons for a salon), keeping the proxy would penalise a
     # busy high street for having shops. Observed live: a gym brief scored
     # "Generic competition density" 19% next to "Gyms and fitness studios".
+    # v2.1.0 — the same rule for every generic proxy: a brief factor of the
+    # same kind supersedes it. "Demand density proxy" (any building) gives way
+    # to offices / apartment blocks / luxury retail; "Road / transit
+    # accessibility" to stations / parking / arterial roads. With all three
+    # covered, the brief IS the framework. Live: a high-end gym in Marine
+    # Lines still ran 60% on any-building / any-shop proxies.
     replaced: list[str] = []
-    if getattr(canonical, "key", "") == "generic" and any(
-        l.get("_family") == "competition" and l.get("direction") == "negative" for l in accepted
-    ):
+    replaced_points = 0.0          # the share the replaced proxies held; the brief inherits it
+    if getattr(canonical, "key", "") == "generic":
+        covered = {
+            l.get("_family") for l in accepted
+            if l.get("_family") != "competition" or l.get("direction") == "negative"
+        }
+        _proxy_group = {"demand_density_proxy": "demand", "generic_competition": "competition", "road_access": "access"}
         keep = []
         for l in spine:
-            if l.get("_canonicalKey") == "generic_competition":
+            g = _proxy_group.get(str(l.get("_canonicalKey") or ""))
+            if g and g in covered:
                 replaced.append(str(l.get("name")))
+                replaced_points += float(l.get("weight") or 0.0) * 100.0
             else:
                 keep.append(l)
         spine = keep
 
-    spine_pts = [float(l.get("weight") or 0.0) for l in spine]
-    spine_total = sum(spine_pts) or 1.0
-    # Work in points where the spine sums to 100 (to_layers_dict emits fractions).
-    spine_pts = [w / spine_total * 100.0 for w in spine_pts]
+    # Points: the framework's own weights on a 100-point scale (to_layers_dict
+    # emits fractions of the FULL framework, so a proxy the brief replaced
+    # takes its points with it — a surviving 30-point proxy stays 30 points,
+    # it does not inflate to 100. Live: "Generic competition density" at 62%
+    # over four brief factors at 8-11%).
+    spine_pts = [float(l.get("weight") or 0.0) * 100.0 for l in spine]
+    spine_total = sum(spine_pts)
     ctx_pts = [float(l.get("weight") or 0.0) for l in accepted]
     ctx_total = sum(ctx_pts)
+    if replaced_points > 0 and ctx_total > 0:
+        # The points a replaced proxy held go to the brief factors that took
+        # its place, in proportion — the framework's share of the score is
+        # unchanged, it is just measured with the right things now.
+        ctx_pts = [w + replaced_points * (w / ctx_total) for w in ctx_pts]
+        ctx_total = sum(ctx_pts)
     capped = False
     max_share = MAX_CONTEXT_SHARE_GENERIC if getattr(canonical, "key", "") == "generic" else MAX_CONTEXT_SHARE
-    if ctx_total > 0:
-        share = ctx_total / (100.0 + ctx_total)
+    if ctx_total > 0 and spine_total > 0 and not replaced_points:
+        share = ctx_total / (spine_total + ctx_total)
         if share > max_share:
-            scale = (max_share * 100.0 / (1.0 - max_share)) / ctx_total
+            scale = (max_share * spine_total / (1.0 - max_share)) / ctx_total
             ctx_pts = [w * scale for w in ctx_pts]
             ctx_total = sum(ctx_pts)
             capped = True
-    grand = 100.0 + ctx_total
+    grand = spine_total + ctx_total
+    if grand <= 0:
+        grand = 1.0
     layers: list[dict] = []
     for l, w in zip(spine, spine_pts):
         l2 = dict(l); l2["weight"] = round(w / grand, 4); layers.append(l2)
@@ -473,11 +626,16 @@ def compose(
     )
 
 
-def customer_text(intent, spec: dict | None) -> str:
-    """Everything the customer actually said: the brief plus resolved
-    clarification answers (meta.clarificationsResolved, v1.13.0)."""
+def customer_text(intent, spec: dict | None, user_messages: list[str] | None = None) -> str:
+    """Everything the customer actually said: the brief, resolved
+    clarification answers (meta.clarificationsResolved, v1.13.0), and every
+    later message in the conversation — an "add a factor" turn is the
+    customer speaking too (v2.1.0 live: the added factor was rejected as
+    not_in_brief because only the first brief was read)."""
     parts = [str(getattr(intent, "rawPrompt", "") or "")]
     meta = (spec or {}).get("meta") or {}
     for s in meta.get("clarificationsResolved") or []:
+        parts.append(str(s))
+    for s in user_messages or []:
         parts.append(str(s))
     return "\n".join(parts)

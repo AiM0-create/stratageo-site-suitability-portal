@@ -118,7 +118,7 @@ async def clarify(brief: str) -> dict:
         # Fail-soft: the customer can still run with the parser's table.
         logger.exception("clarify: model call failed — returning no questions")
 
-    result = validate_questions(raw, slots, layers)
+    result = validate_questions(raw, slots, layers, user_text=brief)
     if result.rejections:
         logger.info(
             "clarify: %d question(s) accepted, %d rejected: %s",
@@ -136,6 +136,12 @@ async def clarify(brief: str) -> dict:
     if not reply:
         reply = ("I have what I need — here's the plan." if complete and not questions
                  else "A couple of things would sharpen this:")
+    elif not questions and re.search(r"sharpen|couple of things|few things", reply, re.I):
+        # v2.1.0 live: the model wrote "A couple of things would sharpen this:"
+        # and the engine then dropped every question — the promise hung there
+        # with nothing under it. Keep the acknowledgement, replace the promise.
+        reply = re.sub(r"\s*[^.!?]*(?:sharpen|couple of things|few things)[^.!?]*[.:!?]?\s*$", "", reply).strip()
+        reply = (reply + " " if reply else "") + "I have what I need — here's the plan."
 
     return {
         "reply": reply,

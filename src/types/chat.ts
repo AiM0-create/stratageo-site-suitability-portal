@@ -32,6 +32,7 @@ export interface SpecLayer {
   featureClass?: string | null;
   featureClasses?: string[];
   evidence?: string | null;
+  weightBand?: 'low' | 'medium' | 'high' | null;
 }
 
 /** v2.0.0 — what the engine accepted and rejected from the AI's

@@ -436,6 +436,8 @@ async def chat_turn(
                 canonical=canonical,
                 engine_version=ENGINE_VERSION,
                 cost_mode=settings.cost_mode,
+                prior_layers=(spec or {}).get("layers") if isinstance(spec, dict) else None,
+                user_messages=[m.content for m in messages if m.role == "user"],
             )
             # v1.6.0 (Phase 2) — a customer who adjusted weight sliders on the
             # plan card must not have them wiped when this turn re-applies

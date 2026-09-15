@@ -376,10 +376,21 @@ def _needs_free_text(effect: dict) -> bool:
     )
 
 
+# v2.1.0 — the optional slots are asked only when the brief hints at them.
+# The prompt says so; the model asked "is there anything it must be near?"
+# on a brief with no such hint anyway. The engine decides from the words.
+_HINT_RES: dict[str, re.Pattern] = {
+    "keep_away":    _AVOIDANCE_RE,
+    "must_be_near": _NEAR_RE,
+    "expectations": re.compile(r"\brent|\blease|\bbudget|\bsq\.?\s*ft|\bfloor\s+area|\bcarpet|\bzoning|\bapproval|\blicen[cs]|\bparcel|\bplot|\bown(?:ed|ership)\b", re.I),
+}
+
+
 def validate_questions(
     raw: Any,
     slots: dict[str, SlotState],
     layers: list[dict],
+    user_text: str | None = None,
 ) -> ValidationResult:
     """Gate the AI's questions before a customer sees them.
 
@@ -423,6 +434,12 @@ def validate_questions(
         if st is not None and st.status in ("filled", "skipped"):
             result.rejections.append(Rejection(
                 qid, "redundant", f"slot {slot!r} is already {st.status} from {st.source}"))
+            continue
+        # v2.1.0 — keep_away / must_be_near / expectations only when the brief
+        # hints at them; an empty slot is permission, not an instruction.
+        if user_text is not None and slot in _HINT_RES and not _HINT_RES[slot].search(user_text):
+            result.rejections.append(Rejection(
+                qid, "unhinted", f"nothing in the brief asks about {slot.replace('_', ' ')}"))
             continue
         # v2.1.0 — a business with no framework has no formats to choose from.
         # Live: a salon brief was offered "Salon only / Salon and spa / Spa-led

@@ -427,11 +427,17 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
     // quote the words in the brief it rests on; the engine rejects any it cannot
     // find there, any class it cannot count, and any duplicate of a standard factor.
     // If the business type is one the engine has no framework for (gym, hotel,
-    // office, salon, pharmacy, anything unusual), propose 2-4 — they ARE the analysis,
-    // and the FIRST must be the business's own competition class with
-    // direction "negative" (gym → gyms_fitness, hotel → hotels_competition, salon →
-    // salons_spas, pharmacy → pharmacies): the generic framework only counts
-    // shops-and-eateries as competition, which is wrong for these.
+    // office, salon, pharmacy, anything unusual), the factors you propose here ARE
+    // the framework — the engine replaces its generic proxies with them. Propose
+    // 3-5 that cover: WHO buys (a demand class — offices, apartment_blocks,
+    // luxury_retail for anything premium/high-end, colleges for students…);
+    // WHO competes (the business's own class, direction "negative": gym →
+    // gyms_fitness, salon → salons_spas, hotel → hotels_competition, pharmacy →
+    // pharmacies); HOW people arrive (transit_stations, parking, arterial_roads);
+    // and, for destination or premium businesses, WHAT NEARBY HELPS
+    // (premium_cotenants, shopping_malls, cinemas_entertainment).
+    // When the client asks to ADD a factor, it goes here as a feature class;
+    // if nothing in the vocabulary counts it, say so in feasibility instead.
     {{"featureClass": "it_parks", "direction": "positive",
       "catchment": {{"type": "walk", "minutes": 10}},        // optional; sensible default per class
       "weightBand": "medium",                              // low | medium | high — the engine sets the number

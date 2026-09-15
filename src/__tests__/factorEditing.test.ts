@@ -155,7 +155,7 @@ describe('buildAddFactorPrompt', () => {
   it('keeps the rest of the plan intact and names the factor', () => {
     const p = buildAddFactorPrompt('  student   density ', 'positive');
     expect(p).toContain('"student density"');
-    expect(p).toContain('keep the rest of the plan unchanged');
+    expect(p).toContain('Keep every other factor exactly as it is');
   });
 });
 

@@ -545,8 +545,13 @@ def apply_deterministic_plan(
     canonical: CanonicalArchetype,
     engine_version: str,
     cost_mode: str,
+    prior_layers: list | None = None,
+    user_messages: list[str] | None = None,
 ) -> dict:
     """Override the LLM spec's structural fields with the canonical schema.
+
+    prior_layers — the previous turn's layers (client spec), so brief-origin
+    context factors survive a follow-up turn ("add a factor", "run").
 
     Returns a new dict — does not mutate llm_spec.
     Preserves LLM text fields (explanation, feasibility, plan assumptions).
@@ -569,7 +574,7 @@ def apply_deterministic_plan(
     # each quoting the customer's words — are validated and installed as
     # extra factors under the engine's rules (engine/factor_composer.py).
     # Raw LLM tags are no longer inherited: the vocabulary is the source.
-    from .factor_composer import compose, customer_text
+    from .factor_composer import compose, customer_text, proposals_from_layers, proposals_from_llm_layers
     canonical_layers_base = canonical.to_layers_dict()
     llm_layers_by_name = {}
     for ll in (llm_spec.get("layers") or []):
@@ -583,10 +588,14 @@ def apply_deterministic_plan(
         if matching_llm and matching_llm.get("notes"):
             cl["notes"] = matching_llm.get("notes")       # the customer's verbatim wording, if any
 
+    _known = {str(l.get("name") or "").lower() for l in canonical_layers_base}
+    _known |= {str(l.get("name") or "").lower() for l in (prior_layers or []) if isinstance(l, dict)}
     _composition = compose(
         canonical_layers_base,
-        llm_spec.get("contextFactors"),
-        customer_text(intent, llm_spec),
+        proposals_from_layers(prior_layers)
+        + list(llm_spec.get("contextFactors") or [])
+        + proposals_from_llm_layers(llm_spec.get("layers"), _known),
+        customer_text(intent, llm_spec, user_messages),
         canonical,
         llm_spec,
         intent,

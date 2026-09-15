@@ -255,6 +255,7 @@ class Layer(BaseModel):
     featureClass: Optional[str] = None            # context factor: the vocabulary key
     featureClasses: list[str] = []                # what this factor measures (any origin)
     evidence: Optional[str] = None                # context factor: the customer's words it rests on
+    weightBand: Optional[str] = None              # context factor: low | medium | high (re-validated across turns)
 
 
 class Exclusion(BaseModel):

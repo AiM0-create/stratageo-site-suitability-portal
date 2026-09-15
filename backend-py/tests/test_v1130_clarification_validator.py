@@ -492,3 +492,21 @@ def test_the_vague_brief_earns_questions_and_the_complete_brief_earns_none():
     assert c.accepted == []                       # every slot already known
     assert {r.rule for r in c.rejections} == {"redundant"}
     assert is_complete(complete)
+
+
+class TestOnlyWhenHinted:
+    """v2.1.0 — the optional slots need a hint in the brief."""
+    def test_must_be_near_without_a_hint_is_dropped(self):
+        res = validate_questions([_q("must_be_near", [_opt("Yes", {"type": "require_near"}, free_text=True)])],
+                                 _empty_slots(), CAFE_LAYERS, user_text="High-end gym in Marine Lines, Mumbai")
+        assert res.accepted == [] and res.rejections[0].rule == "unhinted"
+
+    def test_a_hinted_slot_is_asked(self):
+        res = validate_questions([_q("keep_away", [_opt("Yes", {"type": "exclude"}, free_text=True)])],
+                                 _empty_slots(), CAFE_LAYERS, user_text="Cafe in Bengaluru, away from the highway")
+        assert len(res.accepted) == 1
+
+    def test_no_text_means_no_gate(self):
+        res = validate_questions([_q("must_be_near", [_opt("Yes", {"type": "require_near"}, free_text=True)])],
+                                 _empty_slots(), CAFE_LAYERS)
+        assert len(res.accepted) == 1
