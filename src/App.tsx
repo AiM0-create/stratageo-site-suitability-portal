@@ -191,6 +191,11 @@ const App: React.FC = () => {
       const nowReady = !!resp.spec && resp.specValid;
       setChatReady(nowReady);
       setAnalysisPhase(nowReady ? 'spec_ready' : 'planning');
+      // v2.2.0 — a plan that fails validation must never sit there with no
+      // Run button and no explanation (live: "at most 6 isochrone layers").
+      if (resp.spec && !resp.specValid && resp.stage !== 'chat') {
+        setError(`This plan can't run as it is: ${resp.specValidationError || 'the engine rejected it'}. Remove or change a factor, or say what to adjust.`);
+      }
     } catch (err: any) {
       clearTimeout(coldStart);
       const parts = [err?.message || 'The assistant is unavailable. Please try again.'];

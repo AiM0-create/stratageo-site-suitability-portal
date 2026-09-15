@@ -591,3 +591,37 @@ class TestEvidenceIsAboutTheBusiness:
         assert not evidence_in_text("top 3 candidate", brief)
         assert evidence_in_text("NOVA IVF", brief)
         assert evidence_in_text("IVF expansion", brief)      # a business word makes it evidence
+
+
+class TestProviderBudgets:
+    """v2.2.0 live: seven walk-catchment layers → SpecV2 refused the plan and
+    the Run button never appeared. The composed plan must always validate."""
+    def test_a_premium_brief_with_many_walk_factors_validates(self):
+        prompt = "Premium vegetarian sweets, snacks and QSR outlet near Chinar Park, Kolkata, 3 zones"
+        intent = parse_raw_intent(prompt)
+        canonical = get_canonical(intent.businessTypeKey)
+        props = [_p(c, evidence=e) for c, e in [
+            ("apartment_blocks", "Chinar Park"), ("offices", "outlet"),
+            ("transit_hubs_demand", "Chinar Park"), ("fast_food", "QSR")]]
+        props[3]["direction"] = "negative"
+        spec = apply_deterministic_plan(_llm_spec(prompt, props, biz="sweets and QSR"), intent, canonical, "test", "balanced")
+        model = SpecV2.model_validate(spec)          # would raise before v2.2.0
+        iso = [l for l in model.layers if l.catchment.type in ("walk", "drive")]
+        assert len(iso) <= 6
+        assert any("straight-line" in (l.notes or "") for l in model.layers if l.origin == "brief")
+
+    def test_places_budget_falls_back_to_osm(self):
+        from app.engine.factor_composer import fit_to_budget
+        layers = [{"id": f"L{i}", "name": f"P{i}", "weight": 0.1, "origin": "framework",
+                   "source": {"provider": "google_places", "types": ["cafe"]}, "catchment": {"type": "euclidean", "meters": 500}}
+                  for i in range(5)]
+        layers.append({"id": "X_schools", "name": "Schools", "weight": 0.1, "origin": "brief", "featureClass": "schools",
+                       "source": {"provider": "google_places", "types": ["school"]}, "catchment": {"type": "euclidean", "meters": 500}})
+        layers.append({"id": "X_fertility_ivf", "name": "IVF", "weight": 0.05, "origin": "brief", "featureClass": "fertility_ivf",
+                       "source": {"provider": "google_places", "types": ["hospital"], "keyword": "IVF"}, "catchment": {"type": "euclidean", "meters": 500}})
+        out, rej = fit_to_budget(layers)
+        assert sum(1 for l in out if l["source"]["provider"] == "google_places") <= 5
+        schools = next(l for l in out if l["id"] == "X_schools")
+        assert schools["source"]["provider"] == "osm"
+        assert [r.feature_class for r in rej] == ["fertility_ivf"] and rej[0].reason == "over_cap"
+        assert abs(sum(l["weight"] for l in out) - 1.0) < 1e-3

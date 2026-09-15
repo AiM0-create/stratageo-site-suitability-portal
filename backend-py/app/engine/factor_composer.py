@@ -649,11 +649,70 @@ def compose(
         l2 = dict(l); l2["weight"] = round(w / grand, 4); layers.append(l2)
     for l, w in zip(accepted, ctx_pts):
         l2 = dict(l); l2["weight"] = round(w / grand, 4); layers.append(l2)
+    layers, budget_rejections = fit_to_budget(layers)
+    rejected += budget_rejections
+    ctx_total = sum(float(l["weight"]) for l in layers if l.get("origin") == "brief") * grand
     return Composition(
         layers=layers, accepted=[dict(l) for l in layers if l.get("origin") == "brief"],
         rejected=rejected, context_share=(ctx_total / grand if grand else 0.0),
         context_share_capped=capped, replaced=replaced,
     )
+
+
+def fit_to_budget(layers: list[dict]) -> tuple[list[dict], list[Rejection]]:
+    """Keep the composed plan inside the spec's provider budgets — at most
+    MAX_ISOCHRONE_LAYERS walk/drive catchments and MAX_PLACES_LAYERS Places
+    layers — so a plan with brief factors always validates. v2.2.0 live: a
+    sweets-and-QSR brief composed seven walk-catchment layers, SpecV2 refused
+    it ("at most 6 isochrone layers allowed"), and the Run button never
+    appeared. The framework keeps its budget; the lightest brief factors give
+    up theirs: a walk/drive catchment becomes the equivalent straight-line
+    radius (labelled), a Places source falls back to the class's OSM tags,
+    and a Places-only class with no OSM fallback is dropped with a reason."""
+    from ..models.spec import MAX_ISOCHRONE_LAYERS, MAX_PLACES_LAYERS
+    from ..config import get_settings
+    s = get_settings()
+    out = [dict(l) for l in layers]
+    rejections: list[Rejection] = []
+    ctx_light_first = sorted(
+        [l for l in out if l.get("origin") == "brief"], key=lambda l: float(l.get("weight") or 0.0))
+
+    def iso_count():
+        return sum(1 for l in out if (l.get("catchment") or {}).get("type") in ("walk", "drive"))
+
+    for l in ctx_light_first:
+        if iso_count() <= MAX_ISOCHRONE_LAYERS:
+            break
+        c = l.get("catchment") or {}
+        if c.get("type") in ("walk", "drive"):
+            speed = s.walk_speed_m_per_min if c["type"] == "walk" else s.drive_speed_m_per_min
+            meters = int(round(float(c.get("minutes") or 10) * speed / 50.0) * 50)
+            l["catchment"] = {"type": "euclidean", "meters": max(100, min(3000, meters))}
+            l["notes"] = (str(l.get("notes") or "") + f" Measured as a straight-line {l['catchment']['meters']} m radius — "
+                          "the travel-time budget was used by the framework factors.").strip()
+
+    def places_count():
+        return sum(1 for l in out if (l.get("source") or {}).get("provider") == "google_places")
+
+    for l in ctx_light_first:
+        if places_count() <= MAX_PLACES_LAYERS:
+            break
+        src = l.get("source") or {}
+        if src.get("provider") != "google_places":
+            continue
+        fc = fcs.get(str(l.get("featureClass") or ""))
+        if fc is not None and fc.osm_tags and not fc.keyword:
+            l["source"] = {"provider": "osm", "tags": list(fc.osm_tags)}
+            l["notes"] = (str(l.get("notes") or "") + " Counted from OpenStreetMap — the Places budget was used by the framework factors.").strip()
+        else:
+            rejections.append(Rejection(str(l.get("featureClass") or l.get("name")), "over_cap",
+                                        "the Places budget is used by the framework factors and this class has no map-tag fallback"))
+            out.remove(l)
+    if rejections:
+        total = sum(float(l.get("weight") or 0.0) for l in out) or 1.0
+        for l in out:
+            l["weight"] = round(float(l.get("weight") or 0.0) / total, 4)
+    return out, rejections
 
 
 def customer_text(intent, spec: dict | None, user_messages: list[str] | None = None) -> str:
