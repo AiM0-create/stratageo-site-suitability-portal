@@ -4,6 +4,29 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.1.2] — 2026-09-15 — Why the greenest cell is not Priority 1
+
+Owner, on a live high-end-gym run: a cell reads *Overall suitability 10.0*
+and Priority 1 is a different, paler cell at 6.3 — "why? that is not
+specified at all." It was not. The best screening cell was in the shortlist,
+lost on re-verification, and nothing on the map said so, let alone why.
+
+- Every shortlisted cell now carries its **verified score, its rank among the
+  shortlist, and the factor that cost it the most** between screening and
+  verification (`verifiedScore`, `shortlistRank`, `shortlistSize`,
+  `verifiedNote`). Hovering the 10.0 cell reads: *Overall suitability: 10.0/10
+  (screening) — verified 7.1/10, ranked 5 of 12, not a winner: Premium shops
+  and malls counted lower within a real walk catchment than the straight-line
+  screening suggested.*
+- The results header states the link when it matters: *The greenest cell
+  (screening 10.0) ranked 5 of 12 once verified — …*
+  (`shortlist.bestScreeningNote`). Absent when the greenest cell wins.
+- The reason is computed, not written: the layer with the largest weighted
+  drop between its Pass-A screening score and its Pass-B refined score.
+- `offices` counts OSM `office=*` (Places `corporate_office` found nothing in
+  Marine Lines); the plan card lists only classes we cannot count, not the
+  composer's housekeeping.
+
 ## [2.1.1] — 2026-09-15 — The brief is the framework
 
 Owner's test after v2.1.0, a high-end gym in Marine Lines: the plan came

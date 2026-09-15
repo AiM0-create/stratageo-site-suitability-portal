@@ -251,6 +251,12 @@ export interface HexGridCell {
   finalRank?: number;
   /** v2.0.0 — one of the top-K screening cells that were re-verified. */
   shortlisted?: boolean;
+  /** v2.1.2 — every shortlisted cell: verified score, rank among the shortlist,
+   *  and (for the ones that lost) the factor that cost them. */
+  verifiedScore?: number;
+  shortlistRank?: number;
+  shortlistSize?: number;
+  verifiedNote?: string;
 }
 
 /** v2.0.0 — the ranking basis, as numbers the header can print. */
@@ -261,6 +267,8 @@ export interface ShortlistInfo {
   eligible: number;
   separationRings: number;
   basis: string;
+  /** v2.1.2 — when the greenest cell is not a winner, why. */
+  bestScreeningNote?: string | null;
 }
 
 export interface CatchmentOutline {

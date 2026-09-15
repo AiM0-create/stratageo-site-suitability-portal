@@ -8,7 +8,7 @@ from app.config import Settings, APP_VERSION, ENGINE_VERSION
 
 def test_version_is_120():
     # Updated to v1.13.0 — the AI asks, the engine owns the meaning
-    assert APP_VERSION == "2.1.1"
+    assert APP_VERSION == "2.1.2"
     assert ENGINE_VERSION == "stratageo-engine-00078"
 
 

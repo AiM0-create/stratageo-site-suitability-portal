@@ -198,6 +198,11 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
             {exec.criticalNextCheck && (
               <div style={{ fontSize: '11px', color: '#0c4a6e', marginTop: 4 }}><b>Next check:</b> {exec.criticalNextCheck}</div>
             )}
+            {/* v2.1.2 — the link between the greenest cell and the winner,
+                stated where the eye lands. */}
+            {result.shortlist?.bestScreeningNote && (
+              <div style={{ fontSize: '11px', color: '#475569', marginTop: 4 }}>{result.shortlist.bestScreeningNote}</div>
+            )}
           </div>
         )}
 

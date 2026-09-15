@@ -3179,22 +3179,75 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         for rank, (ci, loc) in enumerate(zip(finals, locations))
         if isinstance(loc.get("mcda_score"), (int, float)) and not loc.get("scoreWithheld")
     }
-    _shortlist_h3 = {hexes[ci].h3_id for ci in candidates}
+    # v2.1.2 — every shortlisted cell carries its verified score, its rank
+    # among the shortlist, and — when it is not a winner — the factor that
+    # cost it the most between screening and verification. Owner's question
+    # on a live run: "the hex says 10.0 but Priority 1 is a different hex at
+    # 6.3 — why? that is not specified at all." It was not: the best
+    # screening cell was shortlisted, lost on re-verification, and nothing on
+    # the map said so, let alone why.
+    _verified: dict[int, float] = {}
+    _verify_note: dict[int, str] = {}
+    for ci in candidates:
+        _vc, _vdetail = scoring.composite_for_hex(spec, scores, ci)
+        if _vc is None:
+            continue
+        _verified[ci] = float(_vc) * 10.0
+        # the layer whose verified score fell furthest below its screening score
+        _worst, _worst_drop = None, 0.0
+        for _ls in scores.values():
+            if not _ls.has_data or ci not in _ls.refined:
+                continue
+            _d = _vdetail.get(_ls.layer.id) or {}
+            _ref = _d.get("normScore")
+            if not isinstance(_ref, (int, float)):
+                continue
+            _scr = float(scoring.curve_score(_ls.layer, scoring.tx(_ls.layer, _ls.raw[ci]), _ls.norm_low, _ls.norm_high))
+            _drop = (_scr - float(_ref)) * float(_ls.layer.weight)
+            if _drop > _worst_drop:
+                _worst, _worst_drop = _ls.layer, _drop
+        if _worst is not None and _worst_drop > 0.02:
+            _how = ("within a real walk/drive catchment" if _worst.catchment.type in ("walk", "drive")
+                    else "once re-counted")
+            _verify_note[ci] = (f"{_worst.name} counted lower {_how} than the straight-line screening suggested")
+    _verified_order = sorted(_verified, key=lambda ci: -_verified[ci])
+    _shortlist_rank = {ci: i + 1 for i, ci in enumerate(_verified_order)}
+    _by_h3_ci = {hexes[ci].h3_id: ci for ci in candidates}
     for _cell in hex_grid:
-        if _cell.get("h3") in _shortlist_h3 and not _cell.get("excluded"):
+        _ci = _by_h3_ci.get(_cell.get("h3"))
+        if _ci is not None and not _cell.get("excluded"):
             _cell["shortlisted"] = True
+            if _ci in _verified:
+                _cell["verifiedScore"] = round(_verified[_ci], 2)
+                _cell["shortlistRank"] = _shortlist_rank[_ci]
+                _cell["shortlistSize"] = len(_verified)
+            if _ci in _verify_note:
+                _cell["verifiedNote"] = _verify_note[_ci]
         _hit = _final_by_h3.get(_cell.get("h3"))
         if _hit is not None and not _cell.get("excluded"):
             _rank, _loc = _hit
             _cell["refinedCandidate"] = True
             _cell["refinedScore"] = round(float(_loc["mcda_score"]), 2)
             _cell["finalRank"] = _rank
+    # the headline link between the map and the list
+    _eligible_idx = [i for i in range(len(hexes)) if not excluded[i]]
+    _best_screen = max(_eligible_idx, key=lambda i: float(composite[i])) if _eligible_idx else None
+    _best_note = None
+    if _best_screen is not None and finals and _best_screen not in finals:
+        _bs_rank = _shortlist_rank.get(_best_screen)
+        _best_note = (
+            f"The greenest cell (screening {float(composite[_best_screen]) * 10:.1f}) "
+            + (f"ranked {_bs_rank} of {len(_verified)} once verified"
+               if _bs_rank else "was not in the re-verified shortlist")
+            + (f" — {_verify_note[_best_screen]}." if _best_screen in _verify_note else ".")
+        )
     _shortlist_info = {
         "size": len(candidates),
         "verified": len(finals),
         "screened": len(hexes),
         "eligible": int((~excluded).sum()),
         "separationRings": _sep_rings,
+        "bestScreeningNote": _best_note,
         "basis": ("Cells are coloured by the screening score (every cell, same basis). "
                   f"The top {len(candidates)} screening cells, at least {_sep_rings} ring(s) apart, "
                   "were re-scored with travel-time, routing and Places data; the ranking is "

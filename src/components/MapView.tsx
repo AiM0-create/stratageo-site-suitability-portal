@@ -424,9 +424,14 @@ export const MapView: React.FC<MapViewProps> = ({
       // v2.0.0 — one basis on the surface, both numbers in the tooltip. A
       // chosen zone's colour is its screening score like every other cell;
       // its verified score (the number on its card) is stated alongside.
+      // v2.1.2 — a shortlisted cell that lost says how it ranked and why.
       const finalTag = cell.refinedCandidate && typeof cell.refinedScore === 'number'
         ? ` (screening, the map colour) — verified ${cell.refinedScore.toFixed(1)}/10, ranked #${cell.finalRank ?? '?'} after travel-time and routing checks`
-        : cell.shortlisted ? ' — shortlisted and re-verified, not in the final ranking' : '';
+        : cell.shortlisted
+          ? (typeof cell.verifiedScore === 'number'
+              ? ` (screening) — verified ${cell.verifiedScore.toFixed(1)}/10, ranked ${cell.shortlistRank} of ${cell.shortlistSize}, not a winner${cell.verifiedNote ? `: ${cell.verifiedNote}` : ''}`
+              : ' — shortlisted and re-verified, not in the final ranking')
+          : '';
       const label = cell.excluded
         ? 'Excluded zone'
         : !hasVal
