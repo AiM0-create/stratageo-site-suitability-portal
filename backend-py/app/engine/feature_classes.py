@@ -60,8 +60,11 @@ VOCABULARY: tuple[FeatureClass, ...] = (
     _fc("apartment_blocks", "Apartment blocks", "demand",
         ["building=apartments"], [],
         "counts mapped apartment buildings — denser housing, a proxy for concentrated resident demand"),
+    # OSM-first: `office=*` is well mapped in Indian CBDs; the Places
+    # `corporate_office` type returned nothing for Marine Lines, Mumbai (live,
+    # v2.1.1) and a Places-typed class queries Places only.
     _fc("offices", "Offices and workplaces", "demand",
-        ["office=*", "building=office", "building=commercial", "landuse=commercial"], ["corporate_office"],
+        ["office=*", "building=office", "building=commercial", "landuse=commercial"], [],
         "counts mapped offices, office buildings and commercial land — a proxy for people who work nearby during the day"),
     _fc("it_parks", "IT / business parks", "demand",
         ["landuse=commercial", "office=it", "office=company", "building=office"], [],
