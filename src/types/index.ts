@@ -89,6 +89,10 @@ export interface MCDACriteria {
    * observed_zero (query OK, zero features) vs unavailable (provider failed). */
   dataStatus?: 'observed' | 'observed_zero' | 'unavailable' | string;
   osmQuery?: string;
+  /** v1.14.0 — why this factor is in the analysis, and where it came from. */
+  whyItMatters?: string | null;
+  origin?: 'framework' | 'brief' | 'answer' | 'user' | null;
+  evidence?: string | null;
 }
 
 // ─── Exclusion result ───

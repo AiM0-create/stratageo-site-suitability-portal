@@ -250,6 +250,17 @@ class Layer(BaseModel):
     # from missing data).
     required: bool = False
     notes: Optional[str] = None
+    # v1.14.0 — provenance. Every factor says where it came from and why it is
+    # in the plan. "framework": the business family's spine (deterministic
+    # rationale from engine/factor_composer.FACTOR_RATIONALE). "brief": an
+    # AI-composed context factor built from the customer's own words, on a
+    # feature class from engine/feature_classes.py, validated by the engine.
+    # "user": added or edited by the customer on the plan card. Declared here
+    # because Pydantic silently drops undeclared keys (the v1.11.0 lesson).
+    origin: Optional[Literal["framework", "brief", "answer", "user"]] = None
+    featureClass: Optional[str] = None            # context factor: the vocabulary key
+    featureClasses: list[str] = []                # what this factor measures (any origin)
+    evidence: Optional[str] = None                # context factor: the customer's words it rests on
 
 
 class Exclusion(BaseModel):
@@ -553,6 +564,10 @@ class SpecV2(BaseModel):
     # Entries: {"name": str, "bufferM": float, "lat"?: float, "lng"?: float}.
     namedExclusions: list[dict] = []
     competitionCurve: Optional[str] = None      # "target_band" when band scoring is on
+    # v1.14.0 — what the factor composer accepted and rejected from the AI's
+    # context-factor proposals, with reasons, so the plan card can show the
+    # customer which of their words became a variable and which could not.
+    factorComposition: Optional[dict] = None
     promptWeightUnmatched: list[str] = []       # stated weights no layer matched
 
     # ── v1.6.3 — grid-level choice ─────────────────────────────────────────────

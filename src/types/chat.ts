@@ -24,6 +24,28 @@ export interface SpecLayer {
   whyItMatters?: string | null;
   proxyWarning?: string | null;
   notes?: string | null;
+  /** v1.14.0 — provenance: where this factor came from and what it measures.
+   *  "framework" = the business family's spine; "brief" = composed by the AI
+   *  from the customer's own words (validated by the engine); "user" = edited
+   *  on the plan card. */
+  origin?: 'framework' | 'brief' | 'answer' | 'user' | null;
+  featureClass?: string | null;
+  featureClasses?: string[];
+  evidence?: string | null;
+}
+
+/** v1.14.0 — what the engine accepted and rejected from the AI's
+ *  context-factor proposals, for the plan card's provenance note. */
+export interface FactorComposition {
+  accepted: Array<{ featureClass: string; name: string; direction: string; why?: string | null; evidence?: string | null }>;
+  rejected: Array<{ featureClass: string; reason: string; detail: string }>;
+  contextShare: number;
+  contextShareCapped: boolean;
+  /** generic proxies superseded because the brief named the real competitors */
+  replaced?: string[];
+  frameworkKey: string;
+  frameworkName: string;
+  genericFramework: boolean;
 }
 
 export interface ConstraintItem {
@@ -77,6 +99,8 @@ export interface SpecV2 {
   /** v1.6.0 (Phase 2) — archetype default weights (name → weight), recorded by
    *  the deterministic planner for the default-vs-adjusted audit. */
   canonicalWeights?: Record<string, number>;
+  /** v1.14.0 — factor provenance record from the composer. */
+  factorComposition?: FactorComposition | null;
   /** v1.6.3 — set true when the customer picks an H3 grid level (7 or 8) on
    *  the plan card; the backend then preserves that resolution across chat
    *  turns instead of re-applying the archetype default. */

@@ -4,6 +4,67 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [1.14.0] — 2026-09-15 — The AI composes, the engine measures
+
+The review pack of 15 September put the variable framework on the table and
+the verdict was blunt: eleven fixed templates chosen by keyword, five recognised
+business types and every unrecognised one dumped into a three-proxy Generic,
+and no way to say *why* a variable was in the plan. Reading the code confirmed
+worse: `whyItMatters` was null on nearly every framework factor, the LLM's
+layers were discarded except for raw OSM tags inherited by display-name match
+(so a factor's data source varied run to run), and three headline factors had
+no data mapping at all — "Pedestrian footfall" (35% of café and retail) fell
+through to `point_of_interest`, which Places API (New) rejects, so the layer
+queried an empty type list.
+
+### The rule
+A variable is only real if it decomposes into things the engine can count.
+The AI proposes; the engine validates and installs. Every factor now carries an
+**origin** and a **one-line reason**.
+
+### What was built
+- **`engine/feature_classes.py`** — the closed vocabulary: ~60 feature classes
+  (homes, IT parks, cafés, salons, gyms, malls, stations, footpaths, railway
+  tracks …), each with the OSM tags and Places types it actually queries and a
+  plain sentence saying what is counted. The LLM never writes a raw tag again.
+  A test asserts every entry is executable by the live fetchers.
+- **`engine/factor_composer.py`** — the framework is the *spine*, not the whole
+  plan. Framework factors get a deterministic rationale (`FACTOR_RATIONALE`,
+  templated on the business noun) and their vocabulary source. The LLM's
+  `contextFactors` — feature classes justified by the customer's own words —
+  are validated (unknown class → "not something we can count"; duplicate of
+  the framework; catchment out of range; evidence not in the brief or the
+  clarifying answers; cap of four) and installed at band weights. Context
+  factors never exceed 40% of the total (60% for the generic framework, where
+  the brief *is* the analysis). Weights renormalise preserving ratios.
+- **A specific competitor supersedes the generic proxy.** A gym brief that
+  says "avoid areas with many gyms" now scores gyms as competition and drops
+  "Generic competition density" (all shops and eateries) instead of running
+  both. Observed live before the rule: 19% generic + 12% gyms, side by side.
+- **Models** — `Layer.origin / featureClass / featureClasses / evidence`,
+  `SpecV2.factorComposition` (declared, so Pydantic does not drop them).
+- **Prompt** — the `contextFactors` contract and the vocabulary catalogue; for
+  a business with no framework, the first context factor must be its own
+  competition class, negative.
+- **Plan card** — a provenance note (framework name, what the brief added,
+  what was rejected and why, what was replaced), a *from your brief* chip, and
+  the reason on its own line under every factor. Zone cards in the results
+  drawer show the same reason per factor.
+
+### Verified live (planner turns against the production model)
+- *Gym for IT professionals near the tech parks in Whitefield, avoid many
+  gyms*: IT parks (+, "IT professionals near the tech parks"), offices (+),
+  gyms and fitness studios (−, "avoid areas that already have many gyms"),
+  generic competition dropped.
+- *Salon and spa in Koramangala for working women*: offices (+, "working
+  women"), salons and spas (−), coworking (+, low confidence, thin mapping).
+- *Pet-friendly café near the IT parks*: café framework + IT parks, parks and
+  playgrounds, pet shops and vets — each quoting the words it rests on.
+
+### Not in this release
+The market tier (a computed profile of the study area adjusting catchments
+and weights) is designed, not built; it needs the area fetch before planning.
+
 ## [1.13.1] — 2026-09-12 — Narrow, then commit (frontend-only)
 
 v1.13.0 built the turn; this release puts it on screen. A fresh brief now goes

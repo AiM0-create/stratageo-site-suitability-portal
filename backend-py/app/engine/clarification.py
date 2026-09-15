@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .canonical_archetypes import _REGISTRY
-from .planner_lite import _UNSUPPORTED_RULES, _factor_family
+from .planner_lite import _UNSUPPORTED_RULES, _factor_family, layer_family
 
 # ── The slot vocabulary ───────────────────────────────────────────────────────
 #
@@ -300,7 +300,7 @@ class ValidationResult:
 
 def _families_present(layers: list[dict]) -> set[str]:
     return {
-        _factor_family(str(l.get("name") or ""))
+        layer_family(l)
         for l in (layers or [])
         if isinstance(l, dict) and l.get("id")
     }
@@ -718,7 +718,7 @@ def _scale_family(layers: list[dict], family: str, factor: float) -> tuple[list[
     out = []
     for l in layers or []:
         l2 = dict(l)
-        if _factor_family(str(l2.get("name") or "")) == family:
+        if layer_family(l2) == family:
             l2["weight"] = float(l2.get("weight") or 0.0) * factor
             hit += 1
         out.append(l2)

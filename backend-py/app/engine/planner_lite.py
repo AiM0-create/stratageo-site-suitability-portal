@@ -228,6 +228,18 @@ def _factor_family(name: str) -> str:
     return "other"
 
 
+def layer_family(layer: dict) -> str:
+    """v1.14.0 — a composed context factor carries its family explicitly
+    (`_family`, from its feature class group); framework factors are still
+    classified by name. Risk factors count as "other" for emphasis purposes."""
+    fam = str((layer or {}).get("_family") or "")
+    if fam in ("demand", "access", "cotenancy", "competition"):
+        return fam
+    if fam:
+        return "other"
+    return _factor_family(str((layer or {}).get("name") or ""))
+
+
 # v1.12.6 — turn a scenario's prose `emphasis` into an applicable weight shift.
 #
 # The plan card already rendered scenario chips ("Balanced premium cafe",
@@ -257,7 +269,7 @@ def derive_scenario_multipliers(scenario_text: str, layers: list[dict]) -> dict[
     hits = {
         str(l.get("id") or ""): SCENARIO_EMPHASIS_MULTIPLIER
         for l in layers
-        if l.get("id") and _factor_family(str(l.get("name") or "")) in families
+        if l.get("id") and layer_family(l) in families
     }
     if not hits or len(hits) >= len(layers):
         return {}
@@ -292,7 +304,7 @@ def build_clarifying_questions(layers: list[dict]) -> list[dict]:
         lid = str(l.get("id") or "")
         if not lid:
             continue
-        by_family.setdefault(_factor_family(str(l.get("name") or "")), []).append(lid)
+        by_family.setdefault(layer_family(l), []).append(lid)
 
     questions: list[dict] = []
 

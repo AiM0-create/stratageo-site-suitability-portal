@@ -218,6 +218,11 @@ def build_location(
             **({"comparative": comparative} if comparative else {}),
             **({"scoringCurve": "target_band"} if _is_band else {}),
             "osmQuery": ", ".join(layer.source.tags) if layer.source.provider == "osm" else None,
+            # v1.14.0 — provenance travels with the result so the zone card
+            # can say why this factor is in the analysis at all.
+            "whyItMatters": getattr(layer, "whyItMatters", None),
+            "origin": getattr(layer, "origin", None),
+            "evidence": getattr(layer, "evidence", None),
         })
         osm_signals[_signal_key(layer.name)] = int(raw)
 

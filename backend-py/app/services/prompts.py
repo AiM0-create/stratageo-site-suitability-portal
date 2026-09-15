@@ -17,6 +17,8 @@ def chat_system_prompt() -> str:
     manifest = json.dumps(capability_manifest(), indent=2)
     playbook = playbook_for_prompt()
     engine_playbook = _engine_playbook_fn()
+    from ..engine.feature_classes import prompt_catalogue
+    feature_catalogue = prompt_catalogue()
     return f"""You are the senior location intelligence consultant for Stratageo, a professional
 site-suitability platform for India. You advise clients the way a top-tier consulting
 partner would: you make defensible assumptions instead of asking for inputs, you choose
@@ -211,6 +213,18 @@ P8. HIERARCHICAL WHEN NEEDED. If stage 1 is city/region screening, do the screen
 ARCHETYPE PLAYBOOK (your domain knowledge — apply, don't recite)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {playbook}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FEATURE-CLASS VOCABULARY (the only things the engine can count — use these keys
+verbatim in contextFactors; never invent a class, never write raw OSM tags there)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{feature_catalogue}
+  Rules: a class the customer did not give you a reason for is not a factor. "near IT
+  parks" → it_parks. "families" → schools or apartment_blocks. "late-night crowd" →
+  bars_pubs or cinemas_entertainment. "pet-friendly" → parks_playgrounds, pet_services.
+  "premium" → luxury_retail / premium_cotenants. Rent, ambience, parking availability,
+  visibility and footfall COUNTS are not classes — say so in feasibility, do not
+  propose them.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 UNIVERSAL ARCHETYPE REGISTRY v1.1.0 (14 archetypes — factor guidance)
@@ -413,6 +427,25 @@ SPEC JSON SHAPE (follow EXACTLY — field names are validated)
       "proxyWarning": null,                    // or a plain-language weakness note for weak proxies
       "notes": "user's verbatim wording if they specified this layer"
     }}
+  ],
+  "contextFactors": [
+    // v1.14.0 — WHAT MAKES THIS BRIEF DIFFERENT. The engine installs the business
+    // family's standard factors itself (demand, competition, access, co-tenancy —
+    // you do not choose those). Here you add 0-4 factors that THIS customer's own
+    // words justify, chosen ONLY from the feature-class vocabulary below. Each must
+    // quote the words in the brief it rests on; the engine rejects any it cannot
+    // find there, any class it cannot count, and any duplicate of a standard factor.
+    // If the business type is one the engine has no framework for (gym, hotel,
+    // office, salon, pharmacy, anything unusual), propose 2-4 — they ARE the analysis,
+    // and the FIRST must be the business's own competition class with
+    // direction "negative" (gym → gyms_fitness, hotel → hotels_competition, salon →
+    // salons_spas, pharmacy → pharmacies): the generic framework only counts
+    // shops-and-eateries as competition, which is wrong for these.
+    {{"featureClass": "it_parks", "direction": "positive",
+      "catchment": {{"type": "walk", "minutes": 10}},        // optional; sensible default per class
+      "weightBand": "medium",                              // low | medium | high — the engine sets the number
+      "why": "Lunch trade comes from the tech workforce next door",
+      "evidence": "IT professionals"}}                      // verbatim words from the brief
   ],
   "exclusions": [
     {{"name": "flood-prone river buffer", "source": {{"provider": "osm", "tags": ["waterway=river"]}}, "bufferM": 500}}

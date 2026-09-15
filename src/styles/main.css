@@ -1583,6 +1583,18 @@ button.spec-dir-toggle:hover { filter: brightness(0.95); }
 .spec-factor-remove:hover { color: #dc2626; }
 .spec-factor-slider { width: 100%; margin: 5px 0 3px; accent-color: var(--blue-600, #2563eb); }
 .spec-factor-meta { font-size: 10px; color: var(--gray-500, #64748b); line-height: 1.4; }
+/* v1.14.0 — factor provenance: the reason on its own line, the origin as a chip */
+.criterion-why { font-size: 10.5px; color: #475569; line-height: 1.4; padding: 1px 0 3px; }
+.criterion-why em { color: #64748b; }
+.spec-factor-why { font-size: 11px; color: var(--gray-700, #334155); line-height: 1.45; margin-top: 2px; }
+.spec-factor-evidence { color: var(--gray-500, #64748b); font-style: italic; }
+.spec-origin { font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em; padding: 1px 6px; border-radius: 999px; margin-left: 6px; white-space: nowrap; }
+.spec-origin.is-brief { background: #e0f2fe; color: #075985; }
+.spec-composition { font-size: 11px; color: var(--gray-700, #334155); background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; margin: 6px 0 4px; line-height: 1.45; }
+.spec-composition.is-generic { background: #fffbeb; border-color: #fde68a; }
+.spec-composition-rejected { margin: 4px 0 0; padding-left: 16px; }
+.spec-composition-rejected li { margin: 2px 0; }
+.spec-composition-class { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; background: #f1f5f9; padding: 0 4px; border-radius: 3px; }
 
 .spec-add-trigger {
   align-self: flex-start; padding: 4px 10px; font-size: 11.5px; font-weight: 600;

@@ -1677,6 +1677,14 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                             )}
                             <span className="criterion-score">{noData ? '—' : (c.score as number).toFixed(1)}</span>
                           </div>
+                          {/* v1.14.0 — why this factor is in the analysis (framework
+                              rationale, or the customer's own words it was built from). */}
+                          {c.whyItMatters && (
+                            <div className="criterion-why">
+                              {c.whyItMatters}
+                              {c.origin === 'brief' && c.evidence ? <em> — you said “{c.evidence}”</em> : null}
+                            </div>
+                          )}
                           {noData ? (
                             <div className="criterion-insufficient" style={{ fontSize: '11px', color: '#991b1b', padding: '2px 0' }}>
                               Insufficient data to evaluate this {(c as any).required ? 'required constraint' : 'factor'} — excluded from the score.

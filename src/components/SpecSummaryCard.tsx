@@ -71,6 +71,19 @@ const Collapsible: React.FC<{ title: string; defaultOpen?: boolean; badgeClass?:
   );
 };
 
+/** v1.14.0 — plain wording for a composer rejection reason. */
+export function rejectionLabel(reason: string): string {
+  switch (reason) {
+    case 'unknown_class':          return 'not something we can count from map data';
+    case 'duplicate_of_framework': return 'already measured by the framework';
+    case 'duplicate_proposal':     return 'proposed twice';
+    case 'illegal_catchment':      return 'catchment outside what the engine runs';
+    case 'not_in_brief':           return 'nothing in your brief asked for it';
+    case 'over_cap':               return 'too many extra factors';
+    default:                       return 'could not be used';
+  }
+}
+
 export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
   spec,
   specStatus,
@@ -382,6 +395,32 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
           Each row is now a slider (drag, don't type into a 3-character number
           spinner), a clickable direction toggle, and a remove button. Adding a
           brand-new factor goes through the planner — see onSendMessage. */}
+      {/* v1.14.0 — provenance note: which framework, what the brief added,
+          and what could not be turned into a variable (and why). */}
+      {!blocked && spec.factorComposition && (
+        <div className={`spec-composition${spec.factorComposition.genericFramework ? ' is-generic' : ''}`}>
+          {spec.factorComposition.genericFramework
+            ? <>No standard framework for this business type — the factors below are broad proxies plus what your brief added.
+                {spec.factorComposition.replaced?.length
+                  ? <> Your brief named the real competitors, so <em>{spec.factorComposition.replaced.join(', ')}</em> was dropped.</>
+                  : null}</>
+            : <>Framework: <strong>{spec.factorComposition.frameworkName}</strong>
+                {spec.factorComposition.accepted.length
+                  ? <> · {spec.factorComposition.accepted.length} factor{spec.factorComposition.accepted.length > 1 ? 's' : ''} added from your brief</>
+                  : null}</>}
+          {spec.factorComposition.rejected.length > 0 && (
+            <ul className="spec-composition-rejected">
+              {spec.factorComposition.rejected.map((r, i) => (
+                <li key={i}>
+                  <span className="spec-composition-class">{r.featureClass}</span> — {rejectionLabel(r.reason)}
+                  {r.detail ? <span className="spec-list-sub"> ({r.detail})</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {!blocked && (
         <div className="spec-factors">
           {spec.layers.map((l, i) => (
@@ -411,6 +450,14 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
                   </span>
                 )}
                 {l.proxyWarning && <span className="spec-proxy-flag" title={l.proxyWarning}>⚠</span>}
+                {/* v1.14.0 — where this factor came from. A framework factor
+                    is the family's spine; a "from your brief" factor was
+                    composed from the customer's own words and validated. */}
+                {l.origin === 'brief' && (
+                  <span className="spec-origin is-brief" title={l.evidence ? `Added because you said “${l.evidence}”` : 'Added from your brief'}>
+                    from your brief
+                  </span>
+                )}
                 <span className="spec-factor-pct">{pcts[i]}%</span>
                 {onSpecEdit && spec.layers.length > 1 && (
                   <button
@@ -438,8 +485,15 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
               )}
               <div className="spec-factor-meta">
                 {catchmentLabel(l)} · {(l.confidence || 'medium')} confidence
-                {l.whyItMatters ? ` · ${l.whyItMatters}` : ''}
               </div>
+              {/* v1.14.0 — the reason is a line of its own, not a tooltip:
+                  "why this variable" is the thing a customer needs to defend. */}
+              {l.whyItMatters && (
+                <div className="spec-factor-why">
+                  {l.whyItMatters}
+                  {l.origin === 'brief' && l.evidence ? <span className="spec-factor-evidence"> — you said “{l.evidence}”</span> : null}
+                </div>
+              )}
             </div>
           ))}
 

@@ -507,32 +507,49 @@ def apply_deterministic_plan(
 
     # ── Structural overrides ──────────────────────────────────────────────────
 
-    # 1. Replace factor layers with canonical schema (preserve LLM tag choices)
+    # 1. Replace factor layers with the canonical framework, then compose.
+    #
+    # v1.14.0 — the framework is the SPINE, not the whole plan. Until now the
+    # LLM's layers were discarded except for raw OSM tags inherited by display-
+    # name match (which made a factor's data source vary run to run) and a
+    # `whyItMatters` that was null whenever the names differed — so the plan
+    # card could not say why any variable was there. Now every framework
+    # factor carries a deterministic rationale and its vocabulary source, and
+    # the LLM's `contextFactors` — feature classes from the closed vocabulary,
+    # each quoting the customer's words — are validated and installed as
+    # extra factors under the engine's rules (engine/factor_composer.py).
+    # Raw LLM tags are no longer inherited: the vocabulary is the source.
+    from .factor_composer import compose, customer_text
     canonical_layers_base = canonical.to_layers_dict()
     llm_layers_by_name = {}
     for ll in (llm_spec.get("layers") or []):
         llm_layers_by_name[ll.get("name", "").lower()] = ll
-
-    merged_layers = []
     for cl in canonical_layers_base:
-        # Try to find a matching LLM layer by display name to inherit OSM tags/types
         matching_llm = next(
             (v for k, v in llm_layers_by_name.items()
              if cl["name"].lower() in k or k in cl["name"].lower()),
             None,
         )
-        layer = dict(cl)
-        if matching_llm:
-            # Inherit tag/type choices from LLM, but NOT weight/direction/catchment
-            if matching_llm.get("source", {}).get("tags"):
-                layer["source"] = matching_llm["source"]
-            elif matching_llm.get("source", {}).get("types"):
-                layer["source"] = matching_llm["source"]
-            layer["whyItMatters"] = matching_llm.get("whyItMatters")
-            layer["notes"] = matching_llm.get("notes")
-        merged_layers.append(layer)
+        if matching_llm and matching_llm.get("notes"):
+            cl["notes"] = matching_llm.get("notes")       # the customer's verbatim wording, if any
 
+    _composition = compose(
+        canonical_layers_base,
+        llm_spec.get("contextFactors"),
+        customer_text(intent, llm_spec),
+        canonical,
+        llm_spec,
+        intent,
+    )
+    merged_layers = _composition.layers
     spec["layers"] = merged_layers
+    spec["factorComposition"] = {
+        **_composition.to_dict(),
+        "frameworkKey": canonical.key,
+        "frameworkName": canonical.display_name,
+        "genericFramework": canonical.key == "generic",
+    }
+    spec.pop("contextFactors", None)
     # v1.6.0 (Phase 2) — record the archetype's DEFAULT weights before any
     # user adjustment, keyed by display name (the same key the UI sliders and
     # candidate criteria use). This is the "default" side of the report's
