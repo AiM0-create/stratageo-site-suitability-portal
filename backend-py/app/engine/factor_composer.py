@@ -267,9 +267,8 @@ def business_noun(canonical, spec: dict | None = None, intent=None) -> str:
     key = str(getattr(intent, "businessTypeKey", "") or "")
     if key and key != "generic":
         return key.replace("_", " ")
-    biz = str((spec or {}).get("businessType") or "").strip()
-    words = biz.split()
-    return " ".join(words[:4]).rstrip(",;—-") if words else "business"
+    from .derived_plan import _short_business_label
+    return _short_business_label((spec or {}).get("businessType") or "").lower() or "business"
 
 
 def framework_rationale(canonical_key: str, biz: str) -> str | None:

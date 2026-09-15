@@ -245,6 +245,15 @@ _QUALIFIERS = (
 )
 
 
+_LABEL_CUT_RE = re.compile(r"\s+(?:in|at|near|for|around|within|across|on|with|targeting|aimed)\b|[,;:—–(]", re.I)
+
+
+def _short_business_label(text: str) -> str:
+    head = _LABEL_CUT_RE.split(str(text or "").strip(), maxsplit=1)[0].strip(" .-")
+    words = head.split()
+    return " ".join(words[:5])
+
+
 def derive_business_type(intent, canonical, fallback: str = "", override_key: str = "") -> str:
     """A stable label for what is being sited, from the customer's own words.
 
@@ -263,8 +272,11 @@ def derive_business_type(intent, canonical, fallback: str = "", override_key: st
         label = ARCHETYPE_NOUNS.get(override_key, label) or label
     if not label:
         # Nothing deterministic to lean on; keep what the model wrote rather
-        # than inventing a worse label.
-        label = (fallback or getattr(canonical, "display_name", "") or "site").strip()
+        # than inventing a worse label — but only the business, not the brief.
+        # v2.1.0 live: the label was "Salon and spa in Koramangala, Bengaluru
+        # for working women, near the metro, 3 zones". Cut at the first
+        # locating / qualifying preposition or comma; cap at five words.
+        label = _short_business_label(fallback) or (getattr(canonical, "display_name", "") or "site").strip()
     prompt = (getattr(intent, "rawPrompt", "") or "").lower()
     qualifier = next((q for q in _QUALIFIERS if q in prompt), "")
     if qualifier and qualifier not in label.lower():
