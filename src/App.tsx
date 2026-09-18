@@ -20,6 +20,8 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { PromptLimitModal } from './components/PromptLimitModal';
 import SavedAnalyses from './components/SavedAnalyses';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { usePhoneLayout } from './services/phoneLayout';
+import { SHEET_PEEK_PX, type SheetState } from './services/sheetState';
 
 export { isAnalysisSpecWithPoints } from './services/analysisFlow';
 export type { AnalysisPhase } from './types/chat';
@@ -44,6 +46,11 @@ const App: React.FC = () => {
   const [selectedLocations, setSelectedLocations] = useState<LocationData[]>([]);
   const [heatmapType, setHeatmapType] = useState<HeatmapType>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // v2.3.0 — phone: results are a bottom sheet that is never fully hidden
+  // while a result exists. "Open" means half, "close" means peek.
+  const isPhone = usePhoneLayout();
+  const [sheetState, setSheetState] = useState<SheetState>('half');
+  const showResults = useCallback(() => { setDrawerOpen(true); setSheetState('half'); }, []);
 
   // ── flow state ──
   const [isLoading, setIsLoading] = useState(false);
@@ -107,11 +114,11 @@ const App: React.FC = () => {
       if (!analysis) { setError('Shared analysis not found or has expired.'); return; }
       setResult(normalizeAnalysisResult(analysis.result));
       setSpec(analysis.spec);
-      setDrawerOpen(true);
+      showResults();
       setIsSharedView(true);
     }).catch(() => setError('Failed to load shared analysis.'))
       .finally(() => setIsLoading(false));
-  }, [location.pathname]);
+  }, [location.pathname, showResults]);
 
   // Results survive a session switch: cache under the old id, restore for the new.
   const resultsCacheRef = useRef<Map<string, { result: AnalysisResult; spec: AnalysisSpec }>>(new Map());
@@ -285,7 +292,7 @@ const App: React.FC = () => {
 
         setResult(data);
         setSpec(data.spec);
-        setDrawerOpen(true);
+        showResults();
         setChatReady(false);
         setAnalysisPhase('completed');
 
@@ -347,7 +354,7 @@ const App: React.FC = () => {
     } finally {
       isStartingRef.current = false;
     }
-  }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch, analysisPhase, clearResults]);
+  }, [chatSpec, consumePrompt, user, lastPrompt, currentSession.title, addMessage, updateMemory, dispatch, analysisPhase, clearResults, showResults]);
 
   const handleRetryAnalysis = useCallback(() => {
     if (lastSpecRef.current) handleConfirmExecute(lastSpecRef.current);
@@ -376,6 +383,10 @@ const App: React.FC = () => {
     if (finished && isFollowUpQuestion(rawPrompt)) return handleChatTurn(rawPrompt);   // keep the results
 
     const isFreshBrief = !chatSpec || finished;
+    // v2.3.0 — a saved analysis loaded from "My analyses" left its pins on the
+    // map under the new brief's clarification (live, 17 Sep). A fresh brief
+    // starts from an empty map whatever put the last result there.
+    if (isFreshBrief && result) clearResults();
     if (finished) {
       setChatSpec(null); setChatSpecStatus('empty'); setChatReady(false); setChatStage('chat');
       setCanRetry(false); setAnalysisStatus({ message: '', progress: 0 }); setError(null);
@@ -383,7 +394,7 @@ const App: React.FC = () => {
       setAnalysisPhase('planning');
     }
     return isFreshBrief ? handleClarifyThenChat(rawPrompt) : handleChatTurn(rawPrompt);
-  }, [pendingClarification, analysisPhase, chatSpec, addMessage, handleConfirmExecute, handleChatTurn, handleClarifyThenChat, clearResults]);
+  }, [pendingClarification, analysisPhase, chatSpec, result, addMessage, handleConfirmExecute, handleChatTurn, handleClarifyThenChat, clearResults]);
 
   // ── selection / sessions ──
   const handleSelectLocation = useCallback((loc: LocationData) => {
@@ -392,8 +403,8 @@ const App: React.FC = () => {
       if (prev.some(l => l.name === loc.name)) return prev.filter(l => l.name !== loc.name);
       return prev.length < 3 ? [...prev, loc] : [prev[prev.length - 1], loc];
     });
-    if (!drawerOpen) setDrawerOpen(true);
-  }, [drawerOpen]);
+    if (!drawerOpen) showResults();
+  }, [drawerOpen, showResults]);
 
   const handleNewAnalysis = useCallback(() => {
     if (result && spec) resultsCacheRef.current.set(currentSession.id, { result, spec });
@@ -447,9 +458,9 @@ const App: React.FC = () => {
   const handleLoadAnalysis = useCallback((analysis: any) => {
     setResult(normalizeAnalysisResult(analysis.result));
     setSpec(analysis.spec);
-    setDrawerOpen(true);
+    showResults();
     setSavedOpen(false);
-  }, []);
+  }, [showResults]);
 
   // ── auth gate ──
   if (authLoading) {
@@ -470,6 +481,13 @@ const App: React.FC = () => {
     setError(message);
   };
 
+  // v2.3.0 — phone: the sheet covers the bottom of the map, so the camera
+  // fits the zones into the part of the map that is actually visible.
+  const phoneSheet: SheetState | null = isPhone && result ? sheetState : null;
+  const mapBottomInset = phoneSheet === null ? 0
+    : phoneSheet === 'peek' ? SHEET_PEEK_PX
+    : Math.round(window.innerHeight * 0.5);
+
   return (
     <div className="portal">
       <ErrorBoundary section="map" compact onError={() => { if (isExecuting || isLoading) { resetExecution(); setAnalysisPhase('failed'); } }}>
@@ -485,6 +503,7 @@ const App: React.FC = () => {
           catchments={result?.catchments}
           recommendationWithheld={result?.recommendationWithheld}
           studyAreaBoundary={result?.studyAreaBoundary}
+          bottomInset={mapBottomInset}
         />
       </ErrorBoundary>
 
@@ -532,14 +551,17 @@ const App: React.FC = () => {
           canRetry={canRetry}
           onRetryAnalysis={handleRetryAnalysis}
           analysisPhase={analysisPhase}
+          phoneSheet={phoneSheet}
         />
       </ErrorBoundary>
 
       {result && (
         <ErrorBoundary section="results panel" onError={() => { clearResults(); onPanelCrash('The results could not be displayed. Please run the analysis again.')(); }}>
           <ResultsDrawer
-            open={drawerOpen}
-            onClose={() => setDrawerOpen(false)}
+            open={isPhone || drawerOpen}
+            onClose={() => (isPhone ? setSheetState('peek') : setDrawerOpen(false))}
+            sheetState={isPhone ? sheetState : undefined}
+            onSheetChange={isPhone ? setSheetState : undefined}
             result={result}
             spec={spec}
             locations={locations}

@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type { LocationData, AnalysisResult, AnalysisSpec, HeatmapType, MCDACriteria } from '../types';
 import { buildExecutiveSummary, topFactorSignals } from '../services/screeningPresentation';
+import { resolveSheetGesture, type SheetState } from '../services/sheetState';
 
 /**
  * v2.1.0 — the results panel, cut to what a customer decides with:
@@ -28,6 +29,10 @@ interface ResultsDrawerProps {
   onSelectLocation: (location: LocationData) => void;
   heatmapType: HeatmapType;
   onHeatmapChange: (type: HeatmapType) => void;
+  /** v2.3.0 — on a phone the drawer is a bottom sheet; `sheetState` drives its
+   *  height and the header becomes a drag handle. Undefined on desktop. */
+  sheetState?: SheetState;
+  onSheetChange?: (next: SheetState) => void;
 }
 
 const INVESTIGATION_TEXT: Record<string, string> = {
@@ -100,10 +105,28 @@ const Criterion: React.FC<{ c: MCDACriteria }> = ({ c }) => {
 
 export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   open, onClose, result, spec, locations, selectedLocations, onSelectLocation, heatmapType, onHeatmapChange,
+  sheetState, onSheetChange,
 }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const [showNotices, setShowNotices] = useState(false);
+
+  // v2.3.0 — sheet gesture: a vertical drag on the header steps the sheet up
+  // or down; a tap cycles it. Pointer events cover touch and mouse alike.
+  const dragStartY = useRef<number | null>(null);
+  const isSheet = !!sheetState && !!onSheetChange;
+  const onGripDown = (e: React.PointerEvent) => {
+    if (!isSheet) return;
+    dragStartY.current = e.clientY;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+  const onGripUp = (e: React.PointerEvent) => {
+    if (!isSheet || dragStartY.current === null) return;
+    const dy = e.clientY - dragStartY.current;
+    dragStartY.current = null;
+    onSheetChange!(resolveSheetGesture(sheetState!, dy));
+  };
+  const onGripCancel = () => { dragStartY.current = null; };
 
   const withheld = result.recommendationWithheld === true || result.status === 'no_viable_site';
   const ranked = useMemo(() => [...locations].sort((a, b) => {
@@ -136,15 +159,31 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
   const barColor = (t: string) => t === 'good' ? '#059669' : t === 'mixed' ? '#d97706' : '#dc2626';
 
   return (
-    <div className={`drawer ${open ? 'drawer-open' : 'drawer-closed'}`}>
-      <div className="drawer-header">
-        <div>
-          <div className="drawer-title">{withheld ? 'Screening result' : 'Priority zones'}</div>
+    <div className={`drawer ${open ? 'drawer-open' : 'drawer-closed'}${isSheet ? ` drawer-sheet drawer-sheet-${sheetState}` : ''}`}>
+      <div
+        className="drawer-header"
+        onPointerDown={onGripDown}
+        onPointerUp={onGripUp}
+        onPointerCancel={onGripCancel}
+        role={isSheet ? 'button' : undefined}
+        aria-label={isSheet ? `Results sheet, ${sheetState}. Tap or drag to resize.` : undefined}
+      >
+        {isSheet && <div className="drawer-grip" aria-hidden="true" />}
+        <div className="drawer-header-text">
+          <div className="drawer-title">
+            {withheld ? 'Screening result' : 'Priority zones'}
+            {isSheet && !withheld && ranked.length > 0 && (
+              <span className="drawer-title-count"> · {ranked.filter(l => !l.excluded).length}</span>
+            )}
+          </div>
           <div className="drawer-subtitle">{result.business_type} — {result.target_location}</div>
         </div>
-        <button onClick={onClose} className="drawer-close" aria-label="Close">
+        <button onClick={onClose} onPointerDown={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()}
+                className="drawer-close" aria-label={isSheet ? 'Minimise results' : 'Close'}>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="icon-sm">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            {isSheet
+              ? <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+              : <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />}
           </svg>
         </button>
       </div>

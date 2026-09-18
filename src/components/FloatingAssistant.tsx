@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { MAX_PROMPTS_PER_USER } from '../config/firebase';
 import { SpecSummaryCard } from './SpecSummaryCard';
 import { ClarificationCard } from './ClarificationCard';
+import type { SheetState } from '../services/sheetState';
 
 /**
  * v2.1.0 — the conversation panel, reduced to the four things it does:
@@ -40,6 +41,9 @@ interface FloatingAssistantProps {
   canRetry: boolean;
   onRetryAnalysis: () => void;
   analysisPhase: AnalysisPhase;
+  /** v2.3.0 — on a phone with results, the panel sits above the peeking
+   *  results sheet and steps aside while the sheet is open. Null elsewhere. */
+  phoneSheet?: SheetState | null;
 }
 
 const EXAMPLES = [
@@ -53,7 +57,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   hasResults, onToggleResults, drawerOpen, onNewChat, sessionTitle,
   chatSpec, chatSpecStatus, clarification, onClarificationSubmit, briefClarified,
   chatReady, chatStage, isExecuting, onConfirmExecute, onSpecEdit,
-  onCancelAnalysis, canRetry, onRetryAnalysis, analysisPhase,
+  onCancelAnalysis, canRetry, onRetryAnalysis, analysisPhase, phoneSheet = null,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
@@ -87,8 +91,13 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   const showRun = analysisPhase === 'spec_ready' && chatSpec && !isLoading && !isExecuting
     && chatSpec.feasibility?.status !== 'not_feasible';
 
+  // v2.3.0 — phone: the sheet owns the bottom edge. Peeking sheet → the panel
+  // sits on top of its header; open sheet → the panel steps aside entirely.
+  const sheetClass = phoneSheet === 'peek' ? ' assistant-above-sheet'
+    : phoneSheet ? ' assistant-behind-sheet' : '';
+
   return (
-    <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}${drawerOpen ? ' assistant-drawer-shift' : ''}`}>
+    <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}${drawerOpen ? ' assistant-drawer-shift' : ''}${sheetClass}`}>
       <div className="assistant-header" onClick={() => setExpanded(!expanded)}>
         <div className="assistant-header-left">
           <div className="assistant-indicator" />
@@ -160,7 +169,10 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
               <SpecSummaryCard
                 spec={chatSpec}
                 specStatus={chatSpecStatus}
-                readyToExecute={chatReady}
+                // v2.3.0 — one Run button. The sticky action bar below owns it
+                // (it can never scroll out of view); the card used to render a
+                // second one, and on a phone the two sat 40 px apart.
+                readyToExecute={chatReady && !showRun}
                 isExecuting={isExecuting}
                 onConfirmExecute={onConfirmExecute}
                 onSpecEdit={onSpecEdit}

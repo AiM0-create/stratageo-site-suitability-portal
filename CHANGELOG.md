@@ -4,6 +4,41 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.3.0] — 2026-09-18 — A phone-shaped portal (frontend only)
+
+Sagar sir's next feature is *stand on a street, take a photo, get a verdict*
+— phone-first. Checked the live portal at 390 px before building it (17 Sep):
+the results drawer was a full-screen sheet over the map, so map and zones were
+never on screen together, and the only way back to the drawer was a 24 px icon
+in the assistant bar; "Sign out" was clipped off the top bar; five permanent
+marker labels covered the zoom controls; slider thumbs, the × on a factor and
+the expand chevrons were 14–24 px targets; the pins of a loaded analysis
+stayed on the map under a new brief's questions. Tablet (820 px) was fine.
+
+- **Results are a bottom sheet on a phone** (`services/sheetState.ts`,
+  `ResultsDrawer`): three heights — *peek* (header only, the map has the
+  screen), *half* (the answer and first zones, pins visible above), *full*.
+  Tap the header to grow it, drag to step, the chevron to peek. It is never
+  hidden while a result exists. The camera fits the zones into the visible
+  half (`MapView.bottomInset`). The assistant sits on top of a peeking sheet
+  and steps aside while the sheet is open.
+- **One menu on the top bar** below 640 px: My analyses, Share, Export PDF,
+  Admin, Contact, Sign out — 44 px rows. The desktop row is unchanged.
+- **Map labels:** only the selected zone keeps its permanent label on a
+  phone; the sheet lists the names. Legend hidden there. A **tap on a hex**
+  shows the cell's screening / verified note (v2.1.2) — it was hover-only.
+- **44 px touch targets** on every control a thumb has to hit
+  (`@media (hover: none) and (pointer: coarse)`).
+- **One Run button.** The plan card no longer renders a second one under the
+  sticky bar's; on a phone the bar's button is the primary action.
+- A fresh brief clears the previous result from the map, whatever put it
+  there (a run or a loaded saved analysis).
+- **Installable:** `manifest.webmanifest`, icons, theme colour, iOS meta —
+  "Add to Home Screen" opens it as an app. Relative paths so it works under
+  the Pages base.
+- Regression tests: `mobileLayout.test.ts` (sheet state machine, stylesheet
+  contract, touch-target block, manifest). Engine unchanged (2.2.0).
+
 ## [2.2.0] — 2026-09-15 — The model decides the family when the parser is weak
 
 The framework was chosen by a keyword regex and the model's reading of the

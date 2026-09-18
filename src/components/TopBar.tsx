@@ -11,7 +11,11 @@ interface UserInfo {
 
 /** v2.1.0 — two jobs: get back to a past analysis, take this one away
  *  (PDF / share). Everything else (mode badge, methodology dialog, dark-mode
- *  toggle, duplicate "new analysis" button) was removed. */
+ *  toggle, duplicate "new analysis" button) was removed.
+ *
+ *  v2.3.0 — on a phone (≤640 px) the row of icons + name + Admin + Sign out
+ *  overflowed the bar ("Sign out" clipped at 390 px, live 17 Sep). The
+ *  actions collapse into one menu; the stylesheet decides which set shows. */
 interface TopBarProps {
   hasResults: boolean;
   onExportPDF: () => void;
@@ -27,19 +31,21 @@ interface TopBarProps {
 
 export const TopBar: React.FC<TopBarProps> = ({ hasResults, onExportPDF, sessions, currentSessionId, onSwitchSession, user, onLogout, onAdminOpen, onSavedOpen, onShareAnalysis }) => {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
-    if (!historyOpen) return;
+    if (!historyOpen && !menuOpen) return;
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setHistoryOpen(false);
-      }
+      if (historyOpen && dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setHistoryOpen(false);
+      if (menuOpen && menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [historyOpen]);
+  }, [historyOpen, menuOpen]);
+  const pick = (fn?: () => void) => () => { setMenuOpen(false); fn?.(); };
 
   const recentSessions = sessions.filter(s => !s.archived).slice(0, 10);
 
@@ -51,7 +57,7 @@ export const TopBar: React.FC<TopBarProps> = ({ hasResults, onExportPDF, session
         </a>
         <span className="topbar-version">v{__APP_VERSION__}</span>
       </div>
-      <div className="topbar-right">
+      <div className="topbar-right topbar-right-desktop">
         {/* Session history */}
         {recentSessions.length > 1 && (
           <div className="session-dropdown-wrap" ref={dropdownRef}>
@@ -123,6 +129,31 @@ export const TopBar: React.FC<TopBarProps> = ({ hasResults, onExportPDF, session
         <a href="https://stratageo.in/contact.php" target="_blank" rel="noopener noreferrer" className="topbar-contact">
           Contact
         </a>
+      </div>
+
+      {/* Phone: one menu instead of the row above (CSS swaps them at 640 px) */}
+      <div className="topbar-right topbar-right-phone" ref={menuRef}>
+        <button className="topbar-btn topbar-menu-btn" onClick={() => setMenuOpen(o => !o)} aria-label="Menu" aria-expanded={menuOpen}>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="icon-sm">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+          </svg>
+        </button>
+        {menuOpen && (
+          <div className="topbar-menu">
+            {user && (
+              <div className="topbar-menu-user">
+                <span className="topbar-menu-name">{user.displayName || user.email.split('@')[0]}</span>
+                <span className="topbar-menu-sub">{user.isAdmin ? 'Unlimited' : `${user.promptsRemaining} prompts left`}</span>
+              </div>
+            )}
+            {onSavedOpen && <button className="topbar-menu-item" onClick={pick(onSavedOpen)}>My analyses</button>}
+            {hasResults && onShareAnalysis && <button className="topbar-menu-item" onClick={pick(onShareAnalysis)}>Share this analysis</button>}
+            {hasResults && <button className="topbar-menu-item" onClick={pick(onExportPDF)}>Export PDF</button>}
+            {user?.isAdmin && onAdminOpen && <button className="topbar-menu-item" onClick={pick(onAdminOpen)}>Admin</button>}
+            <a className="topbar-menu-item" href="https://stratageo.in/contact.php" target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>Contact</a>
+            {onLogout && <button className="topbar-menu-item topbar-menu-danger" onClick={pick(onLogout)}>Sign out</button>}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -192,6 +192,27 @@ body {
 }
 .topbar-contact:hover { background: var(--blue-700); color: #fff; }
 
+/* v2.3.0 — phone menu. Hidden on desktop; the ≤640px block swaps the two
+   `.topbar-right` variants. */
+.topbar-right-phone { display: none; position: relative; }
+.topbar-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 1000;
+  min-width: 220px; padding: 6px;
+  background: var(--bg-elevated, #fff); border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 10px; box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+}
+.topbar-menu-user { padding: 8px 10px 10px; border-bottom: 1px solid var(--border-subtle, #f1f5f9); margin-bottom: 4px; display: flex; flex-direction: column; }
+.topbar-menu-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.topbar-menu-sub { font-size: 11px; color: var(--text-secondary); }
+.topbar-menu-item {
+  display: flex; align-items: center; min-height: 44px; padding: 0 10px;
+  font-family: var(--font); font-size: 14px; color: var(--text-primary);
+  background: none; border: none; border-radius: 6px; text-align: left; text-decoration: none; cursor: pointer;
+}
+.topbar-menu-item:hover { background: var(--gray-100); }
+.topbar-menu-danger { color: var(--red-700); }
+
 /* ========== FLOATING ASSISTANT ========== */
 .assistant {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
@@ -402,7 +423,10 @@ body {
   padding: 14px 16px 10px; flex-shrink: 0;
   border-bottom: 1px solid rgba(0,0,0,0.04);
 }
+.drawer-header-text { min-width: 0; flex: 1; }
+.drawer-grip { display: none; }
 .drawer-title { font-size: 14px; font-weight: 700; color: var(--gray-800); }
+.drawer-title-count { font-weight: 500; color: var(--gray-500); }
 .drawer-subtitle { font-size: 11px; color: var(--gray-400); margin-top: 1px; }
 .drawer-close {
   background: none; border: none; cursor: pointer; color: var(--gray-400); padding: 2px; border-radius: 4px;
@@ -976,6 +1000,8 @@ body {
   .topbar-badge { font-size: 9px; padding: 2px 7px; }
   .topbar-contact { display: none; }
   .topbar-btn { padding: 6px; }
+  .topbar-right-desktop { display: none; }
+  .topbar-right-phone { display: flex; }
 
   /* --- User badge: clean pill --- */
   .sg-user-badge { padding: 4px 10px; gap: 6px; border-radius: 20px; }
@@ -1016,13 +1042,51 @@ body {
   .assistant-mode-btn { padding: 4px; }
   .csv-upload-btn { padding: 4px; }
 
-  /* --- Results drawer: full-width sheet --- */
-  .drawer { width: 100%; border-radius: 12px 12px 0 0; }
-  .drawer-header { padding: 10px 12px; }
-  .drawer-content { padding: 8px 12px; }
+  /* --- Results: a bottom sheet, never a full-screen cover (v2.3.0) ---
+     Live at 390px the drawer hid the map entirely and the only way back was a
+     24px icon. The sheet has three heights (services/sheetState.ts); the map
+     always keeps the rest. `--sheet-peek` mirrors SHEET_PEEK_PX. */
+  :root { --sheet-peek: 56px; }
+  .drawer {
+    top: auto; bottom: 0; left: 0; right: 0; width: 100%;
+    height: calc(100dvh - 48px);
+    border-right: none; border-top: 1px solid var(--glass-border);
+    border-radius: 14px 14px 0 0;
+    transition: transform 0.25s ease;
+  }
+  .drawer-open, .drawer-closed { transform: translateY(calc(100% - var(--sheet-peek))); }
+  .drawer-sheet-peek { transform: translateY(calc(100% - var(--sheet-peek))); }
+  .drawer-sheet-half { transform: translateY(50%); }
+  .drawer-sheet-full { transform: translateY(0); }
+  .drawer-sheet .drawer-header {
+    min-height: var(--sheet-peek); padding: 14px 12px 8px; align-items: center;
+    touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab;
+  }
+  .drawer-grip {
+    display: block; position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 2px; background: var(--gray-300);
+  }
+  .drawer-sheet-peek .drawer-subtitle { display: none; }
+  .drawer-sheet .drawer-body { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Assistant vs sheet: above the peeking header, aside while it is open */
+  /* (two classes: the ≤480px block re-declares `.assistant` after this) */
+  .assistant.assistant-above-sheet { bottom: calc(var(--sheet-peek) + env(safe-area-inset-bottom, 0px)); }
+  .assistant.assistant-above-sheet.assistant-expanded { max-height: calc(100dvh - 60px - var(--sheet-peek)); }
+  .assistant.assistant-behind-sheet { display: none; }
+  .assistant-results-toggle { display: none; }
+  /* One Run button (the sticky bar) — on a phone it is the primary action */
+  .assistant-start-btn {
+    width: 100%; padding: 11px 14px; font-size: 14px;
+    background: var(--blue-700); color: #fff; border-color: var(--blue-700);
+  }
 
   /* --- Map & overlays --- */
-  .sg-map-legend { bottom: 80px; left: 8px; }
+  /* Five permanent labels on a 390px map covered the zoom controls; the
+     sheet lists the names. Only the selected zone keeps its label. */
+  .sg-marker-label { display: none; }
+  .sg-marker-selected .sg-marker-label { display: block; }
+  .sg-map-legend { display: none; }
   .mapboxgl-ctrl-top-right { top: 54px !important; right: 8px !important; }
   /* v1.12.1 — attribution stays visible on mobile: Mapbox's terms require it.
      It is the compact (i) badge now, so it no longer crowds the assistant. */
@@ -1086,7 +1150,6 @@ body {
   .sg-admin-cards { grid-template-columns: 1fr; }
   .sg-admin-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .drawer-chart { overflow-x: auto; }
-  .sg-map-legend { bottom: 90px; }
 }
 
 /* ─── Very small (under 360px) ─── */
@@ -1106,7 +1169,20 @@ body {
 
 /* ─── Touch devices ─── */
 @media (hover: none) and (pointer: coarse) {
-  .topbar-btn { min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }
+  /* v2.3.0 — 44px targets on everything a thumb has to hit (sliders' thumbs,
+     the × on a factor, expand chevrons, the sheet's close button measured
+     14–24px live). */
+  .topbar-btn, .drawer-close, .drawer-expand, .assistant-toggle, .new-chat-btn, .spec-factor-remove,
+  .assistant-error-dismiss {
+    min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .spec-factor-slider { height: 32px; }
+  .spec-dir-toggle, .drawer-layer-btn, .clarify-option, .spec-add-trigger, .spec-add-confirm, .spec-add-cancel,
+  .assistant-start-btn, .clarify-continue, .assistant-retry-btn, .assistant-cancel-btn {
+    min-height: 40px;
+  }
+  .drawer-loc-header { min-height: 56px; }
+  .topbar-btn { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
   .assistant-chip { min-height: 36px; display: flex; align-items: center; }
   .assistant-send { min-height: 40px; min-width: 40px; }
   .assistant-mode-btn { min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }

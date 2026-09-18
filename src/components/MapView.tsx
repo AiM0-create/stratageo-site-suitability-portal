@@ -47,6 +47,9 @@ interface MapViewProps {
   /** Spatial Reliability Upgrade v1.0.3 */
   recommendationWithheld?: boolean;             // grey out pins, label as raw candidates
   studyAreaBoundary?: [number, number][];        // [lat,lng] ring of the AOI
+  /** v2.3.0 — CSS px of the map hidden under the phone results sheet, so the
+   *  camera fits the zones into the visible part. 0 on desktop. */
+  bottomInset?: number;
 }
 
 const CATCHMENT_COLORS: Record<string, string> = { walk: '#059669', drive: '#7c3aed' };
@@ -78,7 +81,9 @@ function buildMarkerEl(
     : raw ? ' <span style="color:#64748b;font-size:9px">[RAW — NOT RECOMMENDED]</span>' : '';
 
   const el = document.createElement('div');
-  el.className = 'sg-marker';
+  // v2.3.0 — the phone stylesheet hides every permanent label except the
+  // selected zone's (five labels on a 390 px map covered the controls).
+  el.className = isSelected ? 'sg-marker sg-marker-selected' : 'sg-marker';
   // vNext (v1.8.0) — zone-centroid honesty: the pin marks the H3 cell's
   // representative point, never an exact site or address (§6.5).
   el.innerHTML =
@@ -105,6 +110,7 @@ export const MapView: React.FC<MapViewProps> = ({
   catchments,
   recommendationWithheld = false,
   studyAreaBoundary,
+  bottomInset = 0,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -358,12 +364,18 @@ export const MapView: React.FC<MapViewProps> = ({
       .map(l => ({ lat: Number(l.lat), lng: Number(l.lng) }))
       .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
     const focus = selPts.length > 0 ? selPts : pts;
+    // v2.3.0 — on a phone the sheet covers the lower half; keep the zones in
+    // the half that is visible. `bottomInset` is 0 on desktop → the old 60.
+    const padding = bottomInset > 0
+      ? { top: 70, right: 30, bottom: bottomInset + 24, left: 30 }
+      : 60;
     if (focus.length === 1) {
-      map.flyTo({ center: [focus[0].lng, focus[0].lat], zoom: 13, duration: 1000 });
+      map.flyTo({ center: [focus[0].lng, focus[0].lat], zoom: 13, duration: 1000, padding });
     } else if (focus.length > 1) {
       const b = boundsOfLatLng(focus);
-      if (b) map.fitBounds(b, { padding: 60, duration: 1200 });
+      if (b) map.fitBounds(b, { padding, duration: 1200 });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locations, selectedLocations, onSelectLocation, recommendationWithheld, styleEpoch, setData]);
 
   // ── Study-area (AOI) boundary outline (v1.0.3) ──
@@ -470,10 +482,25 @@ export const MapView: React.FC<MapViewProps> = ({
     };
     map.on('mousemove', LYR.hexFill, onMove);
     map.on('mouseleave', LYR.hexFill, onLeave);
+    // v2.3.0 — no hover on a phone, so the cell's screening / verified note
+    // (v2.1.2) was unreachable there. A tap shows it; the next tap anywhere
+    // closes it.
+    const tapPopup = new mapboxgl.Popup({
+      closeButton: true, closeOnClick: true, className: 'sg-tooltip-container sg-tap-popup', maxWidth: '260px',
+    });
+    const onTap = (e: mapboxgl.MapMouseEvent & { features?: mapboxgl.MapboxGeoJSONFeature[] }) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      tapPopup.setLngLat(e.lngLat).setText(String(f.properties?.label ?? '')).addTo(map);
+    };
+    const coarse = (() => { try { return window.matchMedia('(hover: none)').matches; } catch { return false; } })();
+    if (coarse) map.on('click', LYR.hexFill, onTap);
     return () => {
       map.off('mousemove', LYR.hexFill, onMove);
       map.off('mouseleave', LYR.hexFill, onLeave);
+      if (coarse) map.off('click', LYR.hexFill, onTap);
       popup.remove();
+      tapPopup.remove();
     };
   }, [styleEpoch]);
 
