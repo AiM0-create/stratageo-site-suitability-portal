@@ -28,6 +28,11 @@ but a mouse pointer and no mobile user-agent. A true 375×812 touch emulation
   home. Found placing a spot pin. The selection keeps its reference when
   already empty, and the map flies home once — when results go away — not
   on every re-run.
+- **"My analyses" had stopped at 28 May.** Not the saves — Firestore holds
+  every run since — the list: a bare `limit(50)` with no `orderBy` returns
+  the first 50 by document id, and ids are `${uid}_${timestamp}` ascending,
+  so past 50 analyses the newest never appeared. Ordered by document id
+  descending (index-free), 20 newest.
 - Regression tests updated (`mobileLayout.test.ts`: factor-head contract,
   full-width panels).
 

@@ -3,7 +3,7 @@
  * Powers "My Analyses" and shareable links.
  */
 
-import { collection, doc, setDoc, getDoc, getDocs, query, where, limit as fbLimit, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, documentId, setDoc, getDoc, getDocs, query, where, orderBy, limit as fbLimit, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { nanoid } from 'nanoid';
 import type { AnalysisResult, AnalysisSpec } from '../types';
@@ -65,10 +65,17 @@ export async function fetchUserAnalyses(userId: string): Promise<SavedAnalysis[]
   // query failed with failed-precondition — surfacing as "Failed to load analyses". Each
   // user has at most a few dozen analyses (10-prompt quota), so we fetch by userId
   // (single-field index, auto-created) and sort client-side. Index-free and correct.
+  // v2.4.1 — and NO bare limit either: without an orderBy, Firestore hands
+  // back the first 50 by document id, and ids are `${uid}_${Date.now()}` —
+  // ascending, i.e. the OLDEST 50. Anyone past 50 analyses never saw a new
+  // one again (owner's list stopped at 28 May while Firestore held every
+  // run since). Ordering by document id descending is index-free (__name__
+  // is always indexed) and, for one user, is newest-first by construction.
   const q = query(
     collection(db, 'analyses'),
     where('userId', '==', userId),
-    fbLimit(50),
+    orderBy(documentId(), 'desc'),
+    fbLimit(20),
   );
   const snap = await getDocs(q);
   const analyses: SavedAnalysis[] = [];
@@ -95,9 +102,9 @@ export async function fetchUserAnalyses(userId: string): Promise<SavedAnalysis[]
     }
   });
 
-  // Most-recent first, then cap (done client-side since the query has no orderBy).
+  // Newest first (ids carry the timestamp; createdAt confirms it).
   analyses.sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
-  return analyses.slice(0, 20);
+  return analyses;
 }
 
 /**
