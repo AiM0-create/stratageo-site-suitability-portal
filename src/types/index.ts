@@ -132,6 +132,8 @@ export interface LocationData {
   screeningScore?: number | null;
   /** v1.5.2 — which score ranked this candidate: 'refined' (post-verification) or 'screening'. */
   rankingBasis?: 'refined' | 'screening';
+  /** v2.4.0 — this zone is the cell under the customer's pin (spot check). */
+  isTarget?: boolean;
   // ── v1.5-Lite (all optional — older payloads simply omit them) ──
   /** Honest investigation-zone taxonomy; preferred over recommendationStatus when present. */
   investigationLabel?: string;
@@ -271,6 +273,32 @@ export interface ShortlistInfo {
   bestScreeningNote?: string | null;
 }
 
+/** v2.4.0 — "check a spot": where the cell under the customer's pin stands,
+ *  relative to the cells around it. Present only on a spot-check run. */
+export interface TargetCell {
+  h3: string;
+  lat: number;
+  lng: number;
+  point: { lat: number; lng: number };
+  radiusM: number | null;
+  excluded: boolean;
+  cellsScreened: number;
+  cellsEligible: number;
+  screeningScore: number;
+  screeningRank: number | null;
+  percentile: number | null;
+  verdict: 'good' | 'fair' | 'weak' | 'excluded';
+  verdictText: string;
+  areaHint: string | null;
+  /** rank among the re-verified shortlist, when it was verified */
+  verified?: { score: number; rank: number | null; of: number; note: string | null };
+  /** set when the spot is also one of the Priority zones */
+  priority: number | null;
+  /** the full zone card for the spot (factors, next checks); absent when excluded */
+  location?: LocationData;
+  exclusionMasks?: string[];
+}
+
 export interface CatchmentOutline {
   locationName: string;
   locationRank: number;
@@ -355,6 +383,8 @@ export interface AnalysisResult {
   status?: 'success' | 'no_viable_site' | 'failed' | 'malformed';
   /** v2.0.0 — how many cells were re-verified and ranked (the basis of the 0–10 on cards). */
   shortlist?: ShortlistInfo;
+  /** v2.4.0 — only on a spot-check run */
+  targetCell?: TargetCell | null;
   jobRef?: string;
   degradationNotes?: string[];
   providerDiagnostics?: { degraded: string[]; degradationCount?: number; notes?: string[] };

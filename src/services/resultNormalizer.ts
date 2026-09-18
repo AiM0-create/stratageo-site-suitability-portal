@@ -62,6 +62,7 @@ function normalizeLocation(raw: unknown, index: number, warnings: string[]): Loc
   out.screeningScore = asNumOrNull(raw.screeningScore);
   out.rankingBasis = raw.rankingBasis === 'refined' ? 'refined' : (raw.rankingBasis === 'screening' ? 'screening' : undefined);
   out.excluded = raw.excluded === true;
+  out.isTarget = raw.isTarget === true;
   out.reasoning = asStr(raw.reasoning);
   out.searchRadiusM = asNum(raw.searchRadiusM, 0);
   out.osmSignals = isObj(raw.osmSignals) ? raw.osmSignals : {};
@@ -403,6 +404,41 @@ export function normalizeAnalysisResult(raw: unknown): AnalysisResult {
   // v2.0.0 — ranking basis (numbers only; the header prints them)
   if (isObj(src.shortlist) && typeof src.shortlist.size === 'number') {
     out.shortlist = src.shortlist as any;
+  }
+  // v2.4.0 — the spot under the pin. The verdict must be one of four words
+  // and the numbers finite, or the card would print "undefined of NaN".
+  if (isObj(src.targetCell)) {
+    const t: any = src.targetCell;
+    const verdict = ['good', 'fair', 'weak', 'excluded'].includes(t.verdict) ? t.verdict : null;
+    const tlat = Number(t.lat), tlng = Number(t.lng);
+    if (verdict && Number.isFinite(tlat) && Number.isFinite(tlng)) {
+      const loc = t.location !== undefined ? normalizeLocation(t.location, 0, warnings) : null;
+      out.targetCell = {
+        ...t,
+        lat: tlat, lng: tlng, verdict,
+        point: isObj(t.point) ? { lat: asNum(t.point.lat, tlat), lng: asNum(t.point.lng, tlng) } : { lat: tlat, lng: tlng },
+        radiusM: asNumOrNull(t.radiusM),
+        excluded: t.excluded === true,
+        cellsScreened: asNum(t.cellsScreened, 0),
+        cellsEligible: asNum(t.cellsEligible, 0),
+        screeningScore: asNum(t.screeningScore, 0),
+        screeningRank: asNumOrNull(t.screeningRank),
+        percentile: asNumOrNull(t.percentile),
+        verdictText: asStr(t.verdictText),
+        areaHint: asStr(t.areaHint) || null,
+        priority: asNumOrNull(t.priority),
+        location: loc ?? undefined,
+        verified: isObj(t.verified) ? {
+          score: asNum(t.verified.score, 0), rank: asNumOrNull(t.verified.rank),
+          of: asNum(t.verified.of, 0), note: asStr(t.verified.note) || null,
+        } : undefined,
+      };
+    } else {
+      warnings.push('Spot verdict was malformed — hidden.');
+      out.targetCell = null;
+    }
+  } else {
+    out.targetCell = null;
   }
   // v1.6.0 (Phase 3) — one headline confidence verdict (conservative merge)
   if (isObj(src.unifiedConfidence) && typeof src.unifiedConfidence.level === 'string') {

@@ -22,6 +22,8 @@ import SavedAnalyses from './components/SavedAnalyses';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { usePhoneLayout } from './services/phoneLayout';
 import { SHEET_PEEK_PX, type SheetState } from './services/sheetState';
+import { SpotCheck, type SpotStage } from './components/SpotCheck';
+import { startSpotCheck, type LocationSource } from './services/spotCheck';
 
 export { isAnalysisSpecWithPoints } from './services/analysisFlow';
 export type { AnalysisPhase } from './types/chat';
@@ -51,6 +53,17 @@ const App: React.FC = () => {
   const isPhone = usePhoneLayout();
   const [sheetState, setSheetState] = useState<SheetState>('half');
   const showResults = useCallback(() => { setDrawerOpen(true); setSheetState('half'); }, []);
+
+  // ── v2.4.0 — "check a spot" ──
+  // A parallel entry to the same engine: pin → business → verdict. Owns the
+  // pin (the map draws it) and the stage; the card owns its own inputs.
+  const [spotOpen, setSpotOpen] = useState(false);
+  const [spotStage, setSpotStage] = useState<SpotStage>('locate');
+  const [spotPin, setSpotPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [spotSource, setSpotSource] = useState<LocationSource | null>(null);
+  const [spotAccuracy, setSpotAccuracy] = useState<number | undefined>(undefined);
+  const [spotFocus, setSpotFocus] = useState(0);
+  const [spotError, setSpotError] = useState<string | null>(null);
 
   // ── flow state ──
   const [isLoading, setIsLoading] = useState(false);
@@ -462,6 +475,97 @@ const App: React.FC = () => {
     setSavedOpen(false);
   }, [showResults]);
 
+  // ── v2.4.0 — spot check handlers ──
+  const handleSpotOpen = useCallback(() => {
+    setSpotOpen(true); setSpotStage('locate'); setSpotError(null);
+    setSpotPin(null); setSpotSource(null); setSpotAccuracy(undefined);
+    clearResults();
+  }, [clearResults]);
+  const handleSpotClose = useCallback(() => {
+    setSpotOpen(false); setSpotPin(null);
+    if (spotStage === 'running') handleCancelAnalysis();
+  }, [spotStage, handleCancelAnalysis]);
+  const handleSpotPin = useCallback((pos: { lat: number; lng: number }, source: LocationSource, focus: boolean, accuracyM?: number) => {
+    setSpotPin(pos); setSpotSource(source); setSpotAccuracy(source === 'device' ? accuracyM : undefined);
+    if (focus) setSpotFocus(n => n + 1);
+  }, []);
+  const handleSpotMapTap = useCallback((pos: { lat: number; lng: number }) => {
+    setSpotPin(pos); setSpotSource('pin'); setSpotAccuracy(undefined);
+    if (spotStage === 'locate') setSpotStage('confirm');
+  }, [spotStage]);
+  const handleSpotDrag = useCallback((pos: { lat: number; lng: number }) => {
+    setSpotPin(pos); setSpotSource('pin'); setSpotAccuracy(undefined);
+  }, []);
+
+  const handleSpotRun = useCallback(async (lat: number, lng: number, business: string) => {
+    setSpotError(null);
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+    try {
+      if (!(await consumePrompt())) { setLimitModalOpen(true); setSpotStage('confirm'); return; }
+      const startedAt = Date.now();
+      pollAbortRef.current?.abort();
+      const controller = new AbortController();
+      pollAbortRef.current = controller;
+      setIsExecuting(true);
+      setAnalysisPhase('executing');
+      clearResults();
+      setAnalysisStatus({ message: 'Planning the check…', progress: 4 });
+      let jobId: string | null = null;
+      try {
+        const started = await startSpotCheck(lat, lng, business);
+        jobId = started.jobId;
+        activeJobIdRef.current = jobId;
+        const data = normalizeAnalysisResult(await pollAnalysis(jobId, setAnalysisStatus, controller.signal));
+        if (activeJobIdRef.current !== jobId) return;
+        if (data.status === 'malformed' || !data.targetCell) {
+          throw new Error('The check finished without a verdict for this spot. Please try again.');
+        }
+        setResult(data);
+        setSpec(data.spec);
+        setDrawerOpen(false); setSheetState('peek');          // the verdict card first; zones on request
+        setSpotStage('verdict');
+        setAnalysisPhase('completed');
+        addMessage('user', `Check a spot: ${business} at ${lat.toFixed(5)}, ${lng.toFixed(5)}`, { intent: 'query' });
+        addMessage('assistant', data.targetCell.verdictText);
+        if (user) {
+          saveAnalysis(user.uid, user.email, `Check a spot: ${business}`, data, data.spec).catch(() => {});
+          logPrompt({
+            userId: user.uid, email: user.email,
+            prompt: `Check a spot: ${business} at ${lat.toFixed(5)}, ${lng.toFixed(5)}`, sector: data.business_type,
+            city: data.targetCell.areaHint || data.target_location || '',
+            latencyMs: Date.now() - startedAt,
+            resultCount: data.locations.length,
+            topScore: data.targetCell.screeningScore ?? null,
+            pdfExported: false, isFollowUp: false,
+            tokensUsed: 0, dataSource: 'hybrid' as any,
+            analysisStatus: data.status,
+            analysisRecommendation: data.analysisRecommendation,
+            candidates: [{ name: 'Your spot', score: data.targetCell.screeningScore ?? null, investigationLabel: data.targetCell.verdict }],
+          });
+        }
+        if (currentSession.title === 'New Analysis') {
+          dispatch({ type: 'SET_TITLE', title: `Spot check — ${data.business_type}${data.targetCell.areaHint ? ` near ${data.targetCell.areaHint}` : ''}` });
+        }
+      } catch (err: any) {
+        if (err instanceof AnalysisCancelledError) { setSpotStage('confirm'); return; }
+        const failed = err instanceof AnalysisFailedError ? err.failed : undefined;
+        setSpotError(failed?.userMessage || err?.message || 'The check failed. Please try again.');
+        setSpotStage('error');
+        setAnalysisPhase('failed');
+      } finally {
+        if (jobId === null || activeJobIdRef.current === jobId) { setIsExecuting(false); setIsLoading(false); }
+      }
+    } finally {
+      isStartingRef.current = false;
+    }
+  }, [consumePrompt, clearResults, addMessage, user, currentSession.title, dispatch]);
+
+  const handleSpotShowZones = useCallback(() => {
+    setSpotOpen(false);
+    showResults();
+  }, [showResults]);
+
   // ── auth gate ──
   if (authLoading) {
     return (
@@ -483,10 +587,13 @@ const App: React.FC = () => {
 
   // v2.3.0 — phone: the sheet covers the bottom of the map, so the camera
   // fits the zones into the part of the map that is actually visible.
-  const phoneSheet: SheetState | null = isPhone && result ? sheetState : null;
-  const mapBottomInset = phoneSheet === null ? 0
+  const phoneSheet: SheetState | null = isPhone && result && !spotOpen ? sheetState : null;
+  const mapBottomInset = spotOpen
+    ? (isPhone ? Math.round(window.innerHeight * 0.45) : 0)
+    : phoneSheet === null ? 0
     : phoneSheet === 'peek' ? SHEET_PEEK_PX
     : Math.round(window.innerHeight * 0.5);
+  const spotPinMovable = spotOpen && (spotStage === 'locate' || spotStage === 'confirm');
 
   return (
     <div className="portal">
@@ -504,6 +611,10 @@ const App: React.FC = () => {
           recommendationWithheld={result?.recommendationWithheld}
           studyAreaBoundary={result?.studyAreaBoundary}
           bottomInset={mapBottomInset}
+          spotPin={spotOpen || result?.targetCell ? spotPin : null}
+          onSpotPinMove={spotPinMovable ? handleSpotDrag : undefined}
+          spotFocus={spotFocus}
+          onMapClick={spotPinMovable ? handleSpotMapTap : undefined}
         />
       </ErrorBoundary>
 
@@ -524,7 +635,27 @@ const App: React.FC = () => {
         } : undefined}
       />
 
-      <ErrorBoundary section="chat assistant" onError={onPanelCrash('The chat panel hit an unexpected error and was reset. Any in-progress analysis was cancelled — please try again.')}>
+      {spotOpen && (
+        <ErrorBoundary section="spot check" onError={() => { setSpotOpen(false); resetExecution(); }}>
+          <SpotCheck
+            pin={spotPin}
+            pinSource={spotSource}
+            pinAccuracyM={spotAccuracy}
+            onPinChange={handleSpotPin}
+            onRun={handleSpotRun}
+            status={analysisStatus}
+            result={result}
+            stage={spotStage}
+            onStageChange={setSpotStage}
+            error={spotError}
+            onShowZones={handleSpotShowZones}
+            onCancel={() => { handleCancelAnalysis(); setSpotStage('confirm'); }}
+            onClose={handleSpotClose}
+          />
+        </ErrorBoundary>
+      )}
+
+      {!spotOpen && <ErrorBoundary section="chat assistant" onError={onPanelCrash('The chat panel hit an unexpected error and was reset. Any in-progress analysis was cancelled — please try again.')}>
         <FloatingAssistant
           messages={messages}
           isLoading={isLoading}
@@ -552,10 +683,11 @@ const App: React.FC = () => {
           onRetryAnalysis={handleRetryAnalysis}
           analysisPhase={analysisPhase}
           phoneSheet={phoneSheet}
+          onCheckSpot={handleSpotOpen}
         />
-      </ErrorBoundary>
+      </ErrorBoundary>}
 
-      {result && (
+      {result && !spotOpen && (
         <ErrorBoundary section="results panel" onError={() => { clearResults(); onPanelCrash('The results could not be displayed. Please run the analysis again.')(); }}>
           <ResultsDrawer
             open={isPhone || drawerOpen}

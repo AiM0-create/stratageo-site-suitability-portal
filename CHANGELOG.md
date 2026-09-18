@@ -4,6 +4,65 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.4.0] — 2026-09-18 — Check a spot
+
+Sagar sir (18 Sep): *"a person takes a photo of an area and asks, is this a
+good location for my café? We take the latitude and longitude, analyse the
+surroundings, plug it into our framework, and tell them."* Confirmed: a
+camera photo of the actual street, taken standing there.
+
+The photo is the trigger, not the evidence — the coordinates are what we
+analyse. And the engine's scores are relative (percentile-normalised within
+the study area), so a lone cell has no score: the honest verdict is *where
+this cell stands among the cells around it*. That is also the question a
+person standing on a street is actually asking.
+
+### Engine
+- **`POST /api/v2/spot`** `{lat, lng, business}` → plans and starts one run.
+  The plan is the ordinary chat plan for *"<business> at this spot"* (parser
+  → model when weak → framework → brief factors → validation), then three
+  fields are fixed deterministically: `studyArea` = 1.5 km `point_radius`
+  around the pin, `grid` = res 9 (~0.1 km² cells; the framework's res 8 is
+  too coarse for "this street"), `targetPoint` = the pin. Spatial noise the
+  model reads into a one-line brief is dropped. Same cost discipline as
+  `/analyses`: identity first, the credit only after the spec validates.
+- **`SpecV2.targetPoint`** declared (the v1.11.0 lesson: Pydantic drops what
+  is not declared). The cell under the pin is **always re-verified** (added
+  to the Pass B shortlist even when it would never have made it — that is
+  the point of the check) and **always reported**: `result.targetCell` with
+  its screening score and rank among the eligible cells, percentile,
+  verified score and shortlist rank, the full zone card (factors with what
+  was counted, next checks), `priority` when it is also a Priority zone, and
+  the masks that removed it when it is excluded. Verdict *good / fair / weak*
+  by thirds of the eligible cells' screening rank — the same basis the map
+  is coloured on. Smoke, Church Street Bengaluru, café: *"A good spot: ranks
+  4 of 56 cells within 1.5 km on the screening score and 10 of 13 once
+  re-verified"* — 133 consumer POIs, 34 cafés, 88 co-tenants counted.
+- `tests/test_v240_spot_check.py` (16): the declared field, the verdict
+  rule, the plan overrides, and the target description whether it ranked,
+  did not rank, or was masked out.
+
+### Portal
+- **"Standing at a spot? Take a photo and check it."** on the welcome
+  block. `<input capture="environment">` opens the camera; the JPEG's EXIF
+  GPS is read in the browser (`services/exifGps.ts`, ~90 lines, no library —
+  the photo never leaves the phone); when the file carries none (iOS strips
+  it in the picker; forwards and screenshots never have it) the phone's own
+  location is asked for; failing that, *tap the map*. The pin is draggable
+  on the confirm step and says where it came from (± accuracy for GPS).
+- One card: pin + *"what are you opening?"* → progress → **verdict**: Good /
+  Fair / Weak / Not usable, the rank sentence, the top factors with what was
+  counted, the first ground checks, and *"Show the best spots nearby"* —
+  the same run already ranked Priority 1–3 in the 1.5 km, so that is free.
+- `targetCell` and `isTarget` pass through `resultNormalizer` (a malformed
+  verdict is hidden with a warning, never printed as "undefined of NaN").
+- `spotCheck.test.ts`: the EXIF reader against synthetic JPEGs in both byte
+  orders with S/W refs and a zeroed tag; the normalizer boundary.
+
+Not in phase 1, by design: reading the photo's pixels (frontage, footpath,
+visibility — phase 2, shown as unverified), storing the photo, an absolute
+benchmark (needs the market tier). Engine and portal both 2.4.0.
+
 ## [2.3.0] — 2026-09-18 — A phone-shaped portal (frontend only)
 
 Sagar sir's next feature is *stand on a street, take a photo, get a verdict*

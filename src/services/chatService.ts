@@ -22,7 +22,7 @@ const jsonHeaders = (): Record<string, string> => {
  * can verify identity and enforce the analysis quota server-side (where the
  * cost is incurred). Harmless while backend enforcement is off. Lazy import
  * keeps firebase out of this module's static dependency graph. */
-const authJsonHeaders = async (): Promise<Record<string, string>> => {
+export const authJsonHeaders = async (): Promise<Record<string, string>> => {
   const h = jsonHeaders();
   try {
     const { auth } = await import('../config/firebase');

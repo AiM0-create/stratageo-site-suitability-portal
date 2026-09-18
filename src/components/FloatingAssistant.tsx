@@ -44,6 +44,8 @@ interface FloatingAssistantProps {
   /** v2.3.0 — on a phone with results, the panel sits above the peeking
    *  results sheet and steps aside while the sheet is open. Null elsewhere. */
   phoneSheet?: SheetState | null;
+  /** v2.4.0 — opens the "check a spot" flow (photo / location → verdict). */
+  onCheckSpot?: () => void;
 }
 
 const EXAMPLES = [
@@ -57,7 +59,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   hasResults, onToggleResults, drawerOpen, onNewChat, sessionTitle,
   chatSpec, chatSpecStatus, clarification, onClarificationSubmit, briefClarified,
   chatReady, chatStage, isExecuting, onConfirmExecute, onSpecEdit,
-  onCancelAnalysis, canRetry, onRetryAnalysis, analysisPhase, phoneSheet = null,
+  onCancelAnalysis, canRetry, onRetryAnalysis, analysisPhase, phoneSheet = null, onCheckSpot,
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState(true);
@@ -152,6 +154,12 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
                     <button key={p} className="assistant-chip" onClick={() => onRunAnalysis(p)} disabled={isLoading}>{p}</button>
                   ))}
                 </div>
+                {onCheckSpot && (
+                  <button type="button" className="assistant-spot-entry" onClick={onCheckSpot} disabled={isLoading}>
+                    <span className="assistant-spot-icon">📷</span>
+                    <span className="assistant-spot-text"><strong>Standing at a spot?</strong> Take a photo and check it.</span>
+                  </button>
+                )}
               </div>
             )}
 

@@ -50,6 +50,14 @@ interface MapViewProps {
   /** v2.3.0 — CSS px of the map hidden under the phone results sheet, so the
    *  camera fits the zones into the visible part. 0 on desktop. */
   bottomInset?: number;
+  /** v2.4.0 — "check a spot": the customer's pin. Draggable while
+   *  `onSpotPinMove` is given (the confirm step); fixed afterwards. */
+  spotPin?: { lat: number; lng: number } | null;
+  onSpotPinMove?: (pos: { lat: number; lng: number }) => void;
+  /** bump to fly the camera to the spot pin (a new fix arrived); a drag never moves the camera */
+  spotFocus?: number;
+  /** while set, a tap on the map places the spot pin there */
+  onMapClick?: (pos: { lat: number; lng: number }) => void;
 }
 
 const CATCHMENT_COLORS: Record<string, string> = { walk: '#059669', drive: '#7c3aed' };
@@ -111,10 +119,20 @@ export const MapView: React.FC<MapViewProps> = ({
   recommendationWithheld = false,
   studyAreaBoundary,
   bottomInset = 0,
+  spotPin = null,
+  onSpotPinMove,
+  spotFocus = 0,
+  onMapClick,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const spotMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const onMapClickRef = useRef(onMapClick);
+  onMapClickRef.current = onMapClick;
+  // read by the fit effect without re-running it on every drag
+  const spotPinRef = useRef(spotPin);
+  spotPinRef.current = spotPin;
   const hoverPopupRef = useRef<mapboxgl.Popup | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showHexGrid, setShowHexGrid] = useState(true);
@@ -265,7 +283,10 @@ export const MapView: React.FC<MapViewProps> = ({
       new mapboxgl.ScaleControl({ maxWidth: 110, unit: 'metric' }),
       'bottom-left',
     );
-    map.on('click', () => onDeselectAll());
+    map.on('click', (e) => {
+      onDeselectAll();
+      onMapClickRef.current?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+    });
     // installLayers() recreates the (empty) sources; flushPending() then
     // re-applies whatever data has arrived so far — this is what makes a grid
     // that landed while the style was busy actually show up, and what restores
@@ -281,6 +302,8 @@ export const MapView: React.FC<MapViewProps> = ({
     return () => {
       markersRef.current.forEach(m => m.remove());
       markersRef.current = [];
+      spotMarkerRef.current?.remove();
+      spotMarkerRef.current = null;
       hoverPopupRef.current?.remove();
       map.remove();
       mapRef.current = null;
@@ -363,7 +386,10 @@ export const MapView: React.FC<MapViewProps> = ({
     const selPts = selectedLocations
       .map(l => ({ lat: Number(l.lat), lng: Number(l.lng) }))
       .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-    const focus = selPts.length > 0 ? selPts : pts;
+    // v2.4.0 — a spot check's pin is part of the picture: fit it with the zones.
+    const _sp = spotPinRef.current;
+    const focus = selPts.length > 0 ? selPts
+      : (_sp && Number.isFinite(_sp.lat) && Number.isFinite(_sp.lng) ? [...pts, { lat: _sp.lat, lng: _sp.lng }] : pts);
     // v2.3.0 — on a phone the sheet covers the lower half; keep the zones in
     // the half that is visible. `bottomInset` is 0 on desktop → the old 60.
     // The pin is 40 px tall above its anchor and the top bar is 48 px, so the
@@ -379,6 +405,52 @@ export const MapView: React.FC<MapViewProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locations, selectedLocations, onSelectLocation, recommendationWithheld, styleEpoch, setData]);
+
+  // ── v2.4.0 — the spot pin (check a spot) ──
+  // One marker, kept across renders; draggable only while the confirm step
+  // hands us a move callback. Dragging never moves the camera.
+  const onSpotPinMoveRef = useRef(onSpotPinMove);
+  onSpotPinMoveRef.current = onSpotPinMove;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!spotPin || !Number.isFinite(spotPin.lat) || !Number.isFinite(spotPin.lng)) {
+      spotMarkerRef.current?.remove();
+      spotMarkerRef.current = null;
+      return;
+    }
+    let m = spotMarkerRef.current;
+    if (!m) {
+      const el = document.createElement('div');
+      el.className = 'sg-spot-pin';
+      el.innerHTML = '<div class="sg-spot-pin-head">📍</div><div class="sg-spot-pin-label">Your spot</div>';
+      m = new mapboxgl.Marker({ element: el, anchor: 'bottom', draggable: !!onSpotPinMove })
+        .setLngLat([spotPin.lng, spotPin.lat])
+        .addTo(map);
+      m.on('dragend', () => {
+        const ll = m!.getLngLat();
+        onSpotPinMoveRef.current?.({ lat: ll.lat, lng: ll.lng });
+      });
+      spotMarkerRef.current = m;
+    } else {
+      const cur = m.getLngLat();
+      if (Math.abs(cur.lat - spotPin.lat) > 1e-9 || Math.abs(cur.lng - spotPin.lng) > 1e-9) {
+        m.setLngLat([spotPin.lng, spotPin.lat]);
+      }
+      m.setDraggable(!!onSpotPinMove);
+    }
+    m.getElement().classList.toggle('is-draggable', !!onSpotPinMove);
+  }, [spotPin, onSpotPinMove, styleEpoch]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !spotFocus || !spotPin) return;
+    map.flyTo({
+      center: [spotPin.lng, spotPin.lat], zoom: 16, duration: 900,
+      padding: bottomInset > 0 ? { top: 60, right: 0, bottom: bottomInset, left: 0 } : 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spotFocus]);
 
   // ── Study-area (AOI) boundary outline (v1.0.3) ──
   useEffect(() => {

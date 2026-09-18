@@ -397,6 +397,83 @@ body {
 .assistant-send:hover:not(:disabled) { background: var(--blue-600); }
 .assistant-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* ========== v2.4.0 — CHECK A SPOT ========== */
+/* The entry, on the welcome block: the one thing a person standing on a
+   street needs to find. */
+.assistant-spot-entry {
+  display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 10px;
+  padding: 10px 12px; border-radius: 10px; cursor: pointer; text-align: left;
+  font-family: var(--font); font-size: 12.5px; color: var(--gray-700);
+  background: var(--blue-50); border: 1px solid var(--blue-100);
+}
+.assistant-spot-entry:hover:not(:disabled) { border-color: var(--blue-600); }
+.assistant-spot-icon { font-size: 20px; line-height: 1; }
+.assistant-spot-text strong { color: var(--blue-800); }
+
+/* The card: same seat as the assistant (bottom centre; the ≤640px block
+   pins it to the bottom edge). */
+.spot-card {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 40; width: 94%; max-width: 440px; max-height: 70vh; max-height: 70dvh;
+  background: var(--glass); backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border); border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden;
+}
+.spot-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid rgba(0,0,0,0.04); }
+.spot-title { font-size: 12px; font-weight: 600; color: var(--gray-700); }
+.spot-close { background: none; border: none; cursor: pointer; color: var(--gray-400); font-size: 20px; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.spot-close:hover { color: var(--gray-700); }
+.spot-body { padding: 12px 14px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.spot-lead { font-size: 13.5px; line-height: 1.5; color: var(--gray-800); }
+.spot-source { color: var(--gray-500); }
+.spot-primary {
+  width: 100%; padding: 12px 14px; border-radius: 10px; border: none; cursor: pointer;
+  font-family: var(--font); font-size: 14px; font-weight: 600; background: var(--blue-700); color: #fff;
+}
+.spot-primary:hover:not(:disabled) { background: var(--blue-600); }
+.spot-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.spot-secondary {
+  padding: 9px 12px; border-radius: 8px; cursor: pointer; font-family: var(--font); font-size: 13px; font-weight: 600;
+  background: #fff; color: var(--gray-700); border: 1px solid var(--gray-300);
+}
+.spot-secondary:hover:not(:disabled) { border-color: var(--blue-600); color: var(--blue-700); }
+.spot-alt { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.spot-or { font-size: 12px; color: var(--gray-500); }
+.spot-link { background: none; border: none; cursor: pointer; font-family: var(--font); font-size: 12.5px; color: var(--blue-700); text-decoration: underline; padding: 4px 0; align-self: flex-start; }
+.spot-note { font-size: 12px; color: #92400e; background: var(--amber-100); border-radius: 8px; padding: 8px 10px; line-height: 1.45; }
+.spot-fine { font-size: 11px; color: var(--gray-500); line-height: 1.45; }
+.spot-label { font-size: 12px; font-weight: 600; color: var(--gray-700); }
+.spot-input {
+  width: 100%; font-family: var(--font); font-size: 16px; padding: 10px 12px;
+  border: 1px solid var(--gray-200); border-radius: 8px; background: rgba(255,255,255,0.8); color: var(--gray-800); outline: none;
+}
+.spot-input:focus { border-color: var(--blue-600); }
+.spot-verdict { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; }
+.spot-verdict-word { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+.spot-verdict-for { font-size: 12px; color: var(--gray-600); }
+.spot-verdict.is-good { background: #dcfce7; } .spot-verdict.is-good .spot-verdict-word { color: #166534; }
+.spot-verdict.is-fair { background: #fef3c7; } .spot-verdict.is-fair .spot-verdict-word { color: #92400e; }
+.spot-verdict.is-weak { background: #fee2e2; } .spot-verdict.is-weak .spot-verdict-word { color: #991b1b; }
+.spot-verdict.is-excluded { background: var(--gray-100); } .spot-verdict.is-excluded .spot-verdict-word { color: var(--gray-600); }
+.spot-verdict-text { font-size: 13px; line-height: 1.5; color: var(--gray-800); }
+.spot-factors { display: flex; flex-direction: column; gap: 7px; }
+.spot-factor-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; margin-bottom: 3px; }
+.spot-factor-name { flex: 1; min-width: 0; color: var(--gray-800); font-weight: 600; }
+.spot-factor-raw { color: var(--gray-500); font-size: 11px; white-space: nowrap; }
+.spot-factor-score { color: var(--gray-700); font-weight: 700; flex: 0 0 28px; text-align: right; }
+.spot-next-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500); margin-bottom: 4px; }
+.spot-next ul { padding-left: 16px; font-size: 12px; color: var(--gray-700); line-height: 1.5; }
+
+/* The pin on the map — the one thing that is the customer's, not the engine's */
+.sg-spot-pin { display: flex; flex-direction: column; align-items: center; cursor: default; }
+.sg-spot-pin.is-draggable { cursor: grab; }
+.sg-spot-pin-head { font-size: 34px; line-height: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35)); }
+.sg-spot-pin-label {
+  margin-top: -2px; font-size: 10px; font-weight: 700; color: #1d4ed8;
+  background: rgba(255,255,255,0.95); border: 1px solid #bfdbfe; border-radius: 10px; padding: 1px 7px;
+  white-space: nowrap; order: -1; margin-bottom: 2px;
+}
+
 /* When drawer is open, shift the assistant rightward to avoid overlap */
 .assistant-drawer-shift {
   left: calc(50% + 200px); /* 200px = half of drawer width (400px) */
@@ -1075,6 +1152,10 @@ body {
   .assistant.assistant-above-sheet.assistant-expanded { max-height: calc(100dvh - 60px - var(--sheet-peek)); }
   .assistant.assistant-behind-sheet { display: none; }
   .assistant-results-toggle { display: none; }
+  .spot-card {
+    position: fixed; max-width: 100%; left: 0; transform: none; border-radius: 14px 14px 0 0;
+    bottom: 0; bottom: env(safe-area-inset-bottom, 0px); max-height: calc(100dvh - 60px);
+  }
   /* One Run button (the sticky bar) — on a phone it is the primary action */
   .assistant-start-btn {
     width: 100%; padding: 11px 14px; font-size: 14px;
@@ -1173,12 +1254,13 @@ body {
      the × on a factor, expand chevrons, the sheet's close button measured
      14–24px live). */
   .topbar-btn, .drawer-close, .drawer-expand, .assistant-toggle, .new-chat-btn, .spec-factor-remove,
-  .assistant-error-dismiss {
+  .assistant-error-dismiss, .spot-close {
     min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
   }
   .spec-factor-slider { height: 32px; }
   .spec-dir-toggle, .drawer-layer-btn, .clarify-option, .spec-add-trigger, .spec-add-confirm, .spec-add-cancel,
-  .assistant-start-btn, .clarify-continue, .assistant-retry-btn, .assistant-cancel-btn {
+  .assistant-start-btn, .clarify-continue, .assistant-retry-btn, .assistant-cancel-btn,
+  .spot-secondary, .spot-link, .assistant-spot-entry {
     min-height: 40px;
   }
   .drawer-loc-header { min-height: 56px; }

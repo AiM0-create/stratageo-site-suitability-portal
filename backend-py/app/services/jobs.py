@@ -877,6 +877,85 @@ async def _degradable_call(
     return default
 
 
+def target_verdict(rank: int, n_eligible: int) -> str:
+    """good / fair / weak by thirds of the eligible cells' screening rank."""
+    if n_eligible <= 0 or rank <= 0:
+        return "weak"
+    share = (rank - 1) / n_eligible          # 0 = best
+    return "good" if share < 1 / 3 else "fair" if share < 2 / 3 else "weak"
+
+
+async def _describe_target(
+    spec: SpecV2, hexes, ci: int, composite, excluded, scores, layer_pois,
+    finals: list[int], locations: list[dict], verified: dict, shortlist_rank: dict,
+    verify_note: dict, mask_stats: dict,
+) -> dict:
+    """v2.4.0 — the block a "check a spot" verdict card is built from."""
+    cell = hexes[ci]
+    n_elig = int((~excluded).sum())
+    is_excl = bool(excluded[ci])
+    info: dict = {
+        "h3": cell.h3_id, "lat": cell.lat, "lng": cell.lng,
+        "point": dict(spec.targetPoint or {}),
+        "radiusM": int(spec.studyArea.radiusM or 0) if spec.studyArea.type == "point_radius" else None,
+        "excluded": is_excl,
+        "cellsScreened": len(hexes), "cellsEligible": n_elig,
+        "screeningScore": round(float(composite[ci]) * 10, 2),
+    }
+    try:
+        info["areaHint"] = ((await reverse_geocode_name(cell.lat, cell.lng)) or "").strip() or None
+    except Exception:
+        info["areaHint"] = None
+    if is_excl:
+        # No per-cell mask ledger exists; name the masks that removed cells in
+        # this run rather than guess which one took this cell.
+        _masks = [k for k, v in mask_stats.items()
+                  if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+                  and not k.startswith(("minViable", "viable", "metroExclusionStation", "metroExclusionOverride"))]
+        info.update({
+            "verdict": "excluded",
+            "screeningRank": None, "percentile": None,
+            "exclusionMasks": _masks,
+            "verdictText": ("This cell is kept out by a hard exclusion in this run"
+                            + (f" ({', '.join(_masks)})" if _masks else "") + "."),
+        })
+        return info
+    rank = 1 + int(sum(1 for i in range(len(hexes)) if not excluded[i] and float(composite[i]) > float(composite[ci])))
+    verdict = target_verdict(rank, n_elig)
+    info.update({
+        "screeningRank": rank,
+        "percentile": round(1.0 - (rank - 1) / n_elig, 3) if n_elig else None,
+        "verdict": verdict,
+    })
+    if ci in verified:
+        info["verified"] = {
+            "score": round(verified[ci], 2),
+            "rank": shortlist_rank.get(ci),
+            "of": len(verified),
+            "note": verify_note.get(ci),
+        }
+    if ci in finals:
+        loc = locations[finals.index(ci)]
+        info["location"] = loc
+        info["priority"] = finals.index(ci) + 1
+    else:
+        info["location"] = results_mod.build_location(
+            spec, hexes, ci, scores, layer_pois, "Your spot", rank, screening01=float(composite[ci]),
+        )
+        info["location"]["areaHint"] = info["areaHint"]
+        info["location"]["isTarget"] = True
+        info["priority"] = None
+    _word = {"good": "a good spot", "fair": "a fair spot", "weak": "a weak spot"}[verdict]
+    _radius = f"{info['radiusM'] / 1000:.1f} km" if info.get("radiusM") else "the area"
+    info["verdictText"] = (
+        f"{_word.capitalize()} for a {spec.businessType}: it ranks {rank} of {n_elig} "
+        f"cells within {_radius} on the screening score"
+        + (f" and {info['verified']['rank']} of {info['verified']['of']} once re-verified" if ci in verified and shortlist_rank.get(ci) else "")
+        + (f" — Priority {info['priority']} in this run." if info.get("priority") else ".")
+    )
+    return info
+
+
 async def _run_analysis(job: Job, spec: SpecV2) -> None:
     s = get_settings()
     notes: list[str] = []
@@ -1158,6 +1237,24 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     hexes, res, grid_notes = polyfill(polygon, spec.grid.resolution, min_cells=s.min_grid_cells)
     notes.extend(grid_notes)
     notes.append(f"H3 grid: {len(hexes)} hexes at resolution {res}")
+
+    # v2.4.0 — "check a spot": the cell under the customer's pin is the
+    # subject of the run. It is always re-verified (Pass B) and always
+    # reported, whether or not it ranks. Nearest cell if the pin's own cell is
+    # somehow outside the grid (polyfill may have degraded the resolution).
+    _target_ci: int | None = None
+    if spec.targetPoint and isinstance(spec.targetPoint, dict) and hexes:
+        try:
+            import h3 as _h3
+            _tp_lat, _tp_lng = float(spec.targetPoint["lat"]), float(spec.targetPoint["lng"])
+            _tp_h3 = _h3.latlng_to_cell(_tp_lat, _tp_lng, res)
+            _target_ci = next((i for i, h in enumerate(hexes) if h.h3_id == _tp_h3), None)
+            if _target_ci is None:
+                _target_ci = min(range(len(hexes)),
+                                 key=lambda i: scoring.haversine_m(hexes[i].lat, hexes[i].lng, _tp_lat, _tp_lng))
+        except Exception:               # never let the spot bookkeeping break a run
+            logger.exception("targetPoint resolution failed")
+            _target_ci = None
 
     # ── 3. Data fetch — ALL OSM layers + exclusions in one union query ──
     # Consumer-POI layers (cafés, shops, clinics…) are sourced from BOTH OSM and
@@ -2082,6 +2179,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     candidates = scoring.select_candidates(
         composite, hexes, excluded, top_k, _sep_rings,
     )
+    # v2.4.0 — the spot under the pin is verified even when it would never
+    # have made the screening shortlist; that is the point of the check.
+    if _target_ci is not None and not excluded[_target_ci] and _target_ci not in candidates:
+        candidates.append(_target_ci)
     # v1.5.2 — ranking-basis transparency (user-reported confusion: "recommended
     # cells were not the highest suitability scores"). Two legitimate mechanisms
     # cause a pick to differ from the darkest map cell; both are now disclosed.
@@ -3254,6 +3355,33 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
                   "among those and its 0–10 scale is relative to that shortlist."),
     }
 
+    # ── v2.4.0 — the spot under the pin: where it stands, honestly ──────────
+    # Verdict is RELATIVE to the cells around it (the scores are percentile-
+    # normalised within the study area — a lone cell has no score): good /
+    # fair / weak by thirds of the eligible cells' screening rank, the same
+    # basis the map is coloured on. The verified rank is stated alongside.
+    _target_info = None
+    if _target_ci is not None:
+        _target_info = await _describe_target(
+            spec, hexes, _target_ci, composite, excluded, scores, layer_pois,
+            finals, locations, _verified, _shortlist_rank, _verify_note, mask_stats,
+        )
+        if _target_ci in finals:
+            locations[finals.index(_target_ci)]["isTarget"] = True
+        elif _target_info and isinstance(_target_info.get("location"), dict):
+            # the same customer-facing projection the ranked zones get
+            try:
+                _tl = _target_info["location"]
+                apply_screening_verdicts([_tl])
+                _tl["nextValidation"] = build_zone_next_validation(
+                    _tl, unsupported_keys=_unsup_keys,
+                    unverified_constraint_names=_policy.unverifiedHardConstraints,
+                    sparse_competition_factors=_sparse_comp,
+                    buildability_degraded=bool(_buildability_degraded),
+                )
+            except Exception as _tv_ex:
+                logger.warning("target screening projection failed (non-fatal): %s", _tv_ex)
+
     # ── Catchment outlines for the winners ───────────────────────────
     catchments = results_mod.build_catchments(spec, iso_polygons, finals, locations)
 
@@ -3356,6 +3484,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "locations": locations,
         "grounding_sources": [],
         "hexGrid": hex_grid,
+        "targetCell": _target_info,         # v2.4.0 — the spot under the pin, or None
         "shortlist": _shortlist_info,       # v2.0.0 — the ranking basis, as numbers
         "catchments": catchments,
         "dataSufficiency": data_sufficiency,

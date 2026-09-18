@@ -571,6 +571,10 @@ class SpecV2(BaseModel):
     # customer which of their words became a variable and which could not.
     factorComposition: Optional[dict] = None
     promptWeightUnmatched: list[str] = []       # stated weights no layer matched
+    # v2.4.0 — "check a spot": the customer's pin. The cell under it is always
+    # re-verified and reported (result.targetCell) whether or not it ranks.
+    # {"lat": float, "lng": float}; None for an ordinary area search.
+    targetPoint: Optional[dict] = None
 
     # ── v1.6.3 — grid-level choice ─────────────────────────────────────────────
     # Set true by the UI when the customer picks an H3 level (7 or 8) on the
