@@ -4,6 +4,25 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.4.2] — 2026-09-18 — The sheet on a real phone (frontend only)
+
+Owner's phone after v2.4.1: "score menu disappears after minimising to see
+the map; only shows 1st place score, not others; mobile view is bugged."
+Both symptoms, one cause the emulation could not show: the results sheet was
+a full-height panel positioned inside a `100vh` container and *translated*
+down per state. On a real phone `100vh` is taller than the visible screen
+(the browser's URL / toolbar), so the minimised bar sat below the screen
+edge, and in the half state the scrollable body ran off the bottom — only
+the first card was ever reachable.
+
+- The sheet is now `position: fixed` to the visible viewport and changes its
+  **height** per state — peek 56 px, half `50dvh`, full `100dvh − 48 px` —
+  so the body scrolls within what is on screen: Priority 1, 2, 3, the map
+  colours, the notices. Safe-area padding at the bottom.
+- The portal shell itself is `100dvh` (with a `100vh` fallback).
+- `mobileLayout.test.ts` asserts the fixed / dvh contract and refuses `100vh`
+  on the sheet.
+
 ## [2.4.1] — 2026-09-18 — Checked on a real phone emulation
 
 Owner ran v2.4.0 on his phone: "still not suited for mobile". The v2.3.0

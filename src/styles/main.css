@@ -93,7 +93,7 @@ body {
 .icon-xs { width: 14px; height: 14px; flex-shrink: 0; }
 
 /* ========== PORTAL SHELL ========== */
-.portal { position: relative; width: 100%; height: 100vh; overflow: hidden; }
+.portal { position: relative; width: 100%; height: 100vh; height: 100dvh; overflow: hidden; }
 
 /* ========== MAP (full viewport) ========== */
 .sg-map-wrapper { position: absolute; inset: 0; z-index: 0; }
@@ -1125,17 +1125,25 @@ body {
      24px icon. The sheet has three heights (services/sheetState.ts); the map
      always keeps the rest. `--sheet-peek` mirrors SHEET_PEEK_PX. */
   :root { --sheet-peek: 56px; }
+  /* v2.4.2 — the sheet is FIXED to the visible viewport and changes HEIGHT,
+     not a full-height panel translated down inside a 100vh container. On a
+     real phone 100vh is taller than the screen (the browser's URL bar), so
+     the translated sheet's peek bar sat below the screen edge ("disappears
+     after minimising") and in the half state the scrollable body ran off the
+     bottom — only Priority 1 could ever be reached. Owner's phone, 18 Sep. */
   .drawer {
-    top: auto; bottom: 0; left: 0; right: 0; width: 100%;
-    height: calc(100dvh - 48px);
+    position: fixed; top: auto; bottom: 0; left: 0; right: 0; width: 100%;
+    height: var(--sheet-peek);
     border-right: none; border-top: 1px solid var(--glass-border);
     border-radius: 14px 14px 0 0;
-    transition: transform 0.25s ease;
+    transition: height 0.25s ease;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
-  .drawer-open, .drawer-closed { transform: translateY(calc(100% - var(--sheet-peek))); }
-  .drawer-sheet-peek { transform: translateY(calc(100% - var(--sheet-peek))); }
-  .drawer-sheet-half { transform: translateY(50%); }
-  .drawer-sheet-full { transform: translateY(0); }
+  .drawer-open, .drawer-closed { transform: none; }
+  .drawer-sheet-peek { height: calc(var(--sheet-peek) + env(safe-area-inset-bottom, 0px)); }
+  .drawer-sheet-half { height: 50dvh; }
+  .drawer-sheet-full { height: calc(100dvh - 48px); }
+  .drawer-sheet-peek .drawer-body { overflow: hidden; }
   .drawer-sheet .drawer-header {
     min-height: var(--sheet-peek); padding: 14px 12px 8px; align-items: center;
     touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab;

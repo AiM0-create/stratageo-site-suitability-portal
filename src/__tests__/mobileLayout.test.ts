@@ -67,15 +67,23 @@ describe('phone stylesheet contract', () => {
     expect(block).toMatch(new RegExp(`--sheet-peek:\\s*${SHEET_PEEK_PX}px`));
   });
 
-  it('the drawer is a bottom sheet with three heights, never a full-screen cover', () => {
+  it('the drawer is a FIXED bottom sheet whose height changes, in dvh (v2.4.2)', () => {
+    // A translated full-height panel inside a 100vh container put the peek
+    // bar below a real phone's screen edge and ran the half state's scroll
+    // body off the bottom (only Priority 1 reachable). Owner's phone, 18 Sep.
     const drawer = ruleIn(block, '.drawer');
+    expect(drawer).toMatch(/position:\s*fixed/);
     expect(drawer).toMatch(/bottom:\s*0/);
     expect(drawer).toMatch(/top:\s*auto/);
-    expect(ruleIn(block, '.drawer-sheet-peek')).toMatch(/translateY\(calc\(100% - var\(--sheet-peek\)\)\)/);
-    expect(ruleIn(block, '.drawer-sheet-half')).toMatch(/translateY\(50%\)/);
-    expect(ruleIn(block, '.drawer-sheet-full')).toMatch(/translateY\(0\)/);
-    // "closed" on a phone still peeks — the map never loses the results
-    expect(ruleIn(block, '.drawer-open, .drawer-closed')).toMatch(/var\(--sheet-peek\)/);
+    expect(drawer).toMatch(/transition:\s*height/);
+    expect(drawer).not.toMatch(/100vh/);
+    expect(ruleIn(block, '.drawer-sheet-peek')).toMatch(/height:\s*calc\(var\(--sheet-peek\)/);
+    expect(ruleIn(block, '.drawer-sheet-half')).toMatch(/height:\s*50dvh/);
+    expect(ruleIn(block, '.drawer-sheet-full')).toMatch(/height:\s*calc\(100dvh - 48px\)/);
+    // the desktop slide-in transform must not apply on a phone
+    expect(ruleIn(block, '.drawer-open, .drawer-closed')).toMatch(/transform:\s*none/);
+    // the shell itself uses the visible viewport
+    expect(ruleIn(css, '.portal')).toMatch(/height:\s*100dvh/);
   });
 
   it('the sheet header is a drag handle (touch-action none, grip visible)', () => {
