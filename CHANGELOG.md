@@ -4,7 +4,7 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
-## [2.4.1] — 2026-09-18 — Checked on a real phone emulation (frontend only)
+## [2.4.1] — 2026-09-18 — Checked on a real phone emulation
 
 Owner ran v2.4.0 on his phone: "still not suited for mobile". The v2.3.0
 pass had been verified in a desktop iframe at 390 px — same media queries,
@@ -36,9 +36,13 @@ but a mouse pointer and no mobile user-agent. A true 375×812 touch emulation
 - Regression tests updated (`mobileLayout.test.ts`: factor-head contract,
   full-width panels).
 
+- Engine: a spot check's `target_location` is the pin's locality, so "My
+  analyses" reads "cafe — D'Souza Layout", not "cafe —".
+
 Verified in the emulation: brief → plan → run → half sheet with the hex
 surface and three pins → peek with the assistant bar above it → tapping a
-hex shows its score (touch path). Engine unchanged (2.4.0).
+hex shows its score (touch path); spot flow → tap-to-place keeps the camera.
+Engine and portal 2.4.1.
 
 ## [2.4.0] — 2026-09-18 — Check a spot
 

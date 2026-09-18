@@ -3366,6 +3366,10 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
             spec, hexes, _target_ci, composite, excluded, scores, layer_pois,
             finals, locations, _verified, _shortlist_rank, _verify_note, mask_stats,
         )
+        # v2.4.1 — a spot check has no named area; "My analyses" showed
+        # "cafe —". The pin's reverse-geocoded locality is the location.
+        if not target_location and _target_info and _target_info.get("areaHint"):
+            target_location = str(_target_info["areaHint"]).strip()
         if _target_ci in finals:
             locations[finals.index(_target_ci)]["isTarget"] = True
         elif _target_info and isinstance(_target_info.get("location"), dict):
