@@ -369,7 +369,7 @@ export const MapView: React.FC<MapViewProps> = ({
     // The pin is 40 px tall above its anchor and the top bar is 48 px, so the
     // top pad clears both; the sides clear half a pin plus the zoom controls.
     const padding = bottomInset > 0
-      ? { top: 110, right: 56, bottom: bottomInset + 32, left: 40 }
+      ? { top: 110, right: 64, bottom: bottomInset + 32, left: 40 }
       : 60;
     if (focus.length === 1) {
       map.flyTo({ center: [focus[0].lng, focus[0].lat], zoom: 13, duration: 1000, padding });
