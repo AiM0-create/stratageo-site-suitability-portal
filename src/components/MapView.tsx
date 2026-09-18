@@ -133,6 +133,7 @@ export const MapView: React.FC<MapViewProps> = ({
   // read by the fit effect without re-running it on every drag
   const spotPinRef = useRef(spotPin);
   spotPinRef.current = spotPin;
+  const hadLocationsRef = useRef(false);
   const hoverPopupRef = useRef<mapboxgl.Popup | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [showHexGrid, setShowHexGrid] = useState(true);
@@ -335,12 +336,19 @@ export const MapView: React.FC<MapViewProps> = ({
     markersRef.current = [];
 
     if (locations.length === 0) {
-      map.flyTo({
-        center: [config.map.defaultCenter[1], config.map.defaultCenter[0]],
-        zoom: config.map.defaultZoom, duration: 1000,
-      });
+      // v2.4.1 — fly home once when the results go away, not on every re-run
+      // of this effect while there are none (a spot pin was being placed and
+      // each tap snapped the camera back to the country view).
+      if (hadLocationsRef.current) {
+        map.flyTo({
+          center: [config.map.defaultCenter[1], config.map.defaultCenter[0]],
+          zoom: config.map.defaultZoom, duration: 1000,
+        });
+      }
+      hadLocationsRef.current = false;
       return;
     }
+    hadLocationsRef.current = true;
 
     const ranked = [...locations].sort((a, b) => {
       if (a.excluded !== b.excluded) return a.excluded ? 1 : -1;

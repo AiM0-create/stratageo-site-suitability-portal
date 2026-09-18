@@ -603,7 +603,10 @@ const App: React.FC = () => {
           locations={locations}
           selectedLocations={selected}
           onSelectLocation={handleSelectLocation}
-          onDeselectAll={() => setSelectedLocations([])}
+          // keep the reference stable when already empty — a new [] re-ran the
+          // marker effect, whose "no locations" branch flew the camera home on
+          // every map tap (found placing a spot pin on the phone emulation)
+          onDeselectAll={() => setSelectedLocations(prev => (prev.length ? [] : prev))}
           basemapId={basemapId}
           onBasemapChange={handleBasemapChange}
           heatmapType={heatmapType}

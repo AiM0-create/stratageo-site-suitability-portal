@@ -22,6 +22,12 @@ but a mouse pointer and no mobile user-agent. A true 375×812 touch emulation
   location the moment it opens — a person standing at the spot lands straight
   on the confirm step with the pin under them. Photo and tap stay available;
   the photo can also be taken from the confirm step to move the pin.
+- **Every map tap snapped the camera back to the country view** while there
+  were no results: the tap cleared the (already empty) selection with a new
+  array, which re-ran the marker effect, whose "no locations" branch flew
+  home. Found placing a spot pin. The selection keeps its reference when
+  already empty, and the map flies home once — when results go away — not
+  on every re-run.
 - Regression tests updated (`mobileLayout.test.ts`: factor-head contract,
   full-width panels).
 
