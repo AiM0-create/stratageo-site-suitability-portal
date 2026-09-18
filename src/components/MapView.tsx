@@ -366,8 +366,10 @@ export const MapView: React.FC<MapViewProps> = ({
     const focus = selPts.length > 0 ? selPts : pts;
     // v2.3.0 — on a phone the sheet covers the lower half; keep the zones in
     // the half that is visible. `bottomInset` is 0 on desktop → the old 60.
+    // The pin is 40 px tall above its anchor and the top bar is 48 px, so the
+    // top pad clears both; the sides clear half a pin plus the zoom controls.
     const padding = bottomInset > 0
-      ? { top: 70, right: 30, bottom: bottomInset + 24, left: 30 }
+      ? { top: 110, right: 56, bottom: bottomInset + 32, left: 40 }
       : 60;
     if (focus.length === 1) {
       map.flyTo({ center: [focus[0].lng, focus[0].lat], zoom: 13, duration: 1000, padding });

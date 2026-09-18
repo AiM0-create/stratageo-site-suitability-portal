@@ -73,6 +73,11 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
   }, [input]);
 
+  // v2.3.0 — when the results sheet is minimised the map should win: the
+  // panel drops to its bar instead of springing back over the map with the
+  // old plan. The customer expands it again when they want to talk.
+  useEffect(() => { if (phoneSheet === 'peek') setExpanded(false); }, [phoneSheet]);
+
   const promptCap = user?.maxPrompts ?? MAX_PROMPTS_PER_USER;
   const promptsLeft = user ? (user.isAdmin ? Infinity : Math.max(0, promptCap - user.promptsUsed)) : 0;
 
