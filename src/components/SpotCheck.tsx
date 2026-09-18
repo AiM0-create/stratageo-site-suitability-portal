@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AnalysisResult, AnalysisStatus, TargetCell } from '../types';
 import { locationFromDevice, locationFromPhoto, VERDICT_LABEL, type LocationSource, type ResolvedLocation } from '../services/spotCheck';
 
@@ -82,6 +82,25 @@ export const SpotCheck: React.FC<SpotCheckProps> = ({
     place(loc, 'Location is off or was refused — tap the map where the shop would be.');
   };
 
+  // v2.4.1 — ask for the phone's location as soon as the flow opens. A person
+  // standing at the spot is the case this exists for, and on a real 375px
+  // emulation the alternative was "tap the map" on a view of the globe.
+  // Silent on failure: the photo / tap paths stay on screen.
+  const autoLocated = useRef(false);
+  useEffect(() => {
+    if (autoLocated.current || stage !== 'locate' || pin) return;
+    autoLocated.current = true;
+    let alive = true;
+    setLocating('device');
+    locationFromDevice(8000).then(loc => {
+      if (!alive) return;
+      setLocating(null);
+      if (loc) place(loc, '');
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const run = () => {
     const b = business.trim();
     if (!pin || b.length < 2) return;
@@ -137,7 +156,12 @@ export const SpotCheck: React.FC<SpotCheckProps> = ({
                    onKeyDown={e => { if (e.key === 'Enter') run(); }} />
           </div>
           <button type="button" className="spot-primary" onClick={run} disabled={business.trim().length < 2}>Check this spot</button>
-          <button type="button" className="spot-link" onClick={() => onStageChange('locate')}>Place the pin differently</button>
+          <div className="spot-alt">
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onPhoto} />
+            <button type="button" className="spot-link" onClick={() => fileRef.current?.click()} disabled={!!locating}>
+              {locating === 'photo' ? 'Reading the photo…' : '📷 Take a photo of the street instead'}
+            </button>
+          </div>
         </div>
       )}
 

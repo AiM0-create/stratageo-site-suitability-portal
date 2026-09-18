@@ -4,6 +4,31 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.4.1] — 2026-09-18 — Checked on a real phone emulation (frontend only)
+
+Owner ran v2.4.0 on his phone: "still not suited for mobile". The v2.3.0
+pass had been verified in a desktop iframe at 390 px — same media queries,
+but a mouse pointer and no mobile user-agent. A true 375×812 touch emulation
+(the app's browser pane) showed what the phone showed:
+
+- **The panels stopped 22 px short of the right edge** below 480 px: `.assistant`
+  and the spot card were `width: 94%` left-aligned. Now `width: 100%`.
+- **The touch-target rules broke the plan card.** 44 px on the × and 40 px on
+  the direction chip turned every factor into three ragged rows. Icon buttons
+  keep 44 px; wide chips are 30 px tall, the × is 36; the factor head is laid
+  out on purpose — name · % · × on the first row, the chips on the second.
+- **"Tap the map where the shop would be" started on a view of the globe.**
+  The map now opens on India (zoom 4), and the spot flow asks for the phone's
+  location the moment it opens — a person standing at the spot lands straight
+  on the confirm step with the pin under them. Photo and tap stay available;
+  the photo can also be taken from the confirm step to move the pin.
+- Regression tests updated (`mobileLayout.test.ts`: factor-head contract,
+  full-width panels).
+
+Verified in the emulation: brief → plan → run → half sheet with the hex
+surface and three pins → peek with the assistant bar above it → tapping a
+hex shows its score (touch path). Engine unchanged (2.4.0).
+
 ## [2.4.0] — 2026-09-18 — Check a spot
 
 Sagar sir (18 Sep): *"a person takes a photo of an area and asks, is this a

@@ -16,8 +16,10 @@ export const config = {
    * /api/v2/map-config instead — see services/mapConfig.ts. */
 
   map: {
-    defaultCenter: [20, 0] as [number, number],
-    defaultZoom: 2,
+    // v2.4.1 — India, not the globe: on a phone "tap the map where the shop
+    // would be" started from a world view.
+    defaultCenter: [21.5, 79.0] as [number, number],
+    defaultZoom: 4,
   },
 
   /** v1.12.0 — Mapbox GL JS vector styles, replacing the previous raster tile

@@ -107,15 +107,35 @@ describe('phone stylesheet contract', () => {
 });
 
 describe('touch targets', () => {
-  it('everything a thumb has to hit is at least 44px on coarse pointers', () => {
-    const start = css.indexOf('@media (hover: none) and (pointer: coarse)');
+  const start = css.indexOf('@media (hover: none) and (pointer: coarse)');
+  const block = css.slice(start, css.indexOf('\n}\n', start));
+
+  it('icon buttons are 44px on coarse pointers', () => {
     expect(start).toBeGreaterThan(-1);
-    const block = css.slice(start, css.indexOf('\n}\n', start));
-    for (const sel of ['.drawer-close', '.drawer-expand', '.spec-factor-remove', '.assistant-toggle', '.new-chat-btn']) {
+    for (const sel of ['.drawer-close', '.drawer-expand', '.assistant-toggle', '.new-chat-btn']) {
       expect(block).toContain(sel);
     }
     expect(block).toMatch(/min-width:\s*44px;\s*min-height:\s*44px/);
-    expect(block).toMatch(/\.spec-factor-slider\s*\{\s*height:\s*32px/);
+  });
+
+  it('the factor card stays two rows: name · % · × then the chips (v2.4.1)', () => {
+    // 44px on the × and 40px on the direction chip made every card three
+    // ragged rows on a real 375px emulation.
+    expect(block).toMatch(/\.spec-factor-remove\s*\{\s*min-width:\s*36px;\s*min-height:\s*36px/);
+    expect(block).toMatch(/\.spec-dir-toggle\s*\{\s*min-height:\s*30px/);
+    expect(block).toMatch(/\.spec-factor-slider\s*\{\s*height:\s*30px/);
+    expect(block).toMatch(/\.spec-factor-head::after\s*\{[^}]*flex-basis:\s*100%/);
+    expect(block).toMatch(/\.spec-factor-name\s*\{\s*order:\s*1/);
+    expect(block).toMatch(/\.spec-dir-toggle, \.spec-origin, \.spec-proxy-flag\s*\{\s*order:\s*5/);
+  });
+});
+
+describe('phone width', () => {
+  it('the assistant and the spot card span the full width below 480px (a 94% left-aligned panel left a gap)', () => {
+    const start = css.indexOf('@media (max-width: 480px)');
+    const block = css.slice(start, css.indexOf('\n}\n', start));
+    expect(ruleIn(block, '.assistant')).toMatch(/width:\s*100%/);
+    expect(ruleIn(block, '.spot-card')).toMatch(/width:\s*100%/);
   });
 });
 

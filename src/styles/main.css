@@ -1218,10 +1218,11 @@ body {
   .session-dropdown-wrap { display: none; }
 
   .assistant {
-    max-width: 100%; left: 0; transform: none;
+    width: 100%; max-width: 100%; left: 0; transform: none;
     margin: 0; border-radius: 12px 12px 0 0;
     bottom: 0; bottom: env(safe-area-inset-bottom, 0px);
   }
+  .spot-card { width: 100%; }
   .assistant-expanded {
     max-height: calc(100vh - 160px);
     max-height: calc(100dvh - 56px);
@@ -1257,16 +1258,28 @@ body {
   /* v2.3.0 — 44px targets on everything a thumb has to hit (sliders' thumbs,
      the × on a factor, expand chevrons, the sheet's close button measured
      14–24px live). */
-  .topbar-btn, .drawer-close, .drawer-expand, .assistant-toggle, .new-chat-btn, .spec-factor-remove,
+  .topbar-btn, .drawer-close, .drawer-expand, .assistant-toggle, .new-chat-btn,
   .assistant-error-dismiss, .spot-close {
     min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
   }
-  .spec-factor-slider { height: 32px; }
-  .spec-dir-toggle, .drawer-layer-btn, .clarify-option, .spec-add-trigger, .spec-add-confirm, .spec-add-cancel,
+  /* v2.4.1 — measured on a real 375px emulation: 44px on the × and 40px on
+     the direction chip turned every factor card into three ragged rows.
+     Wide chips are fine at 32px tall; the × at 36. */
+  .spec-factor-remove { min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
+  .spec-factor-slider { height: 30px; }
+  .spec-dir-toggle { min-height: 30px; padding: 3px 10px; font-size: 11px; }
+  .drawer-layer-btn, .clarify-option, .spec-add-trigger, .spec-add-confirm, .spec-add-cancel,
   .assistant-start-btn, .clarify-continue, .assistant-retry-btn, .assistant-cancel-btn,
   .spot-secondary, .spot-link, .assistant-spot-entry {
     min-height: 40px;
   }
+  /* Factor head: name · % · × on the first row, the chips on the second. */
+  .spec-factor-head { row-gap: 4px; }
+  .spec-factor-name { order: 1; flex: 1 1 50%; font-size: 12.5px; }
+  .spec-factor-pct { order: 2; font-size: 13px; }
+  .spec-factor-remove { order: 3; }
+  .spec-factor-head::after { content: ''; flex-basis: 100%; order: 4; height: 0; }
+  .spec-dir-toggle, .spec-origin, .spec-proxy-flag { order: 5; margin-left: 0; }
   .drawer-loc-header { min-height: 56px; }
   .topbar-btn { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
   .assistant-chip { min-height: 36px; display: flex; align-items: center; }
