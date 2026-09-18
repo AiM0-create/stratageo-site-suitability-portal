@@ -588,8 +588,9 @@ const App: React.FC = () => {
   // v2.3.0 — phone: the sheet covers the bottom of the map, so the camera
   // fits the zones into the part of the map that is actually visible.
   const phoneSheet: SheetState | null = isPhone && result && !spotOpen ? sheetState : null;
+  // the spot card is taller once it carries a verdict (capped at 60dvh in CSS)
   const mapBottomInset = spotOpen
-    ? (isPhone ? Math.round(window.innerHeight * 0.45) : 0)
+    ? (isPhone ? Math.round(window.innerHeight * (spotStage === 'verdict' ? 0.6 : 0.45)) : 0)
     : phoneSheet === null ? 0
     : phoneSheet === 'peek' ? SHEET_PEEK_PX
     : Math.round(window.innerHeight * 0.5);

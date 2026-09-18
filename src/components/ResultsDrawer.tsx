@@ -286,6 +286,7 @@ export const ResultsDrawer: React.FC<ResultsDrawerProps> = ({
                       <div className="drawer-loc-name">
                         {loc.name}
                         {loc.areaHint && <span className="drawer-loc-hint"> near {loc.areaHint}</span>}
+                        {loc.isTarget && <span className="drawer-loc-target" title="The cell under your pin">📍 your spot</span>}
                         {verdict && VERDICT_STYLE[verdict] && (
                           <span className="excluded-badge" style={{ background: VERDICT_STYLE[verdict].bg, color: VERDICT_STYLE[verdict].fg }}>{verdict.toUpperCase()}</span>
                         )}
