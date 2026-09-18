@@ -20,6 +20,9 @@ the first card was ever reachable.
   so the body scrolls within what is on screen: Priority 1, 2, 3, the map
   colours, the notices. Safe-area padding at the bottom.
 - The portal shell itself is `100dvh` (with a `100vh` fallback).
+- `interactive-widget=resizes-content` on the viewport meta: Android Chrome
+  shrinks the layout for the on-screen keyboard only when asked, so the brief
+  input and the Run button stay above it.
 - `mobileLayout.test.ts` asserts the fixed / dvh contract and refuses `100vh`
   on the sheet.
 
