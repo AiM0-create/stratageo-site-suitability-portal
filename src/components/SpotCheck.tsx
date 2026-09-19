@@ -220,7 +220,7 @@ export const SpotCheck: React.FC<SpotCheckProps> = ({
       {stage === 'error' && (
         <div className="spot-body">
           <div className="assistant-error"><span>{error || 'The check could not be completed.'}</span></div>
-          <button type="button" className="spot-secondary" onClick={() => onStageChange('confirm')}>Try again</button>
+          <button type="button" className="spot-secondary" onClick={() => onStageChange(spec ? 'plan' : 'confirm')}>Try again</button>
         </div>
       )}
 
