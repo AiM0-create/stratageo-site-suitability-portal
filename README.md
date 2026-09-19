@@ -30,7 +30,7 @@ brief ──▶ clarify ──▶ plan ──▶ run ──▶ zones
 ### Check a spot
 
 ```
-📷 photo (or 📍 location, or a tap on the map) ──▶ confirm the pin ──▶ what are you opening? ──▶ verdict
+📷 photo (or 📍 location, or a tap on the map) ──▶ confirm the pin ──▶ what are you opening? ──▶ the factors (agree, adjust) ──▶ run ──▶ verdict
 ```
 
 The same engine, inverted: the 1.5 km around the pin is scored and the
@@ -38,7 +38,8 @@ verdict is **where that cell stands among its neighbours** — *Good / Fair /
 Weak*, its rank on the screening score, the factors behind it, the first
 ground checks — and one tap shows the best spots nearby from the same run.
 The photo only supplies the position (EXIF GPS read in the browser); it is
-never uploaded. `POST /api/v2/spot`.
+never uploaded. `POST /api/v2/spot` composes the plan; the ordinary
+`/api/v2/analyses` runs it.
 
 ---
 

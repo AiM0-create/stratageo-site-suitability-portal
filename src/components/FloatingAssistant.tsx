@@ -113,6 +113,9 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
       <div className="assistant-header" onClick={() => setExpanded(!expanded)}>
         <div className="assistant-header-left">
           <div className="assistant-indicator" />
+          {/* v2.5.0 — shown only when the bar is a round chat button above the
+              results sheet on a phone (CSS decides) */}
+          <span className="assistant-fab-icon" aria-hidden="true">💬</span>
           <span className="assistant-title">{messages.length ? sessionTitle : 'Site Suitability Assistant'}</span>
         </div>
         <div className="assistant-header-right">

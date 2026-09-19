@@ -23,7 +23,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { usePhoneLayout } from './services/phoneLayout';
 import { SHEET_PEEK_PX, type SheetState } from './services/sheetState';
 import { SpotCheck, type SpotStage } from './components/SpotCheck';
-import { startSpotCheck, type LocationSource } from './services/spotCheck';
+import { planSpotCheck, type LocationSource } from './services/spotCheck';
 
 export { isAnalysisSpecWithPoints } from './services/analysisFlow';
 export type { AnalysisPhase } from './types/chat';
@@ -64,6 +64,8 @@ const App: React.FC = () => {
   const [spotAccuracy, setSpotAccuracy] = useState<number | undefined>(undefined);
   const [spotFocus, setSpotFocus] = useState(0);
   const [spotError, setSpotError] = useState<string | null>(null);
+  // v2.5.0 — the composed plan, shown and agreed before it runs
+  const [spotSpec, setSpotSpec] = useState<SpecV2 | null>(null);
 
   // ── flow state ──
   const [isLoading, setIsLoading] = useState(false);
@@ -483,7 +485,7 @@ const App: React.FC = () => {
 
   // ── v2.4.0 — spot check handlers ──
   const handleSpotOpen = useCallback(() => {
-    setSpotOpen(true); setSpotStage('locate'); setSpotError(null);
+    setSpotOpen(true); setSpotStage('locate'); setSpotError(null); setSpotSpec(null);
     setSpotPin(null); setSpotSource(null); setSpotAccuracy(undefined);
     clearResults();
   }, [clearResults]);
@@ -503,12 +505,31 @@ const App: React.FC = () => {
     setSpotPin(pos); setSpotSource('pin'); setSpotAccuracy(undefined);
   }, []);
 
-  const handleSpotRun = useCallback(async (lat: number, lng: number, business: string) => {
+  // v2.5.0 — plan first (no credit), as on the desktop flow. Owner: the spot
+  // check "jumped straight to a verdict with no variables or discussion".
+  const handleSpotPlan = useCallback(async (lat: number, lng: number, business: string) => {
+    setSpotError(null);
+    try {
+      const planned = await planSpotCheck(lat, lng, business);
+      setSpotSpec(planned);
+      setSpotStage('plan');
+    } catch (err: any) {
+      setSpotError(err?.message || 'Could not compose the plan for this spot.');
+      setSpotStage('error');
+      throw err;
+    }
+  }, []);
+
+  const handleSpotRun = useCallback(async () => {
+    const specToUse = spotSpec;
+    if (!specToUse) { setSpotStage('confirm'); return; }
+    const business = specToUse.businessType;
+    const lat = Number(specToUse.targetPoint?.lat), lng = Number(specToUse.targetPoint?.lng);
     setSpotError(null);
     if (isStartingRef.current) return;
     isStartingRef.current = true;
     try {
-      if (!(await consumePrompt())) { setLimitModalOpen(true); setSpotStage('confirm'); return; }
+      if (!(await consumePrompt())) { setLimitModalOpen(true); setSpotStage('plan'); return; }
       const startedAt = Date.now();
       pollAbortRef.current?.abort();
       const controller = new AbortController();
@@ -516,11 +537,10 @@ const App: React.FC = () => {
       setIsExecuting(true);
       setAnalysisPhase('executing');
       clearResults();
-      setAnalysisStatus({ message: 'Planning the check…', progress: 4 });
+      setAnalysisStatus({ message: 'Starting the check…', progress: 4 });
       let jobId: string | null = null;
       try {
-        const started = await startSpotCheck(lat, lng, business);
-        jobId = started.jobId;
+        jobId = await startAnalysis(specToUse);
         activeJobIdRef.current = jobId;
         const data = normalizeAnalysisResult(await pollAnalysis(jobId, setAnalysisStatus, controller.signal));
         if (activeJobIdRef.current !== jobId) return;
@@ -554,7 +574,7 @@ const App: React.FC = () => {
           dispatch({ type: 'SET_TITLE', title: `Spot check — ${data.business_type}${data.targetCell.areaHint ? ` near ${data.targetCell.areaHint}` : ''}` });
         }
       } catch (err: any) {
-        if (err instanceof AnalysisCancelledError) { setSpotStage('confirm'); return; }
+        if (err instanceof AnalysisCancelledError) { setSpotStage('plan'); return; }
         const failed = err instanceof AnalysisFailedError ? err.failed : undefined;
         setSpotError(failed?.userMessage || err?.message || 'The check failed. Please try again.');
         setSpotStage('error');
@@ -565,7 +585,7 @@ const App: React.FC = () => {
     } finally {
       isStartingRef.current = false;
     }
-  }, [consumePrompt, clearResults, addMessage, user, currentSession.title, dispatch]);
+  }, [spotSpec, consumePrompt, clearResults, addMessage, user, currentSession.title, dispatch]);
 
   const handleSpotShowZones = useCallback(() => {
     setSpotOpen(false);
@@ -652,6 +672,9 @@ const App: React.FC = () => {
             pinSource={spotSource}
             pinAccuracyM={spotAccuracy}
             onPinChange={handleSpotPin}
+            onPlan={handleSpotPlan}
+            spec={spotSpec}
+            onSpecEdit={setSpotSpec}
             onRun={handleSpotRun}
             status={analysisStatus}
             result={result}
@@ -659,7 +682,7 @@ const App: React.FC = () => {
             onStageChange={setSpotStage}
             error={spotError}
             onShowZones={handleSpotShowZones}
-            onCancel={() => { handleCancelAnalysis(); setSpotStage('confirm'); }}
+            onCancel={() => { handleCancelAnalysis(); setSpotStage('plan'); }}
             onClose={handleSpotClose}
           />
         </ErrorBoundary>

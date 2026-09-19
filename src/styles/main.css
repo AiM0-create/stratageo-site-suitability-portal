@@ -240,6 +240,7 @@ body {
   box-shadow: 0 0 6px rgba(5,150,105,0.5);
 }
 .assistant-title { font-size: 12px; font-weight: 600; color: var(--gray-700); }
+.assistant-fab-icon { display: none; }
 
 .assistant-results-toggle, .assistant-toggle {
   background: none; border: none; cursor: pointer; color: var(--gray-400);
@@ -466,6 +467,11 @@ body {
 .spot-next-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500); margin-bottom: 4px; }
 .spot-next ul { padding-left: 16px; font-size: 12px; color: var(--gray-700); line-height: 1.5; }
 .drawer-loc-target { margin-left: 6px; font-size: 10px; font-weight: 700; color: #1d4ed8; background: #dbeafe; border-radius: 9px; padding: 1px 6px; vertical-align: middle; }
+
+.spot-body-plan .spec-card { border: none; padding: 0; background: transparent; box-shadow: none; }
+.spot-card.spot-stage-plan { max-height: 80vh; max-height: 80dvh; }
+@keyframes sg-indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+.spot-indeterminate { width: 40%; animation: sg-indeterminate 1.4s ease-in-out infinite; }
 
 /* The pin on the map — the one thing that is the customer's, not the engine's */
 .sg-spot-pin { display: flex; flex-direction: column; align-items: center; cursor: default; }
@@ -1191,6 +1197,20 @@ body {
   .assistant.assistant-conversing.assistant-expanded.assistant-above-sheet {
     height: calc(100dvh - 48px - var(--sheet-peek) - env(safe-area-inset-bottom, 0px));
   }
+  /* v2.5.0 — above a results sheet, the collapsed chat is a round button,
+     not a second full-width bar. Owner's phone: the chat bar and the
+     "Priority zones" bar stacked at the bottom looked like the same thing. */
+  .assistant.assistant-above-sheet.assistant-collapsed {
+    width: 52px; height: 52px; max-height: 52px; left: auto; right: 14px;
+    bottom: calc(var(--sheet-peek) + 14px + env(safe-area-inset-bottom, 0px));
+    border-radius: 26px; box-shadow: var(--shadow-lg);
+  }
+  .assistant.assistant-above-sheet.assistant-collapsed .assistant-header { padding: 0; height: 52px; justify-content: center; border: none; }
+  .assistant.assistant-above-sheet.assistant-collapsed .assistant-header-left { gap: 0; }
+  .assistant.assistant-above-sheet.assistant-collapsed .assistant-indicator,
+  .assistant.assistant-above-sheet.assistant-collapsed .assistant-title,
+  .assistant.assistant-above-sheet.assistant-collapsed .assistant-header-right { display: none; }
+  .assistant.assistant-above-sheet.assistant-collapsed .assistant-fab-icon { display: block; font-size: 22px; line-height: 1; }
   /* the sheet's first appearance slides up instead of popping in */
   .drawer-sheet { animation: sg-sheet-in 0.3s ease; }
   /* "Priority 1 near …" lost the locality to an ellipsis at 375px — wrap */

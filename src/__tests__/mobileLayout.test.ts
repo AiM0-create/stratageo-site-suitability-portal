@@ -119,6 +119,14 @@ describe('phone stylesheet contract', () => {
     expect(ruleIn(block, '.drawer-sheet')).toMatch(/animation:\s*sg-sheet-in/);
   });
 
+  it('above a results sheet the collapsed chat is a round button, not a second bar (v2.5.0)', () => {
+    const fab = ruleIn(block, '.assistant.assistant-above-sheet.assistant-collapsed');
+    expect(fab).toMatch(/width:\s*52px/);
+    expect(fab).toMatch(/border-radius:\s*26px/);
+    expect(fab).toMatch(/bottom:\s*calc\(var\(--sheet-peek\)/);
+    expect(ruleIn(css, '.assistant-fab-icon')).toMatch(/display:\s*none/);   // desktop: hidden
+  });
+
   it('the chosen clarification option beats sticky hover (v2.4.3)', () => {
     // on touch the tapped option stays :hover; grey-on-white-text made the
     // chosen answer look blank on the owner's phone

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AnalysisResult, AnalysisStatus, TargetCell } from '../types';
+import type { SpecV2 } from '../types/chat';
 import { locationFromDevice, locationFromPhoto, VERDICT_LABEL, type LocationSource, type ResolvedLocation } from '../services/spotCheck';
+import { SpecSummaryCard } from './SpecSummaryCard';
 
 /**
  * v2.4.0 — "check a spot".
@@ -13,7 +15,10 @@ import { locationFromDevice, locationFromPhoto, VERDICT_LABEL, type LocationSour
  * where THAT cell stands. Phase 1 never uploads the photo and never reads
  * its pixels.
  */
-export type SpotStage = 'locate' | 'confirm' | 'running' | 'verdict' | 'error';
+/** v2.5.0 — `planning` / `plan`: the factors are shown and agreed before the
+ *  run, as on the desktop flow (owner: "no variables or any discussion of the
+ *  context is done"). */
+export type SpotStage = 'locate' | 'confirm' | 'planning' | 'plan' | 'running' | 'verdict' | 'error';
 
 interface SpotCheckProps {
   pin: { lat: number; lng: number } | null;
@@ -21,7 +26,13 @@ interface SpotCheckProps {
   pinAccuracyM?: number;
   /** a new fix (photo / device / tap) — `focus` asks the map to fly there */
   onPinChange: (pos: { lat: number; lng: number }, source: LocationSource, focus: boolean, accuracyM?: number) => void;
-  onRun: (lat: number, lng: number, business: string) => Promise<void>;
+  /** compose the plan for the pin + business (stage → planning → plan) */
+  onPlan: (lat: number, lng: number, business: string) => Promise<void>;
+  /** the composed plan, editable (weights / direction / remove) before it runs */
+  spec: SpecV2 | null;
+  onSpecEdit: (updated: SpecV2) => void;
+  /** start the agreed plan (stage → running → verdict) */
+  onRun: () => Promise<void>;
   status: AnalysisStatus;
   result: AnalysisResult | null;
   stage: SpotStage;
@@ -43,7 +54,7 @@ const VERDICT_CLASS: Record<TargetCell['verdict'], string> = {
 };
 
 export const SpotCheck: React.FC<SpotCheckProps> = ({
-  pin, pinSource, pinAccuracyM, onPinChange, onRun, status, result, stage, onStageChange,
+  pin, pinSource, pinAccuracyM, onPinChange, onPlan, spec, onSpecEdit, onRun, status, result, stage, onStageChange,
   error, onShowZones, onCancel, onClose,
 }) => {
   const [business, setBusiness] = useState('');
@@ -101,11 +112,15 @@ export const SpotCheck: React.FC<SpotCheckProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const run = () => {
+  const plan = () => {
     const b = business.trim();
     if (!pin || b.length < 2) return;
+    onStageChange('planning');
+    onPlan(pin.lat, pin.lng, b).catch(() => { /* App sets the error + stage */ });
+  };
+  const run = () => {
     onStageChange('running');
-    onRun(pin.lat, pin.lng, b).catch(() => { /* App sets the error + stage */ });
+    onRun().catch(() => { /* App sets the error + stage */ });
   };
 
   const target = result?.targetCell ?? null;
@@ -153,15 +168,40 @@ export const SpotCheck: React.FC<SpotCheckProps> = ({
           <div className="spot-row">
             <input id="spot-business" className="spot-input" type="text" autoFocus placeholder="e.g. café, IVF clinic, high-end gym"
                    value={business} onChange={e => setBusiness(e.target.value)}
-                   onKeyDown={e => { if (e.key === 'Enter') run(); }} />
+                   onKeyDown={e => { if (e.key === 'Enter') plan(); }} />
           </div>
-          <button type="button" className="spot-primary" onClick={run} disabled={business.trim().length < 2}>Check this spot</button>
+          <button type="button" className="spot-primary" onClick={plan} disabled={business.trim().length < 2}>See the factors</button>
           <div className="spot-alt">
             <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onPhoto} />
             <button type="button" className="spot-link" onClick={() => fileRef.current?.click()} disabled={!!locating}>
               {locating === 'photo' ? 'Reading the photo…' : '📷 Take a photo of the street instead'}
             </button>
           </div>
+        </div>
+      )}
+
+      {stage === 'planning' && (
+        <div className="spot-body">
+          <p className="spot-lead">Composing the factors for a {business.trim() || 'business'} at this spot…</p>
+          <div className="assistant-progress">
+            <div className="assistant-progress-text">Reading the business, choosing the framework, adding what your words ask for</div>
+            <div className="assistant-progress-track"><div className="assistant-progress-fill spot-indeterminate" /></div>
+          </div>
+        </div>
+      )}
+
+      {stage === 'plan' && spec && (
+        <div className="spot-body spot-body-plan">
+          <p className="spot-lead">This is what we’ll measure around your pin. Adjust a weight or drop a factor, then run.</p>
+          <SpecSummaryCard
+            spec={spec}
+            specStatus="complete"
+            readyToExecute
+            isExecuting={false}
+            onConfirmExecute={run}
+            onSpecEdit={onSpecEdit}
+          />
+          <button type="button" className="spot-link" onClick={() => onStageChange('confirm')}>Change the spot or the business</button>
         </div>
       )}
 

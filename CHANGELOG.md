@@ -4,6 +4,33 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.5.0] — 2026-09-19 — The spot check shows its plan first
+
+Owner, two screenshots from his phone (high-end gym, Rajnagar Extension):
+"the results and chat thing are in the same minimised area and confusing",
+and "like the desktop portal where variables are shown before running the
+analysis, in *Standing at a spot* no variables or any discussion of the
+context is done." The second is a real gap against the desktop flow, not a
+phone issue.
+
+### Engine
+- **`POST /api/v2/spot` returns the plan, not a running job.** Identity
+  only, no credit. The client shows the plan and starts it through the
+  ordinary `POST /api/v2/analyses`, which validates the spec and consumes
+  the credit exactly as for an area search. `services/spot.py` unchanged.
+
+### Portal
+- **Spot check: pin → business → "See the factors" → plan → Run → verdict.**
+  The plan is the same card as the desktop flow — framework, the factors
+  composed from your words with their reasons, editable weights and
+  directions, what is assumed — with a *Change the spot or the business*
+  link. Cancelling a run returns to the plan, not to the pin.
+- **One bar at the bottom, not two look-alikes.** Above a results sheet on a
+  phone, the collapsed chat is a round 💬 button at the right; tapping it
+  opens the full-height conversation above the sheet's bar.
+- `mobileLayout.test.ts` covers the button; the plan stage reuses
+  `SpecSummaryCard` unchanged. Engine and portal 2.5.0.
+
 ## [2.4.3] — 2026-09-19 — Less choppy (frontend only)
 
 Owner, after v2.4.2 on his phone: "features feel choppy and not similar to

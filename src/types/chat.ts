@@ -102,6 +102,8 @@ export interface SpecV2 {
   canonicalWeights?: Record<string, number>;
   /** v2.0.0 — factor provenance record from the composer. */
   factorComposition?: FactorComposition | null;
+  /** v2.4.0 — "check a spot": the customer's pin; the engine always re-verifies and reports that cell. */
+  targetPoint?: { lat: number; lng: number } | null;
   /** v1.6.3 — set true when the customer picks an H3 grid level (7 or 8) on
    *  the plan card; the backend then preserves that resolution across chat
    *  turns instead of re-applying the archetype default. */

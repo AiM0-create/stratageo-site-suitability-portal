@@ -49,10 +49,10 @@ export async function resolveLocation(photo: Blob | null): Promise<ResolvedLocat
   return locationFromDevice();
 }
 
-export interface SpotStart { jobId: string; spec: SpecV2 }
-
-/** POST /api/v2/spot → the job to poll (with the ordinary pollAnalysis). */
-export async function startSpotCheck(lat: number, lng: number, business: string): Promise<SpotStart> {
+/** POST /api/v2/spot → the composed plan (no credit consumed). v2.5.0 — the
+ *  plan is shown and agreed first, then started through the ordinary
+ *  chatService.startAnalysis, exactly like an area search. */
+export async function planSpotCheck(lat: number, lng: number, business: string): Promise<SpecV2> {
   const r = await fetch(`${config.pyBackendUrl}/api/v2/spot`, {
     method: 'POST', headers: await authJsonHeaders(),
     body: JSON.stringify({ lat, lng, business }),
@@ -61,10 +61,10 @@ export async function startSpotCheck(lat: number, lng: number, business: string)
     const detail = await r.json().catch(() => null);
     const d = detail?.detail;
     const msg = typeof d === 'string' ? d : (d?.message || d?.error);
-    throw new Error(msg || `Could not check this spot (HTTP ${r.status})`);
+    throw new Error(msg || `Could not plan this check (HTTP ${r.status})`);
   }
   const j = await r.json();
-  return { jobId: j.jobId, spec: j.spec as SpecV2 };
+  return j.spec as SpecV2;
 }
 
 export const VERDICT_LABEL: Record<'good' | 'fair' | 'weak' | 'excluded', string> = {
