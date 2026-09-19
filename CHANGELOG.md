@@ -44,8 +44,10 @@ first (Church Street café, 68 cells): **240 s and a timeout.** Where it went:
 
 Measured after, same spot, local engine with the public mirrors degraded:
 **98 s cold** (85 of it Overpass failing over) and **26 s warm**; a healthy
-mirror answers the 1.5 km query in ~10 s. Overpass availability is now the
-only large term left, and it is external. Engine 2.6.0; portal unchanged.
+mirror answers the 1.5 km query in ~10 s. Live on Cloud Run after the
+deploy, same spot through the portal: **~44 s from Run to verdict.**
+Overpass availability is now the only large term left, and it is external.
+Engine 2.6.0; portal unchanged.
 
 ## [2.5.0] — 2026-09-19 — The spot check shows its plan first
 
