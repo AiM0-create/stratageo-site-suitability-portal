@@ -40,6 +40,13 @@ SPOT_TOP_N = 3            # the "best spots nearby" the same run yields for free
 SPOT_REFINE_TOP_K = 3
 
 
+def business_noun(business: str) -> str:
+    """The typed business, tidied: whitespace collapsed, trailing punctuation
+    dropped, at most five words, casing as written."""
+    words = " ".join((business or "").split()).strip(" .,;:!?-").split()
+    return " ".join(words[:5])
+
+
 def spot_brief(business: str) -> str:
     """The one line the planner reads. No coordinates in it: the parser would
     turn them into a coordinate-tagged place study area, which we override."""
@@ -71,7 +78,10 @@ async def plan_spot_check(lat: float, lng: float, business: str) -> dict:
     spec["targetPoint"] = {"lat": lat, "lng": lng}
     spec.setdefault("output", {})["topN"] = SPOT_TOP_N
     spec.setdefault("execution", {})["refineTopK"] = SPOT_REFINE_TOP_K
-    biz = str(spec.get("businessType") or business).strip()
+    # v2.6.1 — the customer typed the business; that is its name. "bakery"
+    # had come back "cafe" (the family key) on the verdict card.
+    biz = business_noun(business) or str(spec.get("businessType") or business).strip()
+    spec["businessType"] = biz
     spec["objective"] = (
         f"Is this spot right for a {biz}? Compared with the cells within "
         f"{SPOT_RADIUS_M / 1000:.1f} km of the pin."

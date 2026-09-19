@@ -4,6 +4,21 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.6.1] — 2026-09-19 — The customer's noun is the business (engine)
+
+Owner, on a spot verdict: typed "bakery", read "for a cafe". The label was
+the parser's family key.
+
+- **Spot check:** the typed business, tidied (five words, casing as written),
+  is `businessType` — "IVF clinic", "high-end gym", "bakery".
+- **Every brief:** when the parser's pattern matched a single word, that word
+  as the customer wrote it is the label — "bakery", "dhaba", "IVF", "nursery"
+  — instead of "cafe", "restaurant", "clinic", "preschool". Multi-word
+  matches and words that are not the business ("coffee" shop, "retail",
+  "logistics") keep the family key. The framework itself is unchanged; only
+  the label the customer reads.
+- `tests/test_v261_business_noun.py`.
+
 ## [2.6.0] — 2026-09-19 — A spot check in under a minute (engine)
 
 Owner: "make the spot check faster" — a person standing on a street was

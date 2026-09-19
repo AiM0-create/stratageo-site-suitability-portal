@@ -264,6 +264,30 @@ _QUALIFIERS = (
 _LABEL_CUT_RE = re.compile(r"\s+(?:in|at|near|for|around|within|across|on|with|targeting|aimed)\b|[,;:—–(]", re.I)
 
 
+# words a pattern matches that are not what the customer is opening
+_NOT_A_NOUN = frozenset({
+    "coffee", "dining", "retail", "logistics", "freight", "cargo", "industrial", "manufacturing",
+    "corporate", "fitness", "wellness", "lodging", "accommodation", "3pl", "sez", "reproductive",
+})
+
+
+def _matched_noun(intent, key: str) -> str:
+    """The single word the parser's pattern for `key` matched in the prompt,
+    as the customer wrote it; '' when the match spans several words."""
+    from .intent_parser import _BIZ_PATTERNS
+    prompt = getattr(intent, "rawPrompt", "") or ""
+    for k, rx in _BIZ_PATTERNS:
+        if k != key:
+            continue
+        m = rx.search(prompt)
+        if m:
+            word = m.group(0).strip()
+            if word and " " not in word and "-" not in word and len(word) <= 20 and word.lower() not in _NOT_A_NOUN:
+                return word.lower() if word.islower() or word.istitle() else word
+            return ""
+    return ""
+
+
 def _short_business_label(text: str) -> str:
     head = _LABEL_CUT_RE.split(str(text or "").strip(), maxsplit=1)[0].strip(" .-")
     words = head.split()
@@ -281,6 +305,13 @@ def derive_business_type(intent, canonical, fallback: str = "", override_key: st
     """
     key = (getattr(intent, "businessTypeKey", "") or "").strip()
     label = key.replace("_", " ").strip() if key and key != "generic" else ""
+    # v2.6.1 — the customer's own noun beats the family key. "bakery" parsed to
+    # the café family and the verdict read "for a cafe"; "dhaba" read
+    # "restaurant"; "IVF clinic" read "clinic". When the parser's pattern
+    # matched a single word, that word — as the customer wrote it — is the
+    # label. Multi-word matches ("premium … restaurant") keep the key.
+    if label:
+        label = _matched_noun(intent, key) or label
     # v1.13.1 — a format the customer chose in the clarification turn wins over
     # the parser's key: they said "premium sit-down", the label says so.
     if override_key:
