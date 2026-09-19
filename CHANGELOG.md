@@ -25,6 +25,9 @@ emulation looking at the transitions rather than the layout:
   "Priority 1 near …" wraps instead of losing the locality to an ellipsis;
   map-colour chips are 34 px, not 40; a factor's name is the row's flexible
   column (it floated to the centre under `space-between`).
+- **A restored plan is runnable.** A reopened session showed the plan card
+  with no Run button (the restore set `chatReady` false) — on any device.
+  The server re-validates on `/analyses` anyway.
 - Dead CSS from v2.1.0 (`spec-clarify-*`, `spec-scenario-*`) left alone; the
   contract tests cover the three phone rules above.
 

@@ -109,11 +109,17 @@ const App: React.FC = () => {
   // Restore the persisted plan when the session changes (refresh / switch)
   useEffect(() => {
     const persisted = (currentSession.chatSpec as SpecV2 | null) ?? null;
+    // v2.4.3 — a restored plan is runnable. It came back with no Run button
+    // (chatReady false, phase 'planning'), so a reopened session showed a
+    // plan card that could do nothing; the server validates the spec again
+    // on /analyses anyway and reports a stale one as an error.
+    const runnable = !!persisted && Array.isArray(persisted.layers) && persisted.layers.length > 0
+      && persisted.feasibility?.status !== 'not_feasible';
     setChatSpec(persisted);
-    setChatSpecStatus(persisted ? 'draft' : 'empty');
-    setChatReady(false);
+    setChatSpecStatus(persisted ? (runnable ? 'complete' : 'draft') : 'empty');
+    setChatReady(runnable);
     setChatStage(persisted ? 'framework' : 'chat');
-    setAnalysisPhase(persisted ? 'planning' : 'idle');
+    setAnalysisPhase(persisted ? (runnable ? 'spec_ready' : 'planning') : 'idle');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSession.id]);
 
