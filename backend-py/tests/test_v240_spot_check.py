@@ -62,6 +62,11 @@ class _Resp:
 
 def _chat_spec() -> dict:
     return {
+        "plan": {"assumptions": [
+            {"assumption": "Screening a 3000 m radius around Bengaluru.", "basis": "x"},
+            {"assumption": "Grid resolution defaults to H3 level 8.", "basis": "Default applied"},
+            {"assumption": "Top 3 candidate zone(s) will be returned.", "basis": "defaulted"},
+        ]},
         "version": "2.2", "objective": "Find the best café zones near Bengaluru",
         "businessType": "café",
         "studyArea": {"type": "places", "places": ["Indiranagar, Bengaluru"]},
@@ -103,6 +108,12 @@ def test_plan_fixes_area_grid_and_target(monkeypatch):
     # the model's spatial reading of a one-line brief is dropped: the pin is the geography
     assert spec["exclusions"] == [] and spec["routeConstraints"] == []
     assert "1.5 km" in spec["objective"]
+    # v2.5.0 — the assumptions describe THIS run, not the pre-override plan
+    texts = [a["assumption"] for a in spec["plan"]["assumptions"]]
+    assert texts[0].startswith("Screening the 1.5 km around your pin")
+    assert f"H3 level {SPOT_GRID_RES}" in texts[1]
+    assert not any("level 8" in t or "3000 m" in t for t in texts)
+    assert any(t.startswith("Top 3") for t in texts)          # the rest survive
     # and it still validates as a SpecV2, target included
     v = SpecV2.model_validate(spec)
     assert v.targetPoint == {"lat": 12.9716, "lng": 77.5946}

@@ -28,6 +28,10 @@ phone issue.
 - **One bar at the bottom, not two look-alikes.** Above a results sheet on a
   phone, the collapsed chat is a round 💬 button at the right; tapping it
   opens the full-height conversation above the sheet's bar.
+- The plan's assumptions describe the spot run ("Screening the 1.5 km around
+  your pin", "Cells are about 0.1 km²") — the planner had written "Grid
+  resolution defaults to H3 level 8" before the spot overrides. The card's
+  area reads "1.5 km around the pin".
 - `mobileLayout.test.ts` covers the button; the plan stage reuses
   `SpecSummaryCard` unchanged. Engine and portal 2.5.0.
 

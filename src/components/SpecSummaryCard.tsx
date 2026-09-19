@@ -76,7 +76,8 @@ export const SpecSummaryCard: React.FC<SpecSummaryCardProps> = ({
   const blocked = spec.feasibility?.status === 'not_feasible';
   const area = spec.studyArea.type === 'places'
     ? (spec.studyArea.places || []).map(p => p.split(',')[0]).join(', ')
-    : spec.studyArea.type === 'bbox' ? 'custom bounding box' : 'point + radius';
+    : spec.studyArea.type === 'bbox' ? 'custom bounding box'
+    : spec.studyArea.radiusM ? `${(spec.studyArea.radiusM / 1000).toFixed(1)} km around the pin` : 'point + radius';
   const unsupported = spec.meta?.unsupportedRequests || [];
   const composition = spec.factorComposition;
 

@@ -75,4 +75,17 @@ async def plan_spot_check(lat: float, lng: float, business: str) -> dict:
     # the pin is the whole geography.
     for key in ("exclusions", "corridors", "routeConstraints", "namedExclusions", "brandExclusions"):
         spec[key] = []
+    # v2.5.0 — the plan card shows the assumptions, and the planner wrote them
+    # before the overrides above (live: "Grid resolution defaults to H3 level
+    # 8" on a res-9 spot check). Say what this run actually does.
+    plan = spec.get("plan")
+    if isinstance(plan, dict) and isinstance(plan.get("assumptions"), list):
+        kept = [a for a in plan["assumptions"] if isinstance(a, dict)
+                and not str(a.get("assumption", "")).startswith(("Screening a ", "Grid resolution "))]
+        plan["assumptions"] = [
+            {"assumption": f"Screening the {SPOT_RADIUS_M / 1000:.1f} km around your pin.",
+             "basis": "A spot is judged against the cells around it — every score is relative to this area, never an absolute grade."},
+            {"assumption": f"Cells are about 0.1 km² (H3 level {SPOT_GRID_RES}).",
+             "basis": "Fine enough to tell one street from the next; the area search uses larger cells."},
+        ] + kept
     return spec
