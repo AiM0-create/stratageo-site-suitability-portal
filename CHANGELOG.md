@@ -4,6 +4,49 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.6.0] — 2026-09-19 — A spot check in under a minute (engine)
+
+Owner: "make the spot check faster" — a person standing on a street was
+waiting the same 2–3 minutes as an area search, and often longer. Measured
+first (Church Street café, 68 cells): **240 s and a timeout.** Where it went:
+
+| stage | before | why |
+|---|---|---|
+| OSM fetch | ~120 s | mirror roulette — kumi accepted the connection and sat silent for the full 25 s read timeout, mail.ru 504, overpass-api.de 429 on the retries |
+| buildability masks | 90 s | all five land-exclusion layers timed out on the same silent mirror and contributed nothing |
+| baseline land-cover fetch | 30 s | the always-on v1.7.2 mask, fetched serially after Pass A, hit the same mirrors |
+| Places Aggregate | 40 s → timeout | 24 calls one at a time, ~1.7 s each |
+
+- **Spot checks skip buildability** as a recorded PlannerLite decision ("you
+  are standing on the spot; rail / protected-land / open-ground masks are a
+  field check here"). The always-on baseline land-cover mask (water, forest,
+  military) is kept — a Priority zone must not sit in a lake.
+- **Spot checks refine the pin plus the top three**, not the top twelve
+  (`execution.refineTopK = 3`); the verdict is on the screening rank of every
+  cell anyway, and Pass B is per candidate.
+- **Places Aggregate runs four candidates at a time** (every run). The
+  provider's own budget and breaker still apply per call; a disabled /
+  degraded answer still stops the stage.
+- **The baseline land-cover fetch starts beside the main OSM fetch** instead
+  of after Pass A (every run).
+- **Overpass: hedged failover.** If the first mirror has not answered in 8 s
+  the next starts beside it and the first success wins (`_post_hedged`, on
+  the POI and area fetches). A silent mirror cools for 15 min, a 429/5xx for
+  5; among cooling mirrors the oldest failure goes first; the connect
+  timeout is 6 s. The health memo is persisted to the provider cache so a
+  cold start does not re-learn a dead mirror 25 s at a time. The union
+  query is retried once before the per-layer fallback, and the fallback
+  runs one query at a time with a breath between — two in parallel drew the
+  429s that the hedge then escalated.
+- **`result.stageTimings`** — seconds per stage, on every run, so the next
+  "why is it slow" starts from numbers.
+- `tests/test_v260_spot_speed.py` (7).
+
+Measured after, same spot, local engine with the public mirrors degraded:
+**98 s cold** (85 of it Overpass failing over) and **26 s warm**; a healthy
+mirror answers the 1.5 km query in ~10 s. Overpass availability is now the
+only large term left, and it is external. Engine 2.6.0; portal unchanged.
+
 ## [2.5.0] — 2026-09-19 — The spot check shows its plan first
 
 Owner, two screenshots from his phone (high-end gym, Rajnagar Extension):

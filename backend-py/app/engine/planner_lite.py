@@ -799,6 +799,16 @@ def create_analysis_plan(spec, raw_intent=None, study_area_hint=None) -> Analysi
 
     # B. Buildability + frontage
     buildability, build_why = _buildability_relevant(spec, text, water)
+    # v2.6.0 — a spot check (spec.targetPoint) is a person standing on the
+    # spot asking about it. Measured live: the five land-exclusion layers took
+    # the whole 90 s budget and contributed nothing (every mirror timed out)
+    # — a third of a run that timed out at 240 s. The masks are a recorded
+    # field check here, not a fetch.
+    if buildability and getattr(spec, "targetPoint", None):
+        buildability, build_why = False, (
+            "spot check — you are standing on the spot; rail / protected-land / "
+            "open-ground masks are a field check here, not a 90-second fetch"
+        )
     if buildability:
         plan.optional_stages.append("buildability")
         if is_dark_kitchen:

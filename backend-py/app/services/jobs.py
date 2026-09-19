@@ -589,6 +589,9 @@ class Job:
     # (at most ~one Overpass call's worst-case latency later) rather than
     # requiring the whole remaining pipeline to finish first.
     cancel_requested: bool = False
+    # v2.6.0 — (phase, monotonic seconds) at every stage transition, so a
+    # run can say where its time went (result.stageTimings).
+    stage_marks: list = field(default_factory=list)
 
 
 _jobs: dict[str, Job] = {}
@@ -742,6 +745,7 @@ def _update(job: Job, progress: int, phase: str, message: str) -> None:
     job.progress = progress
     job.phase = phase
     job.message = message
+    job.stage_marks.append((phase, time.monotonic()))
     logger.info("job %s [%d%%] %s — %s", job.id[:8], progress, phase, message)
     _snapshot(job)
 
@@ -875,6 +879,32 @@ async def _degradable_call(
             job.id[:8], ProviderBreaker.family(label),
         )
     return default
+
+
+# v1.7.2 — universally-unbuildable land cover, fetched on every run (see the
+# baseline mask block in _run_analysis). Module-level since v2.6.0 so the
+# fetch can start beside the main OSM fetch.
+_BASELINE_UNBUILDABLE_TAGS = [
+    "natural=water", "natural=wetland", "natural=wood",
+    "landuse=forest", "landuse=military", "aeroway=aerodrome",
+    "natural=bare_rock", "natural=scree",
+]
+
+
+def stage_timings(job: "Job") -> list[dict]:
+    """v2.6.0 — [{stage, seconds}] from the stage marks; the last stage runs
+    to now. Diagnostics only — never feeds scoring."""
+    marks = list(job.stage_marks)
+    if not marks:
+        return []
+    marks.append(("end", time.monotonic()))
+    out = []
+    for (phase, t0), (_, t1) in zip(marks, marks[1:]):
+        if out and out[-1]["stage"] == phase:
+            out[-1]["seconds"] = round(out[-1]["seconds"] + (t1 - t0), 1)
+        else:
+            out.append({"stage": phase, "seconds": round(t1 - t0, 1)})
+    return out
 
 
 def target_verdict(rank: int, n_eligible: int) -> str:
@@ -1280,6 +1310,15 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     }
 
     _update(job, 20, "fetch", f"Fetching OSM data ({len(osm_tag_sets)} layers + {len(sup_tag_sets)} supplements, 1 combined query)...")
+    # v2.6.0 — the always-on baseline land-cover fetch (v1.7.2, below) used to
+    # run AFTER Pass A, serially: 30 s of Overpass failover on a spot check
+    # that had already paid 42 s for the main fetch. It is independent of the
+    # factors, so it starts now, beside the main fetch, and is awaited where
+    # it is applied. Same 30 s ceiling, same disclosure on failure.
+    _base_geoms_task = asyncio.ensure_future(asyncio.wait_for(
+        fetch_area_geometries(_BASELINE_UNBUILDABLE_TAGS, overpass_bbox), timeout=30,
+    ))
+    _base_geoms_task.add_done_callback(lambda t: (t.exception() if not t.cancelled() else None))
     fetched: dict[str, list[dict]] = {}
     if osm_tag_sets or exc_tag_sets or sup_tag_sets:
         _osm_warn = None
@@ -1815,16 +1854,8 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     # Roads themselves are NOT maskable at screening resolution (every urban
     # cell contains roads); mountain slope needs DEM/external land-use data —
     # both stated in Known Limitations.
-    _BASELINE_UNBUILDABLE_TAGS = [
-        "natural=water", "natural=wetland", "natural=wood",
-        "landuse=forest", "landuse=military", "aeroway=aerodrome",
-        "natural=bare_rock", "natural=scree",
-    ]
     try:
-        _base_geoms = await asyncio.wait_for(
-            fetch_area_geometries(_BASELINE_UNBUILDABLE_TAGS, overpass_bbox),
-            timeout=30,
-        )
+        _base_geoms = await _base_geoms_task
     except Exception as _bex:
         _base_geoms = []
         fallbacks.append(
@@ -2348,34 +2379,57 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
     if (_agg_layers and s.enable_google_places_aggregate and s.google_places_api_key
             and _plan.should_run("places_aggregate")):
         _AGG_CAND_CAP = 8
-        _agg_pairs = [(ci, hexes[ci]) for ci in candidates[:_AGG_CAND_CAP]]
+        _agg_cis = list(candidates[:_AGG_CAND_CAP])
+        # v2.4.0 — the spot under the pin is always in the refined set
+        if _target_ci is not None and _target_ci in candidates and _target_ci not in _agg_cis:
+            _agg_cis.append(_target_ci)
+        _agg_pairs = [(ci, hexes[ci]) for ci in _agg_cis]
         _update(job, 74, "aggregate_counts",
                 f"Refining counts via Places Aggregate for top {len(_agg_pairs)} candidates...")
+        # v2.6.0 — the calls ran one at a time: 24 calls × ~1.7 s = 40 s on a
+        # spot check that then timed out. Layers stay sequential (a
+        # disabled/degraded answer stops everything), candidates run four at
+        # a time — the provider's own budget and breaker still apply per call.
+        _AGG_CONCURRENCY = 4
+        _agg_sem = asyncio.Semaphore(_AGG_CONCURRENCY)
         _agg_stop = False
         _agg_hits: dict[str, int] = {}
+
+        async def _agg_one(_layer, _radius, _ci, _cell):
+            async with _agg_sem:
+                return _ci, await gp_agg.compute_count(
+                    (_cell.lat, _cell.lng), _radius, _layer.source.types, ctx=_pctx,
+                )
+
         for layer in _agg_layers:
             if _agg_stop:
                 break
             _agg_radius = scoring.proxy_radius_m(layer)
-            for ci, cell in _agg_pairs:
-                pr = await gp_agg.compute_count(
-                    (cell.lat, cell.lng), _agg_radius, layer.source.types, ctx=_pctx,
-                )
+            _agg_results = await asyncio.gather(
+                *(_agg_one(layer, _agg_radius, ci, cell) for ci, cell in _agg_pairs),
+                return_exceptions=True,
+            )
+            for _res in _agg_results:
+                if isinstance(_res, BaseException):
+                    continue                       # keep the existing value
+                ci, pr = _res
                 if pr.status == "disabled":
-                    fallbacks.append(
-                        "Google Places Aggregate is not available for this key/project — "
-                        "candidate counts kept from Places/OSM POIs."
-                    )
+                    if not _agg_stop:
+                        fallbacks.append(
+                            "Google Places Aggregate is not available for this key/project — "
+                            "candidate counts kept from Places/OSM POIs."
+                        )
                     _agg_stop = True
-                    break
+                    continue
                 if pr.status == "degraded":   # circuit open / budget exhausted
-                    _provider_degraded.append("aggregate_counts")
-                    fallbacks.append(
-                        f"Places Aggregate degraded ({pr.degradation_reason}) — "
-                        "remaining candidate counts kept from Places/OSM POIs."
-                    )
+                    if not _agg_stop:
+                        _provider_degraded.append("aggregate_counts")
+                        fallbacks.append(
+                            f"Places Aggregate degraded ({pr.degradation_reason}) — "
+                            "remaining candidate counts kept from Places/OSM POIs."
+                        )
                     _agg_stop = True
-                    break
+                    continue
                 if pr.status == "ok":
                     _cnt = contracts.to_finite_float(
                         pr.data.get("count"), default=None,
@@ -3489,6 +3543,7 @@ async def _run_analysis(job: Job, spec: SpecV2) -> None:
         "grounding_sources": [],
         "hexGrid": hex_grid,
         "targetCell": _target_info,         # v2.4.0 — the spot under the pin, or None
+        "stageTimings": stage_timings(job),  # v2.6.0 — seconds per stage, in order
         "shortlist": _shortlist_info,       # v2.0.0 — the ranking basis, as numbers
         "catchments": catchments,
         "dataSufficiency": data_sufficiency,

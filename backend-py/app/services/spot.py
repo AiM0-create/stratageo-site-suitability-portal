@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 SPOT_RADIUS_M = 1500      # the engine floors point_radius at 1.5 km anyway (study_area.py)
 SPOT_GRID_RES = 9
 SPOT_TOP_N = 3            # the "best spots nearby" the same run yields for free
+# v2.6.0 — re-verify the pin plus the top few, not the top twelve: Pass B
+# (isochrones, Places Aggregate, routing) is per candidate and was most of
+# the wall-clock. The verdict is on the screening rank of every cell anyway.
+SPOT_REFINE_TOP_K = 3
 
 
 def spot_brief(business: str) -> str:
@@ -66,6 +70,7 @@ async def plan_spot_check(lat: float, lng: float, business: str) -> dict:
     spec["gridResolutionAdjustedByUser"] = True
     spec["targetPoint"] = {"lat": lat, "lng": lng}
     spec.setdefault("output", {})["topN"] = SPOT_TOP_N
+    spec.setdefault("execution", {})["refineTopK"] = SPOT_REFINE_TOP_K
     biz = str(spec.get("businessType") or business).strip()
     spec["objective"] = (
         f"Is this spot right for a {biz}? Compared with the cells within "

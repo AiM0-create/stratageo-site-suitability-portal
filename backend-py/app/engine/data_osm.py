@@ -34,29 +34,159 @@ OVERPASS_ENDPOINTS = [
 # short cooldown and is restored automatically once it expires, or on its next
 # success. Process-local by design — max-instances is 1, so this is accurate.
 _ENDPOINT_COOLDOWN_S = 300.0
+# v2.6.0 — a mirror that HANGS (connect/read timeout) costs a full timeout per
+# attempt; a mirror that answers 429/5xx costs milliseconds. Measured live on
+# a spot check: kumi hung for 25 s on the main fetch, then — once every
+# mirror was "cooling" and the order fell back to preference — hung again
+# for 30 s on each of five buildability layers. Hangs cool for longer, and
+# among cooling mirrors the one that failed longest ago goes first.
+_ENDPOINT_HANG_COOLDOWN_S = 900.0
 _endpoint_failed_at: dict[str, float] = {}
+_endpoint_cooldown: dict[str, float] = {}
 
 
 def _ordered_endpoints() -> list[str]:
-    """Preferred order first, endpoints that failed within the cooldown last."""
+    """Preferred order first; endpoints that failed within their cooldown last,
+    oldest failure first among those."""
     now = time.time()
     fresh, cooling = [], []
     for ep in OVERPASS_ENDPOINTS:
-        (cooling if now - _endpoint_failed_at.get(ep, 0.0) < _ENDPOINT_COOLDOWN_S
-         else fresh).append(ep)
-    return fresh + cooling
+        failed = _endpoint_failed_at.get(ep, 0.0)
+        if now - failed < _endpoint_cooldown.get(ep, _ENDPOINT_COOLDOWN_S):
+            cooling.append((failed, ep))
+        else:
+            fresh.append(ep)
+    return fresh + [ep for _, ep in sorted(cooling)]
 
 
-def _note_endpoint_failure(endpoint: str) -> None:
+def _is_hang(err: BaseException) -> bool:
+    return isinstance(err, (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError))
+
+
+def _note_endpoint_failure(endpoint: str, err: BaseException | None = None) -> None:
     _endpoint_failed_at[endpoint] = time.time()
+    _endpoint_cooldown[endpoint] = _ENDPOINT_HANG_COOLDOWN_S if (err is not None and _is_hang(err)) else _ENDPOINT_COOLDOWN_S
+    _schedule_health_save()
+
+
+# v2.6.0 — the memo is process-local and Cloud Run scales to zero between
+# runs, so every cold start re-learned that a dead mirror was dead — 25 s at
+# a time. Persisted to the provider cache (GCS) fail-soft; loaded once.
+_HEALTH_KEY = "overpass/mirror-health.json"
+_health_loaded = False
+
+
+async def load_endpoint_health() -> None:
+    global _health_loaded
+    if _health_loaded:
+        return
+    _health_loaded = True
+    try:
+        from ..services import storage
+        if not storage.enabled():
+            return
+        saved = await storage.get_json(_HEALTH_KEY)
+        if isinstance(saved, dict):
+            for ep, rec in (saved.get("failed") or {}).items():
+                if ep in OVERPASS_ENDPOINTS and isinstance(rec, dict):
+                    _endpoint_failed_at[ep] = float(rec.get("at", 0.0))
+                    _endpoint_cooldown[ep] = float(rec.get("cooldown", _ENDPOINT_COOLDOWN_S))
+    except Exception as e:                      # never block a fetch on the memo
+        logger.debug("overpass health load skipped: %s", e)
+
+
+def _schedule_health_save() -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_save_endpoint_health())
+
+
+async def _save_endpoint_health() -> None:
+    try:
+        from ..services import storage
+        if not storage.enabled():
+            return
+        await storage.put_json(_HEALTH_KEY, {"failed": {
+            ep: {"at": _endpoint_failed_at[ep], "cooldown": _endpoint_cooldown.get(ep, _ENDPOINT_COOLDOWN_S)}
+            for ep in _endpoint_failed_at
+        }})
+    except Exception as e:
+        logger.debug("overpass health save skipped: %s", e)
 
 
 def _note_endpoint_success(endpoint: str) -> None:
-    _endpoint_failed_at.pop(endpoint, None)
+    if _endpoint_failed_at.pop(endpoint, None) is not None:
+        _endpoint_cooldown.pop(endpoint, None)
+        _schedule_health_save()
+
+# v2.6.0 — hedged failover. A mirror that accepts the connection and then sits
+# silent costs the full read timeout before the next one is tried; measured
+# live, kumi did exactly that for 25 s on a 68-cell spot check whose answer
+# mail.ru then produced in 14 s. If the first mirror has not answered within
+# HEDGE_AFTER_S the next one is started beside it and the first success wins
+# (the loser is cancelled). Small extra load on the public mirrors — only
+# while one of them is already misbehaving.
+HEDGE_AFTER_S = 8.0
+
+
+async def _post_hedged(query: str, label: str) -> tuple[dict, str]:
+    """POST `query` to the mirrors in health order; returns (json, endpoint).
+    Raises RuntimeError with the last error once every mirror has failed."""
+    await load_endpoint_health()
+    endpoints = _ordered_endpoints()
+    errors: dict[str, BaseException] = {}
+
+    async def attempt(ep: str) -> tuple[dict, str]:
+        try:
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUTS, headers={"User-Agent": USER_AGENT}) as client:
+                r = await client.post(ep, data={"data": query})
+                r.raise_for_status()
+                data = r.json()
+            _note_endpoint_success(ep)
+            return data, ep
+        except BaseException as e:
+            if not isinstance(e, asyncio.CancelledError):
+                _note_endpoint_failure(ep, e)
+                errors[ep] = e
+                logger.warning("Overpass %s attempt failed (%s): %s", label, ep, e)
+            raise
+
+    running: list[asyncio.Task] = []
+    nxt = 0
+    try:
+        while nxt < len(endpoints) or running:
+            if nxt < len(endpoints):
+                running.append(asyncio.create_task(attempt(endpoints[nxt])))
+                nxt += 1
+            done, _ = await asyncio.wait(
+                running, timeout=HEDGE_AFTER_S if nxt < len(endpoints) else None,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in done:
+                running.remove(t)
+                if t.exception() is None:
+                    return t.result()
+            # timed out waiting → loop starts the next mirror beside the running one(s)
+    finally:
+        for t in running:
+            t.cancel()
+    raise RuntimeError(f"Overpass {label} fetch failed on every mirror: {errors}")
+
 
 HTTP_TIMEOUT = 25          # per endpoint; one attempt each → worst case ~77s (was 50s/152s)
+# v2.6.0 — a dead mirror is found in 6 s (connect), not 25 (read).
+HTTP_TIMEOUTS = httpx.Timeout(HTTP_TIMEOUT, connect=6.0)
 USER_AGENT = "stratageo-engine/1.0.2 (site-suitability analysis; stratageo.in)"
-FALLBACK_CONCURRENCY = 2   # parallel per-layer fetches if the union query fails
+# v2.6.0 — the per-layer fallback fires only after the union query failed on
+# every mirror, i.e. when the mirrors are already struggling. Two parallel
+# per-layer queries then drew 429s from the one mirror still answering,
+# which the hedge escalated into 25 s hangs on the silent ones. One at a
+# time, with a breath between, and the union is retried once first.
+FALLBACK_CONCURRENCY = 1
+FALLBACK_SPACING_S = 1.0
+UNION_RETRY_DELAY_S = 4.0
 
 # (bbox_key, tags_key) → (timestamp, pois)
 _cache: dict[tuple, tuple[float, list[dict]]] = {}
@@ -93,9 +223,14 @@ async def fetch_all_layers(
     Falls back to bounded-concurrency per-layer fetches if the union query fails."""
     union_tags = sorted({t for tags in tag_sets.values() for t in tags})
     try:
-        all_pois = await fetch_layer_pois(union_tags, bbox)
+        try:
+            all_pois = await fetch_layer_pois(union_tags, bbox)
+        except Exception as e1:
+            logger.warning("union Overpass fetch failed (%s) — retrying once in %.0fs", e1, UNION_RETRY_DELAY_S)
+            await asyncio.sleep(UNION_RETRY_DELAY_S)
+            all_pois = await fetch_layer_pois(union_tags, bbox)
     except Exception as e:
-        logger.warning("union Overpass fetch failed (%s) — falling back to per-layer", e)
+        logger.warning("union Overpass fetch failed twice (%s) — falling back to per-layer", e)
         sem = asyncio.Semaphore(FALLBACK_CONCURRENCY)
 
         async def one(lid: str, tags: list[str]) -> tuple[str, list[dict]]:
@@ -104,6 +239,8 @@ async def fetch_all_layers(
                     return lid, await fetch_layer_pois(tags, bbox)
                 except Exception:
                     return lid, []
+                finally:
+                    await asyncio.sleep(FALLBACK_SPACING_S)
 
         results = await asyncio.gather(*(one(lid, tags) for lid, tags in tag_sets.items()))
         return dict(results)
@@ -161,7 +298,7 @@ async def fetch_line_geometries(
     for endpoint in _ordered_endpoints():
         try:
             async with httpx.AsyncClient(
-                timeout=HTTP_TIMEOUT,
+                timeout=HTTP_TIMEOUTS,
                 headers={"User-Agent": USER_AGENT},
             ) as client:
                 r = await client.post(endpoint, data={"data": query})
@@ -185,7 +322,7 @@ async def fetch_line_geometries(
             logger.info("Overpass geom: %d ways for %d tag(s) via %s", len(ways), len(tags), endpoint)
             return ways
         except Exception as e:
-            _note_endpoint_failure(endpoint)
+            _note_endpoint_failure(endpoint, e)
             last_err = e
             logger.warning("Overpass geom attempt failed (%s): %s", endpoint, e)
             await asyncio.sleep(0.5)
@@ -240,41 +377,25 @@ async def fetch_area_geometries(
 
     query = _build_area_query(tags, bbox)
     logger.debug("Overpass area query (%d tag(s)): %s", len(tags), query[:400])
-    last_err: Exception | None = None
-    for endpoint in _ordered_endpoints():
-        try:
-            async with httpx.AsyncClient(
-                timeout=HTTP_TIMEOUT,
-                headers={"User-Agent": USER_AGENT},
-            ) as client:
-                r = await client.post(endpoint, data={"data": query})
-                r.raise_for_status()
-                data = r.json()
-            feats = []
-            for el in data.get("elements", []):
-                if el.get("type") == "way":
-                    geom = _coords(el.get("geometry"))
-                    if len(geom) >= 2:
-                        feats.append({"geometry": geom, "tags": el.get("tags", {})})
-                elif el.get("type") == "relation":
-                    for m in el.get("members", []):
-                        if m.get("type") != "way":
-                            continue
-                        geom = _coords(m.get("geometry"))
-                        if len(geom) >= 2:
-                            feats.append({"geometry": geom, "tags": el.get("tags", {}), "role": m.get("role")})
-            _cache[key] = (time.time(), feats)
-            if storage.enabled():
-                await storage.put_json(gcs_key, {"ts": time.time(), "feats": feats})
-            _note_endpoint_success(endpoint)
-            logger.info("Overpass area: %d features for %d tag(s) via %s", len(feats), len(tags), endpoint)
-            return feats
-        except Exception as e:
-            _note_endpoint_failure(endpoint)
-            last_err = e
-            logger.warning("Overpass area attempt failed (%s): %s", endpoint, e)
-            await asyncio.sleep(0.5)
-    raise RuntimeError(f"Overpass area fetch failed for tags={tags}: {last_err}")
+    data, endpoint = await _post_hedged(query, "area")
+    feats = []
+    for el in data.get("elements", []):
+        if el.get("type") == "way":
+            geom = _coords(el.get("geometry"))
+            if len(geom) >= 2:
+                feats.append({"geometry": geom, "tags": el.get("tags", {})})
+        elif el.get("type") == "relation":
+            for m in el.get("members", []):
+                if m.get("type") != "way":
+                    continue
+                geom = _coords(m.get("geometry"))
+                if len(geom) >= 2:
+                    feats.append({"geometry": geom, "tags": el.get("tags", {}), "role": m.get("role")})
+    _cache[key] = (time.time(), feats)
+    if storage.enabled():
+        await storage.put_json(gcs_key, {"ts": time.time(), "feats": feats})
+    logger.info("Overpass area: %d features for %d tag(s) via %s", len(feats), len(tags), endpoint)
+    return feats
 
 
 async def fetch_named_features(
@@ -312,7 +433,7 @@ async def fetch_named_features(
     for endpoint in _ordered_endpoints():
         try:
             async with httpx.AsyncClient(
-                timeout=HTTP_TIMEOUT, headers={"User-Agent": USER_AGENT},
+                timeout=HTTP_TIMEOUTS, headers={"User-Agent": USER_AGENT},
             ) as client:
                 r = await client.post(endpoint, data={"data": query})
                 r.raise_for_status()
@@ -334,7 +455,7 @@ async def fetch_named_features(
             logger.info("Overpass named(%r): %d features via %s", name_regex, len(feats), endpoint)
             return feats
         except Exception as ex:
-            _note_endpoint_failure(endpoint)
+            _note_endpoint_failure(endpoint, e)
             last_err = ex
             logger.warning("Overpass named fetch failed (%s): %s", endpoint, ex)
             await asyncio.sleep(0.5)
@@ -367,35 +488,19 @@ async def fetch_layer_pois(
 
     query = _build_query(tags, bbox)
     logger.debug("Overpass POI query (%d tag(s)): %s", len(tags), query[:400])
-    last_err: Exception | None = None
-    for endpoint in _ordered_endpoints():
-        try:
-            async with httpx.AsyncClient(
-                timeout=HTTP_TIMEOUT,
-                headers={"User-Agent": USER_AGENT},
-            ) as client:
-                r = await client.post(endpoint, data={"data": query})
-                r.raise_for_status()
-                data = r.json()
-            pois = []
-            for el in data.get("elements", []):
-                if el["type"] == "node":
-                    lat, lng = el.get("lat"), el.get("lon")
-                else:
-                    c = el.get("center") or {}
-                    lat, lng = c.get("lat"), c.get("lon")
-                if lat is None or lng is None:
-                    continue
-                pois.append({"lat": lat, "lng": lng, "tags": el.get("tags", {})})
-            _cache[key] = (time.time(), pois)
-            if storage.enabled():
-                await storage.put_json(gcs_key, {"ts": time.time(), "pois": pois})
-            _note_endpoint_success(endpoint)
-            logger.info("Overpass: %d POIs for %d tag(s) via %s", len(pois), len(tags), endpoint)
-            return pois
-        except Exception as e:
-            _note_endpoint_failure(endpoint)
-            last_err = e
-            logger.warning("Overpass attempt failed (%s): %s", endpoint, e)
-            await asyncio.sleep(0.5)
-    raise RuntimeError(f"Overpass fetch failed for tags={tags}: {last_err}")
+    data, endpoint = await _post_hedged(query, "POI")
+    pois = []
+    for el in data.get("elements", []):
+        if el["type"] == "node":
+            lat, lng = el.get("lat"), el.get("lon")
+        else:
+            c = el.get("center") or {}
+            lat, lng = c.get("lat"), c.get("lon")
+        if lat is None or lng is None:
+            continue
+        pois.append({"lat": lat, "lng": lng, "tags": el.get("tags", {})})
+    _cache[key] = (time.time(), pois)
+    if storage.enabled():
+        await storage.put_json(gcs_key, {"ts": time.time(), "pois": pois})
+    logger.info("Overpass: %d POIs for %d tag(s) via %s", len(pois), len(tags), endpoint)
+    return pois
