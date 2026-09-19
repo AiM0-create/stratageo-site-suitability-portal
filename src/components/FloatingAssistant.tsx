@@ -84,6 +84,13 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   // panel drops to its bar instead of springing back over the map with the
   // old plan. The customer expands it again when they want to talk.
   useEffect(() => { if (phoneSheet === 'peek') setExpanded(false); }, [phoneSheet]);
+  // v2.6.1 — "+ New analysis" on a phone left the panel as a bar; the welcome
+  // block (and the "Standing at a spot?" entry) needed another tap.
+  const prevCount = useRef(messages.length);
+  useEffect(() => {
+    if (prevCount.current > 0 && messages.length === 0) setExpanded(true);
+    prevCount.current = messages.length;
+  }, [messages.length]);
 
   const promptCap = user?.maxPrompts ?? MAX_PROMPTS_PER_USER;
   const promptsLeft = user ? (user.isAdmin ? Infinity : Math.max(0, promptCap - user.promptsUsed)) : 0;

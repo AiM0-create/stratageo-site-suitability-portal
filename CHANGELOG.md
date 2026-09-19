@@ -18,6 +18,9 @@ the parser's family key.
   "logistics") keep the family key. The framework itself is unchanged; only
   the label the customer reads.
 - `tests/test_v261_business_noun.py`.
+- Portal: "+ New analysis" on a phone opens the panel (it stayed a bar, so
+  the welcome block and the spot-check entry needed another tap). Portal
+  2.6.1.
 
 ## [2.6.0] — 2026-09-19 — A spot check in under a minute (engine)
 
