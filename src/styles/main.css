@@ -397,6 +397,8 @@ body {
 .assistant-send:hover:not(:disabled) { background: var(--blue-600); }
 .assistant-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
+@keyframes sg-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
 /* ========== v2.4.0 — CHECK A SPOT ========== */
 /* The entry, on the welcome block: the one thing a person standing on a
    street needs to find. */
@@ -638,8 +640,10 @@ body {
   padding: 7px 8px; background: var(--gray-50); border: 1px solid var(--gray-100);
   border-radius: 6px; margin-bottom: 6px;
 }
-.criterion-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.criterion-name { font-size: 11px; font-weight: 600; color: var(--gray-600); }
+.criterion-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+/* v2.4.3 — the name is the row's flexible column (it floated to the centre
+   between the arrow and the weight under space-between) */
+.criterion-name { font-size: 11px; font-weight: 600; color: var(--gray-600); flex: 1 1 auto; min-width: 0; }
 .criterion-score { font-size: 11px; font-weight: 700; color: var(--blue-700); }
 .criterion-bar-track { width: 100%; height: 3px; background: var(--gray-200); border-radius: 2px; overflow: hidden; margin-bottom: 4px; }
 .criterion-bar-fill { height: 100%; background: linear-gradient(90deg, var(--blue-600), var(--green-600)); border-radius: 2px; transition: width 0.3s; }
@@ -1168,11 +1172,32 @@ body {
   /* the verdict scrolls inside the card so the map keeps its top 40% (the
      zones' camera fit assumes it — App.mapBottomInset) */
   .spot-card.spot-stage-verdict { max-height: 60dvh; }
-  /* One Run button (the sticky bar) — on a phone it is the primary action */
-  .assistant-start-btn {
+  /* One Run button (the sticky bar) — on a phone it is the primary action.
+     `:hover` too: a tapped button stays hovered on touch (v2.4.3). */
+  .assistant-start-btn, .assistant-start-btn:hover {
     width: 100%; padding: 11px 14px; font-size: 14px;
     background: var(--blue-700); color: #fff; border-color: var(--blue-700);
   }
+
+  /* v2.4.3 — a conversation gets a STABLE panel. Content-sized, the panel
+     grew 40% → 50% → 100% as the reply, the questions and the plan arrived —
+     "choppy". Once the first message is sent it takes the screen under the
+     top bar and scrolls inside; the map returns with the results (sheet)
+     or on collapse. Above a peeking results sheet it leaves the bar. */
+  .assistant.assistant-conversing.assistant-expanded {
+    height: calc(100dvh - 48px); max-height: none; border-radius: 0;
+    transition: height 0.25s ease;
+  }
+  .assistant.assistant-conversing.assistant-expanded.assistant-above-sheet {
+    height: calc(100dvh - 48px - var(--sheet-peek) - env(safe-area-inset-bottom, 0px));
+  }
+  /* the sheet's first appearance slides up instead of popping in */
+  .drawer-sheet { animation: sg-sheet-in 0.3s ease; }
+  /* "Priority 1 near …" lost the locality to an ellipsis at 375px — wrap */
+  .drawer-loc-name { white-space: normal; line-height: 1.3; }
+  .drawer-layers { display: flex; flex-wrap: wrap; gap: 6px; }
+  .drawer-layers-label { flex-basis: 100%; }
+  .drawer-layer-btn { min-height: 34px; font-size: 12px; padding: 4px 12px; }
 
   /* --- Map & overlays --- */
   /* Five permanent labels on a 390px map covered the zoom controls; the
@@ -1276,11 +1301,12 @@ body {
   .spec-factor-remove { min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
   .spec-factor-slider { height: 30px; }
   .spec-dir-toggle { min-height: 30px; padding: 3px 10px; font-size: 11px; }
-  .drawer-layer-btn, .clarify-option, .spec-add-trigger, .spec-add-confirm, .spec-add-cancel,
+  .clarify-option, .spec-add-trigger, .spec-add-confirm, .spec-add-cancel,
   .assistant-start-btn, .clarify-continue, .assistant-retry-btn, .assistant-cancel-btn,
   .spot-secondary, .spot-link, .assistant-spot-entry {
     min-height: 40px;
   }
+  .drawer-layer-btn { min-height: 34px; }
   /* Factor head: name · % · × on the first row, the chips on the second. */
   .spec-factor-head { row-gap: 4px; }
   .spec-factor-name { order: 1; flex: 1 1 50%; font-size: 12.5px; }
@@ -1928,9 +1954,12 @@ button.spec-dir-toggle:hover { filter: brightness(0.95); }
 }
 .clarify-option:hover:not(:disabled) { background: #f1f5f9; }
 .clarify-option:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 1px; }
-.clarify-option.is-active { background: #1d4ed8; color: #fff; border-color: #1e40af; }
+/* v2.4.3 — sticky hover: on a phone the tapped option stays :hover, and the
+   hover grey outranked the active blue — white text on grey, the chosen
+   answer looked blank (owner's phone, 19 Sep). Active wins over hover. */
+.clarify-option.is-active, .clarify-option.is-active:hover { background: #1d4ed8; color: #fff; border-color: #1e40af; }
 .clarify-option.is-optout { color: #64748b; border-style: dashed; }
-.clarify-option.is-optout.is-active { background: #475569; border-color: #334155; color: #fff; }
+.clarify-option.is-optout.is-active, .clarify-option.is-optout.is-active:hover { background: #475569; border-color: #334155; color: #fff; }
 .clarify-option:disabled { opacity: .55; cursor: default; }
 .clarify-freetext {
   display: block; width: 100%; box-sizing: border-box; margin-top: 6px;

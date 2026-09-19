@@ -109,8 +109,20 @@ describe('phone stylesheet contract', () => {
     expect(ruleIn(block, '.sg-marker-selected .sg-marker-label')).toMatch(/display:\s*block/);
   });
 
-  it('the single Run button is primary on a phone', () => {
-    expect(ruleIn(block, '.assistant-start-btn')).toMatch(/width:\s*100%/);
+  it('the single Run button is primary on a phone — and stays so under sticky hover (v2.4.3)', () => {
+    expect(ruleIn(block, '.assistant-start-btn, .assistant-start-btn:hover')).toMatch(/width:\s*100%/);
+  });
+
+  it('a conversation gets a stable full-height panel; a restored one opens as its bar (v2.4.3)', () => {
+    expect(ruleIn(block, '.assistant.assistant-conversing.assistant-expanded')).toMatch(/height:\s*calc\(100dvh - 48px\)/);
+    expect(ruleIn(block, '.assistant.assistant-conversing.assistant-expanded.assistant-above-sheet')).toMatch(/var\(--sheet-peek\)/);
+    expect(ruleIn(block, '.drawer-sheet')).toMatch(/animation:\s*sg-sheet-in/);
+  });
+
+  it('the chosen clarification option beats sticky hover (v2.4.3)', () => {
+    // on touch the tapped option stays :hover; grey-on-white-text made the
+    // chosen answer look blank on the owner's phone
+    expect(css).toMatch(/\.clarify-option\.is-active, \.clarify-option\.is-active:hover\s*\{/);
   });
 });
 

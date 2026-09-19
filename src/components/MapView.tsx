@@ -406,7 +406,9 @@ export const MapView: React.FC<MapViewProps> = ({
       ? { top: 110, right: 64, bottom: bottomInset + 32, left: 40 }
       : 60;
     if (focus.length === 1) {
-      map.flyTo({ center: [focus[0].lng, focus[0].lat], zoom: 13, duration: 1000, padding });
+      // v2.4.3 — never zoom OUT to look at a tapped pin (it sat at a fixed 13
+      // while the fitted view was closer — the map jumped back on every tap)
+      map.flyTo({ center: [focus[0].lng, focus[0].lat], zoom: Math.max(map.getZoom(), 13), duration: 700, padding });
     } else if (focus.length > 1) {
       const b = boundsOfLatLng(focus);
       if (b) map.fitBounds(b, { padding, duration: 1200 });

@@ -4,6 +4,30 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.4.3] — 2026-09-19 — Less choppy (frontend only)
+
+Owner, after v2.4.2 on his phone: "features feel choppy and not similar to
+the desktop portal feel". Walked the whole flow on the 375×812 touch
+emulation looking at the transitions rather than the layout:
+
+- **The conversation panel jumped in height** — 40 % → 50 % → 100 % as the
+  reply, the questions and the plan arrived, content-sized each time. Once
+  the first message is sent it now takes the screen under the top bar and
+  scrolls inside; the map comes back with the results sheet or on collapse.
+  A restored conversation opens as its bar, not over the map.
+- **Sticky hover.** On touch a tapped element stays `:hover`. The chosen
+  clarification option's hover grey outranked its active blue — white text
+  on grey, the answer looked blank; the Run button rendered in its hover
+  outline. Active and primary now win over hover.
+- **Tapping a pin zoomed the map OUT** (a fixed zoom 13 while the fitted view
+  was closer). It never zooms out now, and the move is shorter.
+- The results sheet slides up on first appearance instead of popping in;
+  "Priority 1 near …" wraps instead of losing the locality to an ellipsis;
+  map-colour chips are 34 px, not 40; a factor's name is the row's flexible
+  column (it floated to the centre under `space-between`).
+- Dead CSS from v2.1.0 (`spec-clarify-*`, `spec-scenario-*`) left alone; the
+  contract tests cover the three phone rules above.
+
 ## [2.4.2] — 2026-09-18 — The sheet on a real phone (frontend only)
 
 Owner's phone after v2.4.1: "score menu disappears after minimising to see

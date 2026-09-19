@@ -8,6 +8,7 @@ import { MAX_PROMPTS_PER_USER } from '../config/firebase';
 import { SpecSummaryCard } from './SpecSummaryCard';
 import { ClarificationCard } from './ClarificationCard';
 import type { SheetState } from '../services/sheetState';
+import { PHONE_MEDIA_QUERY } from '../services/phoneLayout';
 
 /**
  * v2.1.0 — the conversation panel, reduced to the four things it does:
@@ -62,7 +63,11 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
   onCancelAnalysis, canRetry, onRetryAnalysis, analysisPhase, phoneSheet = null, onCheckSpot,
 }) => {
   const { user } = useAuth();
-  const [expanded, setExpanded] = useState(true);
+  // v2.4.3 — on a phone a restored conversation opens as its bar, not as a
+  // full-screen panel over the map (the panel is full-height while conversing).
+  const [expanded, setExpanded] = useState(() => {
+    try { return !(window.matchMedia(PHONE_MEDIA_QUERY).matches && messages.length > 0); } catch { return true; }
+  });
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -104,7 +109,7 @@ export const FloatingAssistant: React.FC<FloatingAssistantProps> = ({
     : phoneSheet ? ' assistant-behind-sheet' : '';
 
   return (
-    <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}${drawerOpen ? ' assistant-drawer-shift' : ''}${sheetClass}`}>
+    <div className={`assistant ${expanded ? 'assistant-expanded' : 'assistant-collapsed'}${drawerOpen ? ' assistant-drawer-shift' : ''}${sheetClass}${messages.length > 0 ? ' assistant-conversing' : ''}`}>
       <div className="assistant-header" onClick={() => setExpanded(!expanded)}>
         <div className="assistant-header-left">
           <div className="assistant-indicator" />
