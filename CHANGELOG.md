@@ -43,10 +43,14 @@ non-destructive live probes of the public engine. What the probes found:
   for share links, LIST is the owner's or an admin's. **Rules must be
   deployed** (`firebase deploy --only firestore:rules`).
 
-Not changed by this release, recorded for the go-live checklist: server-side
-identity/quota enforcement is still OFF on Cloud Run (`REQUIRE_USER_AUTH`
-unset — the quota is enforced only by the client and Firestore rules; anyone
-with the bundled app token can start analyses within the IP limits); the
+Same day, as configuration rather than code: **`REQUIRE_USER_AUTH=true` is
+now set on Cloud Run** (revision 00110) — every LLM route verifies the
+Firebase ID token and `/analyses` consumes the credit in a Firestore
+transaction; anonymous callers get `AUTH_REQUIRED`, bad tokens
+`AUTH_INVALID`, verified live. **The Firestore rules were deployed** via
+the Rules API (ruleset `e6f533b8`, previous `e80fef07` kept for rollback) —
+which also revealed that the v1.6.1 `maxPrompts` allotment rules had never
+reached production until now. Still open for the go-live checklist: the
 service runs as the default compute service account; the Firebase web API
 key and the Mapbox token rely on console-side restrictions. Clean:
 `npm audit` and `pip-audit` report no known vulnerabilities; no real secret
