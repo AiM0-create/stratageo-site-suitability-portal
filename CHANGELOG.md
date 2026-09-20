@@ -4,6 +4,38 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.7.0] — 2026-09-20 — A report you can hand to a client (portal)
+
+Owner, on the exported "High end gym / Kashmiri Market" PDF: "lacks
+structure, composition, formal appeal and map is not there." Read the file:
+
+- **No basemap.** A 1.5 km spot extent needs zoom 16 with 256 px tiles —
+  56 tiles, over the figure's 32-tile safety cap — so `fetchBasemap`
+  returned null and the "map" was hexes on white with a footnote nobody
+  reads. The zoom is now chosen to fit the budget (`basemapZoom`), tiles
+  are 512 px @2x (a quarter of the requests for the same detail), and the
+  timeout is 9 s.
+- **Text off the page.** Every wrapped paragraph was measured at the
+  previous font size (6.5–7 pt) and drawn at 8 pt, so the executive summary
+  and every assessment ran past the right margin. Factor names were cut by
+  character count ("Shops, eateries and services (all ki"); the "/10" under
+  each score badge was drawn below the badge in white.
+- **11 MB for seven pages** — the figure was embedded as PNG, which jsPDF
+  stores almost raw. JPEG now; ~0.5 MB.
+
+The report is rebuilt on a small layout kit (text measured at the size it
+is drawn, tables that wrap and repeat their header, page-break-aware
+blocks): a cover with the verdict tiles, an "at a glance" table and a
+contents list; numbered sections — executive summary (with the spot
+verdict when it is a spot check), ranked zones, the scoring framework
+with each factor's direction, weight, catchment and origin (framework vs
+the brief), the study-area map (spot pin drawn), one page per zone with
+factor scores, a street-level mini-map centred on the zone, evidence
+counts and next-stage checks; methodology with constraint verification
+and the weight audit as tables; and a tabular evidence appendix. Running
+header and "Page i of n" footers. `pdfReport.test.ts` pins the tile
+budget. Portal 2.7.0.
+
 ## [2.6.1] — 2026-09-19 — The customer's noun is the business (engine)
 
 Owner, on a spot verdict: typed "bakery", read "for a cafe". The label was

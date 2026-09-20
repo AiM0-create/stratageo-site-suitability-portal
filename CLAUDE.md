@@ -55,7 +55,7 @@ SpecSummaryCard   → chatService.startAnalysis → POST /api/v2/analyses   (ret
                   → resultNormalizer.normalizeAnalysisResult → App state → MapView / ResultsDrawer
 ```
 
-The frontend has one flow: brief → `/clarify` → `/chat` (plan) → `/analyses` (run, poll) → map + drawer. **Check a spot** (`components/SpotCheck.tsx` → `POST /api/v2/spot`, `services/spot.py`) is the same engine with `studyArea=point_radius`, res 9 and `spec.targetPoint`; the run reports `result.targetCell` (always re-verified, always described) and the verdict is relative to the cells around the pin — never an absolute score. There is no client-side analysis path; `services/pdfReport.ts` renders the PDF from the result payload.
+The frontend has one flow: brief → `/clarify` → `/chat` (plan) → `/analyses` (run, poll) → map + drawer. **Check a spot** (`components/SpotCheck.tsx` → `POST /api/v2/spot`, `services/spot.py`) is the same engine with `studyArea=point_radius`, res 9 and `spec.targetPoint`; the run reports `result.targetCell` (always re-verified, always described) and the verdict is relative to the cells around the pin — never an absolute score. There is no client-side analysis path; `services/pdfReport.ts` renders the PDF from the result payload on a small layout kit (`Doc`: wrap/fit measure at the size they draw; tables wrap; blocks are page-break aware) and `services/mapFigure.ts` draws the figures — `basemapZoom` must keep the tile count inside `MAX_TILES` or the basemap silently disappears (the v2.7.0 incident).
 
 ### Three layers of intelligence
 
