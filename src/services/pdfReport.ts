@@ -113,7 +113,9 @@ export function factorMix(criteria: MCDACriteria[]): string {
   if (n === 0) return 'No factors';
   const fw = criteria.filter(c => !c.origin || c.origin === 'framework').length;
   const yours = n - fw;
-  return `${n} factor${n === 1 ? '' : 's'}` + (yours > 0 ? ` (${fw} framework, ${yours} from your brief)` : ' (framework)');
+  if (yours === 0) return `${n} framework factor${n === 1 ? '' : 's'}`;
+  if (fw === 0) return `${n} factor${n === 1 ? '' : 's'}, all from your brief`;
+  return `${n} factors (${fw} framework, ${yours} from your brief)`;
 }
 
 // ─── Layout kit ─────────────────────────────────────────────────────────────
@@ -130,6 +132,8 @@ interface Cell {
   draw?: (x: number, y: number, w: number, h: number) => void;
   /** minimum row height this cell needs (for custom painters) */
   minH?: number;
+  /** cap the `sub` text at this many lines (last line gets an ellipsis) */
+  maxSubLines?: number;
 }
 interface Col { w: number; header: string; align?: 'left' | 'right' | 'center' }
 
@@ -332,7 +336,11 @@ class Doc {
       const laid = row.map((cell, i) => {
         const w = cols[i].w - 4;
         const lines = cell.text ? this.wrap(cell.text, w, cell.size ?? size, cell.style ?? 'normal') : [];
-        const sub = cell.sub ? this.wrap(cell.sub, w, (cell.size ?? size) - 1.4, 'italic') : [];
+        let sub = cell.sub ? this.wrap(cell.sub, w, (cell.size ?? size) - 1.4, 'italic') : [];
+        if (cell.maxSubLines && sub.length > cell.maxSubLines) {
+          sub = sub.slice(0, cell.maxSubLines);
+          sub[sub.length - 1] = this.fit(sub[sub.length - 1] + ' ...', w, (cell.size ?? size) - 1.4, 'italic');
+        }
         const h = lines.length * this.lh(cell.size ?? size) + sub.length * this.lh((cell.size ?? size) - 1.4);
         return { lines, sub, h: Math.max(h, cell.minH ?? 0) };
       });
@@ -383,7 +391,9 @@ export async function exportAnalysisPdf(
     const criteria = topLoc?.criteria_breakdown ?? [];
     const reference: string = r.jobRef || et?.jobId?.slice(0, 8) || '';
     const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
-    const engineVer: string = et?.engineVersion || __APP_VERSION__;
+    const engineRaw: string = et?.engineVersion || __APP_VERSION__;
+    // a Cloud Run revision ("stratageo-engine-00108") is not a "v" number
+    const engineLabel = /^\d/.test(engineRaw) ? `Engine v${engineRaw}` : `Engine ${engineRaw.replace(/^stratageo-engine-/, 'revision ')}`;
     const business = result.business_type || 'Site suitability';
     const place = target?.areaHint ? `near ${target.areaHint}` : (result.target_location || '');
     d.running = `Site Suitability Screening  |  ${business}${place ? `  |  ${place}` : ''}`;
@@ -417,7 +427,7 @@ export async function exportAnalysisPdf(
     d.font(12.5, 'normal', C.paleBlue);
     d.text(d.fit(place || studyAreaText, d.cw, 12.5), d.ml, ty + 1);
     d.font(7.5, 'normal', C.paleBlue);
-    d.text([dateStr, reference ? `Reference ${reference}` : '', `Engine v${engineVer}`].filter(Boolean).join('     '), d.ml, bandH - 8);
+    d.text([dateStr, reference ? `Reference ${reference}` : '', engineLabel].filter(Boolean).join('     '), d.ml, bandH - 8);
     if (withheld) {
       d.font(7.5, 'bold', [253, 224, 71]); d.text('RECOMMENDATION WITHHELD - SEE SECTION 1', d.pw - d.mr, bandH - 8, { align: 'right' });
     }
@@ -464,7 +474,7 @@ export async function exportAnalysisPdf(
     glance.push(['Factors', factorMix(criteria) + (widestCatchment ? `  -  widest catchment ${km(widestCatchment)}` : '')]);
     glance.push(['Scoring', `Two-pass: every cell screened on Euclidean proxies, then ${exec.verifiedCells ?? 'the top'} zones re-verified with travel-time and routing data; the ranking uses the refined scores.`]);
     glance.push(['Claim level', `${humanize(r.siteClaimLevel || 'micro_market_zone')} - zones to investigate, not parcels or exact sites.`]);
-    glance.push(['Prepared', `${dateStr} by Stratageo  -  App v${__APP_VERSION__}, Engine v${engineVer}${et?.evidenceVersion ? `, evidence v${et.evidenceVersion}` : ''}`]);
+    glance.push(['Prepared', `${dateStr} by Stratageo  -  Portal v${__APP_VERSION__}, ${engineLabel.toLowerCase()}${et?.evidenceVersion ? `, evidence v${et.evidenceVersion}` : ''}`]);
     d.kv(glance, { keyW: 30, size: 8 });
 
     // ── contents (filled at the end) ──
@@ -552,9 +562,35 @@ export async function exportAnalysisPdf(
     );
 
     // ════════════════════════════════════════════════════════════════════════
-    // 3  SCORING FRAMEWORK
+    // 3  STUDY AREA MAP
     // ════════════════════════════════════════════════════════════════════════
-    d.h1('3', 'Scoring framework');
+    let figure: Awaited<ReturnType<typeof renderMapFigure>> = null;
+    try {
+      figure = await renderMapFigure({
+        hexGrid: r.hexGrid ?? [],
+        locations: ranked,
+        studyAreaBoundary: r.studyAreaBoundary,
+        withheld,
+        weightsAdjusted: r.weightAudit?.adjustedByUser === true,
+        target: target ? { lat: target.point.lat, lng: target.point.lng } : null,
+      });
+    } catch { figure = null; }
+    if (figure) {
+      d.newPage();
+      d.h1('3', 'Study area map');
+      const imgW = d.cw;
+      const imgH = Math.min(imgW / figure.aspect, d.bottom - d.y - 14);
+      const drawW = imgH * figure.aspect;
+      pdf.addImage(figure.dataUrl, 'JPEG', d.ml + (d.cw - drawW) / 2, d.y, drawW, imgH);
+      d.y += imgH + 4;
+      d.para(`Figure 1. Screening surface over the ${studyAreaText}: cell colour is the Pass-A screening score (stretched to the plotted range); numbered pins are the ranked zones${isSpot ? '; the blue pin is your spot' : ''}. Zones are H3 micro-market cells, not parcels.${figure.hasBasemap ? '' : ' Basemap tiles were unavailable at export time.'}`, { size: 7.2, color: C.s5 });
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 4  SCORING FRAMEWORK
+    // ════════════════════════════════════════════════════════════════════════
+    if (figure) d.newPage();
+    d.h1('4', 'Scoring framework');
     d.para(`${factorMix(criteria)}. Framework factors come from the reviewed ${r.archetypeKey ? humanize(r.archetypeKey) : 'business'} playbook; factors marked "from your brief" were added because the brief named them. Weights are normalised to 100% and shown as applied.`, { size: 7.8, color: C.s5, after: 3 });
     const evFactors: any[] = et?.factors ?? [];
     const catchmentFor = (name: string): string => {
@@ -586,35 +622,13 @@ export async function exportAnalysisPdf(
     const skipped: any[] = r.analysisCompleteness?.skippedStages ?? [];
     if (notes.length || skipped.length) {
       d.h2('Planner decisions for this run');
-      d.bullets([
-        ...skipped.map(s => `${humanize(s.stage)} skipped - ${s.reason}${s.savedCost ? ` (cost saved: ${s.savedCost})` : ''}`),
-        ...notes.filter(n => !/^Planner:/.test(n)).slice(0, 8),
-      ]);
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // 4  STUDY AREA MAP
-    // ════════════════════════════════════════════════════════════════════════
-    let figure: Awaited<ReturnType<typeof renderMapFigure>> = null;
-    try {
-      figure = await renderMapFigure({
-        hexGrid: r.hexGrid ?? [],
-        locations: ranked,
-        studyAreaBoundary: r.studyAreaBoundary,
-        withheld,
-        weightsAdjusted: r.weightAudit?.adjustedByUser === true,
-        target: target ? { lat: target.point.lat, lng: target.point.lng } : null,
-      });
-    } catch { figure = null; }
-    if (figure) {
-      d.newPage();
-      d.h1('4', 'Study area map');
-      const imgW = d.cw;
-      const imgH = Math.min(imgW / figure.aspect, d.bottom - d.y - 14);
-      const drawW = imgH * figure.aspect;
-      pdf.addImage(figure.dataUrl, 'JPEG', d.ml + (d.cw - drawW) / 2, d.y, drawW, imgH);
-      d.y += imgH + 4;
-      d.para(`Figure 1. Screening surface over the ${studyAreaText}: cell colour is the Pass-A screening score (stretched to the plotted range); numbered pins are the ranked zones${isSpot ? '; the blue pin is your spot' : ''}. Zones are H3 micro-market cells, not parcels.${figure.hasBasemap ? '' : ' Basemap tiles were unavailable at export time.'}`, { size: 7.2, color: C.s5 });
+      // the stage reason already says what was skipped ("Water mask skipped - ...");
+      // per-layer merge counts and the ranking-basis essay belong to the portal's audit trail
+      const decisions = [
+        ...skipped.map(s => `${s.reason}${s.savedCost ? ` (cost saved: ${s.savedCost})` : ''}`),
+        ...notes.filter(n => !/^(Planner:|Layer '|Factor '|Ranking basis)/.test(n)),
+      ];
+      d.bullets(Array.from(new Set(decisions)).slice(0, 6));
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -681,7 +695,7 @@ export async function exportAnalysisPdf(
             ? (s <= 3 ? C.red : s <= 6 ? C.amber : C.green)
             : (s >= 7 ? C.green : s >= 4 ? C.blue : C.red);
           return [
-            { text: `${neg ? '[-] ' : '[+] '}${cr.name}`, style: 'bold', sub: cr.justification || (noData ? 'No data for this factor' : '') },
+            { text: `${neg ? '[-] ' : '[+] '}${cr.name}`, style: 'bold', sub: cr.justification || (noData ? 'No data for this factor' : ''), maxSubLines: 2 },
             { draw: (x: number, y: number, w: number, h: number) => {
                 if (noData) { d.font(6.8, 'italic', C.s5); d.text(cr.dataStatus === 'unavailable' ? 'provider unavailable' : 'insufficient data', x, y + h / 2 + 1); }
                 else d.bar(s, x, y + h / 2 - 1.5, w, 3, crCol);
@@ -707,11 +721,17 @@ export async function exportAnalysisPdf(
         });
       } catch { mini = null; }
       const colGap = 6;
-      const leftW = mini ? 86 : 0;
+      let leftW = mini ? 86 : 0;
+      let miniH = mini ? leftW / mini.aspect : 0;
+      // shrink the mini-map into the space left on this page rather than
+      // pushing the whole block to a near-empty next page (zone 1 did, live)
+      if (mini) {
+        const avail = d.bottom - d.y - 14;
+        if (miniH > avail && avail >= 42) { miniH = avail; leftW = miniH * mini.aspect; }
+        d.need(miniH + 14);
+      } else d.need(30);
       const rightX = d.ml + leftW + (mini ? colGap : 0);
       const rightW = d.cw - leftW - (mini ? colGap : 0);
-      const miniH = mini ? leftW / mini.aspect : 0;
-      d.need(Math.max(miniH + 12, 30));
       const blockTop = d.y;
       if (mini) {
         d.h2('Zone map');
@@ -838,7 +858,7 @@ export async function exportAnalysisPdf(
           [{ w: 34, header: 'Provider' }, { w: 88, header: 'Purpose' }, { w: 22, header: 'Features', align: 'right' }, { w: 34, header: 'Status' }],
           pq.slice(0, 40).map(q => [
             { text: String(q.provider) },
-            { text: humanize(String(q.queryPurpose || '')).replace(/primary X /i, ''), sub: q.warning || '' },
+            { text: humanize(String(q.queryPurpose || '').replace(/\s*\[source=[^\]]*\]/, '').replace(/^primary_X_/, '').replace(/_X_/g, ' - ')), sub: q.warning || '' },
             { text: String(q.featureCount ?? 0), align: 'right' },
             { text: `${q.responseStatus || '-'}${q.cacheHit ? ' (cached)' : ''}${q.durationMs != null ? `  ${(q.durationMs / 1000).toFixed(1)}s` : ''}`, color: C.s7 },
           ] as Cell[]),
@@ -860,7 +880,7 @@ export async function exportAnalysisPdf(
           { size: 7.2, headBg: C.s7 },
         );
       }
-      const lims: string[] = et.limitations || [];
+      const lims: string[] = (et.limitations || []).filter((l: string) => !/Fingerprint|AUDIT REPRODUCIBLE/.test(l));
       if (lims.length) { d.h2('Recorded limitations'); d.bullets(lims.slice(0, 10), { size: 7.6 }); }
     }
     if (r.uploadedCandidatesOnly) {

@@ -69,8 +69,10 @@ describe('report text helpers', () => {
 
   it('factorMix says how many factors came from the brief', () => {
     expect(factorMix([])).toBe('No factors');
-    expect(factorMix([crit('A'), crit('B', 'framework')])).toBe('2 factors (framework)');
+    expect(factorMix([crit('A'), crit('B', 'framework')])).toBe('2 framework factors');
     expect(factorMix([crit('A'), crit('B', 'brief'), crit('C', 'answer')])).toBe('3 factors (1 framework, 2 from your brief)');
+    // the live gym spot check: every factor came from the brief — say so, not "0 framework"
+    expect(factorMix([crit('A', 'brief'), crit('B', 'brief')])).toBe('2 factors, all from your brief');
   });
 
   it('originText uses the drawer vocabulary', () => {

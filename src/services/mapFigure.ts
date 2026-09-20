@@ -254,7 +254,7 @@ export async function renderMapFigure(opts: FigureOptions): Promise<MapFigure | 
         ctx.fillStyle = `rgba(148,163,184,${(0.15 + t * 0.30).toFixed(2)})`;
       } else {
         // More transparent over a basemap so streets/labels read through
-        ctx.globalAlpha = hasBasemap ? (compact ? 0.26 + t * 0.30 : 0.34 + t * 0.34) : 0.42 + t * 0.40;
+        ctx.globalAlpha = hasBasemap ? (compact ? 0.16 + t * 0.26 : 0.34 + t * 0.34) : 0.42 + t * 0.40;
         ctx.fillStyle = RAMP(t);
       }
       ctx.fill();
@@ -338,7 +338,7 @@ export async function renderMapFigure(opts: FigureOptions): Promise<MapFigure | 
 
     // ── North arrow (inside frame, top-right) ──
     const na = compact ? 0.7 : 1;
-    const nx = m + plotW - 46 * na, nyTop = m + 22 * na;
+    const nx = m + plotW - (compact ? 62 : 46) * na, nyTop = m + (compact ? 34 : 22) * na;
     ctx.save();
     ctx.beginPath();
     ctx.arc(nx, nyTop + 26 * na, 30 * na, 0, Math.PI * 2);
