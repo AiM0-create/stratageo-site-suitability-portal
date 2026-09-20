@@ -112,13 +112,24 @@ MAX_PLACES_LAYERS = 5
 MAX_ISOCHRONE_LAYERS = 6
 
 
+# v2.7.1 — security sweep: a client-supplied bbox spanning a country (or a
+# 500 km radius) is polyfilled before the max_hexes degrade loop can help
+# (res 7 has no floor: ~640k cells for India) and then sent to Overpass as one
+# query. With --max-instances 1 that is a denial of service for every user.
+# Screening is a city-scale product; these caps are well above any real brief.
+MAX_STUDY_RADIUS_M = 30_000
+MAX_BBOX_SPAN_DEG = 0.6          # ~65 km N-S; ~60 km E-W at Indian latitudes
+MAX_PLACES = 8
+MAX_HULL_BUFFER_M = 5_000
+
+
 class StudyArea(BaseModel):
     type: Literal["places", "bbox", "point_radius"]
-    places: Optional[list[str]] = None          # e.g. ["Salt Lake, Kolkata", "New Town, Kolkata"]
+    places: Optional[list[str]] = Field(default=None, max_length=MAX_PLACES)  # e.g. ["Salt Lake, Kolkata"]
     bbox: Optional[list[float]] = None           # [west, south, east, north]
     point: Optional[dict] = None                 # {"lat": .., "lng": ..}
-    radiusM: Optional[int] = None
-    hullBufferM: int = 500
+    radiusM: Optional[int] = Field(default=None, gt=0, le=MAX_STUDY_RADIUS_M)   # tiny radii are floored by the engine (v1.8.1)
+    hullBufferM: int = Field(default=500, ge=0, le=MAX_HULL_BUFFER_M)
 
     @model_validator(mode="after")
     def check_shape(self):
@@ -126,8 +137,23 @@ class StudyArea(BaseModel):
             raise ValueError("studyArea.type=places requires a non-empty places list")
         if self.type == "bbox" and (not self.bbox or len(self.bbox) != 4):
             raise ValueError("studyArea.type=bbox requires bbox [west, south, east, north]")
+        if self.type == "bbox":
+            w, s_, e, n = self.bbox
+            if not (-180 <= w < e <= 180 and -90 <= s_ < n <= 90):
+                raise ValueError("studyArea.bbox must be [west, south, east, north] in degrees")
+            if (e - w) > MAX_BBOX_SPAN_DEG or (n - s_) > MAX_BBOX_SPAN_DEG:
+                raise ValueError(f"studyArea.bbox spans more than {MAX_BBOX_SPAN_DEG} degrees — screening is city-scale")
         if self.type == "point_radius" and (not self.point or not self.radiusM):
             raise ValueError("studyArea.type=point_radius requires point and radiusM")
+        if self.type == "point_radius":
+            try:
+                lat, lng = float(self.point["lat"]), float(self.point["lng"])
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("studyArea.point needs numeric lat and lng")
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                raise ValueError("studyArea.point is outside the world")
+        if self.places and any(len(p) > 200 for p in self.places):
+            raise ValueError("studyArea.places entries must be under 200 characters")
         return self
 
 
@@ -150,9 +176,21 @@ _OSM_KEYS = {
 }
 
 
+# v2.7.1 — security sweep: tags are interpolated into Overpass QL as
+# ["key"="value"]. The client posts the spec verbatim to /analyses, so a tag
+# such as amenity=cafe"];node["name"~".*"] would have closed the selector and
+# appended arbitrary statements (a planet-wide query, from the engine's IP).
+# OSM keys and values are a conservative charset; anything else is rejected.
+_TAG_KEY_RE = re.compile(r"^[A-Za-z0-9_:\-]{1,64}$")
+# values may be any language ("Café", "चाय") — only the quote, the backslash
+# and control characters can escape a quoted Overpass string
+_TAG_VALUE_RE = re.compile(r'^[^"\\\x00-\x1f]{1,96}$')
+MAX_TAGS_PER_SOURCE = 24
+
+
 class OsmSource(BaseModel):
     provider: Literal["osm"] = "osm"
-    tags: list[str] = Field(min_length=1)        # ["railway=station", "amenity=cafe"]
+    tags: list[str] = Field(min_length=1, max_length=MAX_TAGS_PER_SOURCE)  # ["railway=station", "amenity=cafe"]
 
     @field_validator("tags")
     @classmethod
@@ -165,11 +203,15 @@ class OsmSource(BaseModel):
                 continue
             t = t.strip()
             if "=" in t:
-                cleaned.append(t)
+                pass
             elif t in _OSM_KEYS:
-                cleaned.append(f"{t}=*")
+                t = f"{t}=*"
             else:
-                cleaned.append(f"amenity={t}")
+                t = f"amenity={t}"
+            k, v = t.split("=", 1)
+            if not _TAG_KEY_RE.match(k) or not (v == "*" or _TAG_VALUE_RE.match(v)):
+                raise ValueError(f"osm tag {t[:40]!r} contains characters that are not part of an OSM key=value")
+            cleaned.append(t)
         if not cleaned:
             raise ValueError("osm source needs at least one key=value tag")
         return cleaned

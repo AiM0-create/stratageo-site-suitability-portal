@@ -4,6 +4,55 @@ All notable changes are documented here. Format: [SemVer](https://semver.org).
 
 ---
 
+## [2.7.1] — 2026-09-20 — Security sweep: every LLM route behind the gate (engine + portal)
+
+Owner: "do a full sweep security test of the portal, everything." Code,
+configuration (Cloud Run, GCS, Firestore rules, CI), dependencies and
+non-destructive live probes of the public engine. What the probes found:
+
+- **`/api/v2/clarify` and `/api/v2/spot` answered anonymous calls** — no
+  `X-App-Token`, no per-IP limit, no body cap. Both spend an OpenAI call.
+  The v1.6.0 gate lists protected prefixes by hand and neither route
+  (v1.13.0, v2.4.0) was added; verified live with an invalid body reaching
+  the handler (422, not 401). Now gated; `test_v271_security_sweep.py`
+  drives all four cost-bearing routes through the middleware.
+- **Per-IP rate limit keyed on the first `X-Forwarded-For` hop.** Cloud
+  Run appends the real address after whatever the client sends, so one
+  header chose the bucket. The platform-appended (last) hop is used.
+- **Overpass QL injection through `layers[].source.tags`.** The client posts
+  the spec verbatim to `/analyses` and tags were interpolated raw into
+  `["key"="value"]`; a quote closed the selector. Keys are `[A-Za-z0-9_:-]`,
+  values may be any language but never a quote, backslash or control
+  character; at most 24 tags per source.
+- **No cap on the study area.** A country-sized bbox or a 500 km radius
+  polyfilled before the `max_hexes` degrade loop could help (res 7 has no
+  floor) and went to Overpass as one query — on a one-instance service that
+  is everyone's outage. Radius ≤ 30 km, bbox ≤ 0.6°, hull buffer ≤ 5 km,
+  ≤ 8 places, coordinates on the planet.
+- **`/docs` and `/openapi.json` were public.** Off unless `EXPOSE_DOCS=true`.
+- **Docs named a flag the code never read.** `STRATAGEO_REQUIRE_USER_AUTH`
+  in three places; the settings class reads `REQUIRE_USER_AUTH`. Flipping
+  the documented name would have done nothing, silently.
+- **Portal:** the zone-pin tooltip put the zone name into `innerHTML` raw —
+  names also arrive from shared analysis documents another signed-in user
+  wrote, so a crafted share link ran script in the viewer's session
+  (escaped now, `escapeHtml`); the PDF library loads with subresource
+  integrity and the never-used html2canvas is gone; `firestore.rules`
+  granted LIST on `analyses/` to the world (one unauthenticated REST query
+  enumerated every customer's briefs and emails) — GET by id stays public
+  for share links, LIST is the owner's or an admin's. **Rules must be
+  deployed** (`firebase deploy --only firestore:rules`).
+
+Not changed by this release, recorded for the go-live checklist: server-side
+identity/quota enforcement is still OFF on Cloud Run (`REQUIRE_USER_AUTH`
+unset — the quota is enforced only by the client and Firestore rules; anyone
+with the bundled app token can start analyses within the IP limits); the
+service runs as the default compute service account; the Firebase web API
+key and the Mapbox token rely on console-side restrictions. Clean:
+`npm audit` and `pip-audit` report no known vulnerabilities; no real secret
+in git history (the `sk.` strings are test fixtures); GCS bucket private;
+CORS allow-list correct; Cloud Run `--max-instances 1`.
+
 ## [2.7.0] — 2026-09-20 — A report you can hand to a client (portal)
 
 Owner, on the exported "High end gym / Kashmiri Market" PDF: "lacks

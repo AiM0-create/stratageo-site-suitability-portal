@@ -577,8 +577,9 @@ def test_pdf_evidence_appendix_marker_in_source():
     if not src_path.exists():
         pytest.skip("pdfReport.ts not found relative to test location")
     src = src_path.read_text(encoding="utf-8")
-    assert "Evidence Appendix" in src, (
-        "pdfReport.ts must include 'Evidence Appendix' (v1.3.0 PDF requirement)"
+    # v2.7.0 — section headings are sentence case ("7  Evidence appendix")
+    assert "evidence appendix" in src.lower(), (
+        "pdfReport.ts must include an 'Evidence appendix' section (v1.3.0 PDF requirement)"
     )
     assert "evidenceTrail" in src, (
         "App.tsx PDF section must reference evidenceTrail"

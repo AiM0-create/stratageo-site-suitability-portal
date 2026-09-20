@@ -78,11 +78,17 @@ service cloud.firestore {
     }
 
     // ── analyses/{id} (share-by-link results) ────────────────────
-    // Read is public by design: a saved analysis is a capability-URL share
-    // (the unguessable shareId is the secret). This matches existing behavior.
+    // GET is public by design: a saved analysis is a capability-URL share
+    // (the unguessable shareId is the secret).
+    // v2.7.1 — security sweep: `read` also granted LIST, so an unfiltered
+    // query against the collection (one REST call with the public web API
+    // key, no sign-in) enumerated every customer's briefs, zones and emails.
+    // Listing is now the owner's (or an admin's) — the app only ever queries
+    // `where userId == uid`, which these rules accept.
     // Writes are locked to the owner so shared results can't be tampered with.
     match /analyses/{id} {
-      allow read:   if true;
+      allow get:    if true;
+      allow list:   if isOwner(resource.data.userId) || isAdmin();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isOwner(resource.data.userId) || isAdmin();
     }

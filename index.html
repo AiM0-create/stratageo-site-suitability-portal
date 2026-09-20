@@ -26,8 +26,12 @@
        so there is no render-blocking third-party script tag here any more. -->
 
   <!-- PDF export (lazy loaded, only used on export action) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+  <!-- v2.7.1 — security sweep: subresource integrity pins the exact bytes of
+       the PDF library (a CDN compromise cannot swap in a script that reads the
+       signed-in session); the unused canvas-capture library is gone. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+          integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk"
+          crossorigin="anonymous" defer></script>
 </head>
 <body>
   <noscript>You need to enable JavaScript to run this app.</noscript>

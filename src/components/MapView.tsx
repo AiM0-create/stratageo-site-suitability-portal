@@ -74,6 +74,13 @@ const LYR = {
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
+/** Text → HTML-safe text for the one innerHTML template on the map. */
+export function escapeHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /** Ranked candidate pin — same markup/CSS classes as the Leaflet build so the
  *  existing pin styling and the permanent label carry over unchanged. */
 function buildMarkerEl(
@@ -94,9 +101,11 @@ function buildMarkerEl(
   el.className = isSelected ? 'sg-marker sg-marker-selected' : 'sg-marker';
   // vNext (v1.8.0) — zone-centroid honesty: the pin marks the H3 cell's
   // representative point, never an exact site or address (§6.5).
+  // v2.7.1 — security sweep: the name is data from the engine OR from a shared
+  // analysis document another user wrote to Firestore; it goes in as text.
   el.innerHTML =
     `<div class="sg-tooltip-container sg-marker-label">` +
-      `<div class="sg-tooltip"><strong>${headGlyph}</strong> ${name}${excludedLabel}<br/>` +
+      `<div class="sg-tooltip"><strong>${headGlyph}</strong> ${escapeHtml(name)}${excludedLabel}<br/>` +
       `<span class="sg-tooltip-score">${score}/10</span><br/>` +
       `<span style="font-size:9px;color:#64748b">Investigation-zone centroid (approximate)</span></div>` +
     `</div>` +

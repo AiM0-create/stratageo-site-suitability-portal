@@ -9,7 +9,15 @@ from .security import SecurityMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 
-app = FastAPI(title="Stratageo Analysis Engine", version=APP_VERSION)
+# v2.7.1 — the interactive docs stay off on the public service (they map the
+# whole cost-bearing surface for anyone who finds the URL); EXPOSE_DOCS=true
+# turns them back on for local work.
+_docs = get_settings().expose_docs
+app = FastAPI(
+    title="Stratageo Analysis Engine", version=APP_VERSION,
+    docs_url="/docs" if _docs else None, redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 
 # Order matters: CORS outermost (added last runs first), then rate-limit/size gate.
 app.add_middleware(SecurityMiddleware)

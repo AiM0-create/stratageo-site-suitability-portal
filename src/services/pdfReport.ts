@@ -11,7 +11,7 @@
 // cover, numbered sections, a contents list, a per-zone mini-map and a
 // tabular evidence appendix.
 //
-// jsPDF and html2canvas are globals loaded from index.html.
+// jsPDF is a global loaded from index.html (with subresource integrity).
 import type { AnalysisResult, AnalysisSpec, LocationData, MCDACriteria } from '../types';
 import { config } from '../config';
 import { renderMapFigure } from './mapFigure';

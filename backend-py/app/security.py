@@ -24,17 +24,33 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import get_settings
 
 # Only these (cost-bearing) paths are gated + rate-limited.
-_PROTECTED_PREFIXES = ("/api/v2/chat", "/api/v2/analyses")
+# v2.7.1 — security sweep: /clarify (v1.13.0) and /spot (v2.4.0) each spend
+# an OpenAI call and were added WITHOUT being listed here, so they answered
+# anonymous requests with no token, no rate limit and no body cap (verified
+# live: POST /api/v2/clarify with no X-App-Token reached the handler).
+_PROTECTED_PREFIXES = ("/api/v2/chat", "/api/v2/analyses", "/api/v2/clarify", "/api/v2/spot")
 # Polling and health must never be throttled (the UI hits them in a loop).
 _EXEMPT_EXACT = ("/health",)
 
 
+def client_ip_from_xff(xff: str, fallback: str = "unknown") -> str:
+    """The hop Google's frontend appended, not the one the client wrote.
+
+    v2.7.1 — Cloud Run APPENDS the real client address to whatever
+    X-Forwarded-For the client sent ("<spoofed>, <real>"). Taking the first
+    hop let a caller pick their own bucket in the per-IP limiter with one
+    header, leaving only the global window. The last hop is the one the
+    platform vouches for.
+    """
+    hops = [h.strip() for h in (xff or "").split(",") if h.strip()]
+    return hops[-1] if hops else fallback
+
+
 def _client_ip(request: Request) -> str:
-    # Cloud Run sets X-Forwarded-For: "<client>, <lb>"; take the first hop.
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return client_ip_from_xff(
+        request.headers.get("x-forwarded-for", ""),
+        request.client.host if request.client else "unknown",
+    )
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):

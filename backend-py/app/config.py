@@ -61,11 +61,11 @@ v1.6.1: Confidence, Report, Quotas, Security (Phase 3) — (1) unifiedConfidence
   atomically in a backend transaction, never client-writable), replacing the
   single hardcoded 10-prompt cap; (4) server-side identity + quota enforcement
   (app/auth_quota.py) on /api/v2/chat and /api/v2/analyses via Firebase ID
-  tokens — OFF by default (STRATAGEO_REQUIRE_USER_AUTH=false) for rollout
+  tokens — OFF by default (REQUIRE_USER_AUTH=false) for rollout
   safety, fail-closed when turned on; (5) a per-user chat-turn rate limit
   (60/hour default) closing an unmetered-LLM-spend gap. See
   docs/PHASE3-SECURITY-REVIEW.md for the full review; flipping
-  STRATAGEO_REQUIRE_USER_AUTH to true is a deliberate go-live action, not
+  REQUIRE_USER_AUTH to true is a deliberate go-live action, not
   bundled with this deploy.
 v1.6.2: Smart water/buildability relevance — fixes a live-observed failure
   ("high-end gym in Mumbai" put a candidate on the coastline/dockyard edge and
@@ -568,7 +568,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ── Version metadata (single source of truth) ─────────────────────────────────
-APP_VERSION     = "2.6.1"
+APP_VERSION     = "2.7.1"
 API_VERSION     = "v2"
 ENGINE_VERSION  = "stratageo-engine-00078"
 # SPEC_VERSION / EVIDENCE_VERSION_PUBLIC are NOT bumped for v1.5.1/v1.5.2/
@@ -583,7 +583,7 @@ ENGINE_VERSION  = "stratageo-engine-00078"
 # unchanged (frontend normalizer treats them all as optional).
 SPEC_VERSION    = "2.3"
 EVIDENCE_VERSION_PUBLIC = "1.4.0"
-RELEASE_NAME    = "A spot check in under a minute"
+RELEASE_NAME    = "Security sweep: every LLM route behind the gate"
 
 
 class Settings(BaseSettings):
@@ -601,6 +601,8 @@ class Settings(BaseSettings):
     google_places_api_key: str = ""
     ors_api_key: str = ""
     app_shared_token: str = ""
+    # v2.7.1 — Swagger/OpenAPI only when asked for (local dev); off on Cloud Run.
+    expose_docs: bool = False
     # v1.12.0 — Mapbox GL JS PUBLIC token, served to the browser at runtime by
     # /api/v2/map-config rather than baked into the frontend bundle at build
     # time. Keeping it out of the bundle means it never enters the repo or a
@@ -718,7 +720,9 @@ class Settings(BaseSettings):
 
     # ── v1.6.0 (Phase 3) — server-side identity + quota enforcement ─────────
     # OFF by default (rollout-safe: deploy code first, flip the flag once the
-    # token-sending frontend is live). When ON, /api/v2/chat verifies identity
+    # token-sending frontend is live). Env var: REQUIRE_USER_AUTH (no prefix —
+    # v2.7.1 corrected docs that said STRATAGEO_REQUIRE_USER_AUTH, which this
+    # settings class never read). When ON, /api/v2/chat verifies identity
     # and /api/v2/analyses verifies identity AND transactionally consumes one
     # analysis credit from Firestore users/{uid}.promptsUsed. Fail-closed.
     require_user_auth: bool = False
